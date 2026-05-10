@@ -1025,7 +1025,38 @@ function addManualResearch() {
 function importCsv() {
   const rows = parseEverbeeRows(elements.csvInput.value)
   rows.forEach(addResearchRow)
+  if (rows.some((row) => rowHasErankInput(row) && !rowHasEverbeeInput(row))) {
+    const count = fillEverbeeJobFromErank()
+    setSimpleStatus(`eRank結果を読み込みました。関連語も使って、EverBeeで売上確認する候補を${count}件作りました。`)
+  }
   renderAll()
+}
+
+function rowHasErankInput(row) {
+  return [
+    row.erankSearchVolume,
+    row.erankClicks,
+    row.erankCtr,
+    row.erankCompetition,
+    row.erankKeywordDifficulty,
+    row.erankTrend,
+  ].some((value) => String(value ?? '').trim() !== '')
+}
+
+function rowHasEverbeeInput(row) {
+  return [
+    row.listingsAnalyzed,
+    row.topMonthlySales,
+    row.topRevenue,
+    row.averagePrice,
+    row.listingAge,
+  ].some((value) => String(value ?? '').trim() !== '')
+}
+
+function fillEverbeeJobFromErank() {
+  const keywords = salesCheckKeywords()
+  elements.researchJobInput.value = keywords.join('\n')
+  return keywords.length
 }
 
 function extensionResearchRows(extensionState) {
