@@ -13,6 +13,7 @@ import {
   buildSeoPlanFromBuckets,
   scoreEverbeeResult,
   normalizePhrase,
+  resolveMarketEvent,
 } from '../../shared/market-keyword-engine/index.js'
 
 const PAGE_SOURCE = 'market-finder-page'
@@ -41,9 +42,25 @@ const state = {
 }
 
 const pendingExtensionRequests = new Map()
+const MONTH_LABELS = [
+  '月未設定',
+  '1月',
+  '2月',
+  '3月',
+  '4月',
+  '5月',
+  '6月',
+  '7月',
+  '8月',
+  '9月',
+  '10月',
+  '11月',
+  '12月',
+]
 
 const elements = {
   eventSelect: document.querySelector('#eventSelect'),
+  customEventInput: document.querySelector('#customEventInput'),
   categorySelect: document.querySelector('#categorySelect'),
   yearInput: document.querySelector('#yearInput'),
   limitInput: document.querySelector('#limitInput'),
@@ -144,8 +161,15 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
 }
 
+function customEventName() {
+  return String(elements.customEventInput?.value ?? '').trim()
+}
+
 function selectedEvent() {
-  return MARKET_EVENTS.find((event) => event.id === elements.eventSelect.value) ?? MARKET_EVENTS[0]
+  return resolveMarketEvent({
+    eventId: elements.eventSelect.value,
+    customEventName: customEventName(),
+  })
 }
 
 function selectedCategory() {
@@ -165,6 +189,7 @@ function selectedYearOption() {
 function currentOptions() {
   return {
     eventId: elements.eventSelect.value,
+    customEventName: customEventName(),
     categoryId: elements.categorySelect.value,
     year: selectedYearOption(),
     limit: Number(elements.limitInput.value) || 80,
@@ -175,18 +200,37 @@ function currentOptions() {
 }
 
 function fillSelects() {
-  elements.eventSelect.innerHTML = MARKET_EVENTS.map((event) => (
-    `<option value="${event.id}">${escapeHtml(event.jpLabel)} / ${escapeHtml(event.label)}</option>`
-  )).join('')
+  const eventsByMonth = MARKET_EVENTS.reduce((groups, event) => {
+    const month = Number(event.month) || 0
+    if (!groups.has(month)) groups.set(month, [])
+    groups.get(month).push(event)
+    return groups
+  }, new Map())
+
+  elements.eventSelect.innerHTML = Array.from(eventsByMonth.entries())
+    .sort(([leftMonth], [rightMonth]) => leftMonth - rightMonth)
+    .map(([month, events]) => {
+      const groupLabel = month === 0 ? '北米 その他' : `北米 ${MONTH_LABELS[month] ?? `${month}月`}`
+      const options = events.map((event) => (
+        `<option value="${escapeHtml(event.id)}">${escapeHtml(event.jpLabel)} / ${escapeHtml(event.label)}</option>`
+      )).join('')
+      return `<optgroup label="${escapeHtml(groupLabel)}">${options}</optgroup>`
+    })
+    .join('')
+  elements.eventSelect.value = MARKET_EVENTS.some((event) => event.id === 'fathers-day')
+    ? 'fathers-day'
+    : MARKET_EVENTS[0]?.id
 
   elements.categorySelect.innerHTML = PRODUCT_CATEGORIES.map((category) => (
     `<option value="${category.id}">${escapeHtml(category.label)}</option>`
   )).join('')
 }
 
-function renderTargets() {
+function renderTargets({ syncYear = true } = {}) {
   const event = selectedEvent()
-  elements.yearInput.value = event.defaultYear
+  if (syncYear && !customEventName()) {
+    elements.yearInput.value = event.defaultYear
+  }
   elements.targetChips.innerHTML = event.targets.map((target, index) => `
     <label class="chip">
       <input type="checkbox" value="${escapeHtml(target)}" ${index < 7 ? 'checked' : ''}>
@@ -1371,7 +1415,11 @@ async function stopExtensionResearch() {
 
 function bindEvents() {
   elements.eventSelect.addEventListener('change', () => {
-    renderTargets()
+    renderTargets({ syncYear: true })
+    generateCandidates()
+  })
+  elements.customEventInput.addEventListener('input', () => {
+    renderTargets({ syncYear: false })
     generateCandidates()
   })
   elements.categorySelect.addEventListener('change', generateCandidates)
@@ -1426,7 +1474,7 @@ function initExtensionBridge() {
 
 function init() {
   fillSelects()
-  renderTargets()
+  renderTargets({ syncYear: true })
   bindEvents()
   setFlowMode('auto')
   generateCandidates()

@@ -1,70 +1,470 @@
+const DEFAULT_EVENT_YEAR = 2026
+
+const TARGET_GROUPS = {
+  gift: ['mom', 'dad', 'grandma', 'grandpa', 'teacher', 'nurse', 'coworker', 'best friend', 'family'],
+  family: ['mom', 'dad', 'kids', 'grandma', 'grandpa', 'family matching', 'couples', 'baby', 'pet owner'],
+  school: ['teacher', 'kindergarten teacher', 'school nurse', 'librarian', 'principal', 'student', 'mom'],
+  party: ['hostess', 'couples', 'best friend', 'coworker', 'party crew', 'family matching', 'kids party'],
+  pet: ['dog mom', 'dog dad', 'cat mom', 'cat dad', 'pet owner', 'rescue mom', 'pet lover'],
+  patriotic: ['veteran', 'military family', 'dad', 'mom', 'grandpa', 'teacher', 'family matching'],
+  awareness: ['support squad', 'survivor', 'teacher', 'nurse', 'mom', 'friend', 'family'],
+}
+
+const DEFAULT_DESIGN_ANGLES = ['clean typography', 'simple icon plus text', 'giftable phrase layout', 'retro badge style']
+
+function marketEvent(config) {
+  return {
+    defaultYear: DEFAULT_EVENT_YEAR,
+    displayTerm: config.label,
+    targets: TARGET_GROUPS.gift,
+    intents: [`${config.searchTerm} gift`, `${config.searchTerm} shirt`, `${config.searchTerm} party`],
+    designAngles: DEFAULT_DESIGN_ANGLES,
+    ...config,
+  }
+}
+
 export const MARKET_EVENTS = [
-  {
-    id: 'fathers-day',
-    label: "Father's Day",
-    jpLabel: '父の日',
-    searchTerm: 'fathers day',
-    displayTerm: "Father's Day",
-    defaultYear: 2026,
-    targets: ['new dad', 'first time dad', 'dog dad', 'girl dad', 'grandpa', 'bonus dad', 'dad to be', 'papa', 'husband dad'],
-    intents: ['first fathers day', 'dad est {year}', 'fathers day gift', 'from daughter', 'from son', 'dad life'],
-    designAngles: ['retro typography', 'simple badge layout', 'small icon plus bold text', 'giftable family wording'],
-  },
-  {
-    id: 'mothers-day',
-    label: "Mother's Day",
-    jpLabel: '母の日',
-    searchTerm: 'mothers day',
-    displayTerm: "Mother's Day",
-    defaultYear: 2026,
-    targets: ['new mom', 'first time mom', 'mama', 'grandma', 'bonus mom', 'dog mom', 'boy mom', 'girl mom', 'mom to be'],
-    intents: ['first mothers day', 'mama est {year}', 'mothers day gift', 'from daughter', 'from son', 'mom life'],
-    designAngles: ['soft retro lettering', 'floral accent', 'clean script plus block text', 'warm gift wording'],
-  },
-  {
-    id: 'halloween',
-    label: 'Halloween',
-    jpLabel: 'ハロウィン',
-    searchTerm: 'halloween',
-    displayTerm: 'Halloween',
-    defaultYear: 2026,
-    targets: ['teacher', 'nurse', 'book lover', 'mom', 'couples', 'kids party', 'office party', 'pet owner'],
-    intents: ['spooky season', 'halloween party', 'trick or treat', 'matching halloween', 'halloween gift'],
-    designAngles: ['vintage spooky lettering', 'small seasonal icon', 'campy retro composition', 'black and cream print palette'],
-  },
-  {
-    id: 'christmas',
-    label: 'Christmas',
-    jpLabel: 'クリスマス',
-    searchTerm: 'christmas',
-    displayTerm: 'Christmas',
-    defaultYear: 2026,
-    targets: ['mom', 'dad', 'grandma', 'teacher', 'nurse', 'book lover', 'family matching', 'coworker', 'pet owner'],
-    intents: ['christmas gift', 'family christmas', 'christmas party', 'holiday season', 'matching christmas'],
-    designAngles: ['cozy retro type', 'giftable phrase layout', 'classic holiday colors', 'simple icon cluster'],
-  },
-  {
+  marketEvent({
+    id: 'new-years-day',
+    month: 1,
+    label: "New Year's Day",
+    jpLabel: '元日',
+    searchTerm: 'new years day',
+    targets: ['party host', 'family matching', 'couples', 'best friend', 'coworker', 'teacher', 'mom'],
+    intents: ['new year gift', 'new year party', 'new year crew', 'new year {year}', 'fresh start'],
+    designAngles: ['sparkle typography', 'minimal year badge', 'party phrase layout', 'black and gold accent'],
+  }),
+  marketEvent({
+    id: 'mlk-day',
+    month: 1,
+    label: 'MLK Day',
+    jpLabel: 'キング牧師記念日',
+    searchTerm: 'mlk day',
+    targets: ['teacher', 'student', 'school staff', 'community group', 'family'],
+    intents: ['mlk day shirt', 'dream quote', 'peace equality', 'civil rights'],
+    designAngles: ['respectful typography', 'school event layout', 'minimal quote design', 'heritage colors'],
+  }),
+  marketEvent({
+    id: 'lunar-new-year',
+    month: 1,
+    label: 'Lunar New Year',
+    jpLabel: '旧正月',
+    searchTerm: 'lunar new year',
+    targets: ['family', 'kids', 'teacher', 'party host', 'coworker', 'mom'],
+    intents: ['lunar new year gift', 'year of the horse', 'lunar new year party', 'new year family'],
+    designAngles: ['festive red accent', 'zodiac animal motif', 'clean cultural typography', 'family celebration'],
+  }),
+  marketEvent({
     id: 'valentines-day',
+    month: 2,
     label: "Valentine's Day",
     jpLabel: 'バレンタイン',
     searchTerm: 'valentines day',
-    displayTerm: "Valentine's Day",
-    defaultYear: 2026,
     targets: ['wife', 'husband', 'teacher', 'book lover', 'best friend', 'couples', 'single humor', 'mom'],
     intents: ['valentines gift', 'matching valentines', 'galentines', 'love shirt', 'heart day'],
     designAngles: ['simple heart motif', 'playful type lockup', 'soft pink accent', 'clean gift wording'],
-  },
-  {
+  }),
+  marketEvent({
+    id: 'galentines-day',
+    month: 2,
+    label: "Galentine's Day",
+    jpLabel: 'ガレンタイン',
+    searchTerm: 'galentines day',
+    targets: ['best friend', 'bridesmaid', 'coworker', 'book club', 'mom friend', 'sister'],
+    intents: ['galentines gift', 'girls night', 'bestie gift', 'friendship shirt', 'galentines party'],
+    designAngles: ['playful friendship type', 'heart icon cluster', 'pink and red accent', 'party wording'],
+  }),
+  marketEvent({
+    id: 'black-history-month',
+    month: 2,
+    label: 'Black History Month',
+    jpLabel: 'ブラックヒストリーマンス',
+    searchTerm: 'black history month',
+    targets: ['teacher', 'student', 'school staff', 'mom', 'community group'],
+    intents: ['black history month shirt', 'school celebration', 'black pride', 'history teacher'],
+    designAngles: ['bold heritage typography', 'classroom friendly layout', 'respectful statement design', 'warm accent colors'],
+  }),
+  marketEvent({
+    id: 'big-game-party',
+    month: 2,
+    label: 'Big Game Party',
+    jpLabel: 'ビッグゲーム',
+    searchTerm: 'big game party',
+    targets: ['party host', 'dad', 'mom', 'football mom', 'tailgate crew', 'coworker'],
+    intents: ['big game party shirt', 'football party', 'tailgate shirt', 'game day snack'],
+    designAngles: ['sports party typography', 'snack icon layout', 'tailgate badge', 'green field accent'],
+  }),
+  marketEvent({
+    id: 'st-patricks-day',
+    month: 3,
+    label: "St. Patrick's Day",
+    jpLabel: 'セントパトリックデー',
+    searchTerm: 'st patricks day',
+    targets: ['teacher', 'nurse', 'mom', 'dad', 'party crew', 'coworker', 'kids'],
+    intents: ['st patricks day gift', 'lucky shirt', 'irish party', 'shamrock shirt', 'pinch proof'],
+    designAngles: ['green accent type', 'shamrock icon', 'pub style badge', 'funny party phrase'],
+  }),
+  marketEvent({
+    id: 'mardi-gras',
+    month: 3,
+    label: 'Mardi Gras',
+    jpLabel: 'マルディグラ',
+    searchTerm: 'mardi gras',
+    targets: ['party crew', 'teacher', 'mom', 'coworker', 'best friend', 'travel group'],
+    intents: ['mardi gras party', 'mardi gras shirt', 'beads mask', 'new orleans trip'],
+    designAngles: ['purple green gold palette', 'mask icon', 'party typography', 'travel souvenir feel'],
+  }),
+  marketEvent({
+    id: 'womens-history-month',
+    month: 3,
+    label: "Women's History Month",
+    jpLabel: '女性史月間',
+    searchTerm: 'womens history month',
+    targets: ['teacher', 'student', 'mom', 'nurse', 'book lover', 'coworker'],
+    intents: ['womens history month shirt', 'women empowerment', 'classroom shirt', 'girl power'],
+    designAngles: ['bold statement type', 'classroom friendly design', 'minimal icon accent', 'empowerment wording'],
+  }),
+  marketEvent({
+    id: 'spring-break',
+    month: 3,
+    label: 'Spring Break',
+    jpLabel: '春休み',
+    searchTerm: 'spring break',
+    targets: ['teacher', 'student', 'mom', 'travel group', 'beach trip', 'best friend'],
+    intents: ['spring break trip', 'beach vacation', 'teacher spring break', 'family vacation'],
+    designAngles: ['sunny travel layout', 'retro beach type', 'simple vacation badge', 'bright accent colors'],
+  }),
+  marketEvent({
+    id: 'easter',
+    month: 4,
+    label: 'Easter',
+    jpLabel: 'イースター',
+    searchTerm: 'easter',
+    targets: ['mom', 'kids', 'teacher', 'family matching', 'grandma', 'church group', 'pet owner'],
+    intents: ['easter gift', 'easter egg hunt', 'easter bunny', 'family easter', 'teacher easter'],
+    designAngles: ['soft pastel type', 'bunny icon', 'egg hunt layout', 'family matching wording'],
+  }),
+  marketEvent({
+    id: 'earth-day',
+    month: 4,
+    label: 'Earth Day',
+    jpLabel: 'アースデイ',
+    searchTerm: 'earth day',
+    targets: ['teacher', 'student', 'nature lover', 'plant lover', 'mom', 'school club'],
+    intents: ['earth day shirt', 'plant trees', 'save the planet', 'nature teacher', 'eco gift'],
+    designAngles: ['nature inspired icon', 'clean eco typography', 'green accent palette', 'school event layout'],
+  }),
+  marketEvent({
+    id: 'national-pet-day',
+    month: 4,
+    label: 'National Pet Day',
+    jpLabel: 'ナショナルペットデー',
+    searchTerm: 'national pet day',
+    targets: TARGET_GROUPS.pet,
+    intents: ['national pet day gift', 'dog mom gift', 'dog dad gift', 'cat mom gift', 'rescue pet'],
+    designAngles: ['paw icon plus text', 'pet portrait wording', 'funny owner phrase', 'simple badge design'],
+  }),
+  marketEvent({
+    id: 'administrative-professionals-day',
+    month: 4,
+    label: 'Administrative Professionals Day',
+    jpLabel: '事務職感謝デー',
+    searchTerm: 'administrative professionals day',
+    targets: ['admin assistant', 'office manager', 'coworker', 'boss', 'school secretary', 'medical office'],
+    intents: ['admin gift', 'office gift', 'secretary gift', 'administrative assistant gift'],
+    designAngles: ['office humor typography', 'clean desk icon', 'appreciation gift wording', 'minimal professional layout'],
+  }),
+  marketEvent({
+    id: 'mothers-day',
+    month: 5,
+    label: "Mother's Day",
+    jpLabel: '母の日',
+    searchTerm: 'mothers day',
+    targets: ['new mom', 'first time mom', 'mama', 'grandma', 'bonus mom', 'dog mom', 'boy mom', 'girl mom', 'mom to be'],
+    intents: ['first mothers day', 'mama est {year}', 'mothers day gift', 'from daughter', 'from son', 'mom life'],
+    designAngles: ['soft retro lettering', 'floral accent', 'clean script plus block text', 'warm gift wording'],
+  }),
+  marketEvent({
+    id: 'teacher-appreciation-week',
+    month: 5,
+    label: 'Teacher Appreciation Week',
+    jpLabel: '先生感謝週間',
+    searchTerm: 'teacher appreciation week',
+    targets: ['teacher', 'kindergarten teacher', 'preschool teacher', 'school nurse', 'librarian', 'principal'],
+    intents: ['teacher appreciation gift', 'teacher gift', 'end of school gift', 'classroom gift', 'teacher life'],
+    designAngles: ['school supply icon', 'warm thank-you wording', 'classroom badge', 'playful teacher typography'],
+  }),
+  marketEvent({
+    id: 'nurses-week',
+    month: 5,
+    label: 'Nurses Week',
+    jpLabel: '看護師週間',
+    searchTerm: 'nurses week',
+    targets: ['nurse', 'labor delivery nurse', 'nicu nurse', 'er nurse', 'nursing student', 'doctor office'],
+    intents: ['nurse appreciation gift', 'nurses week gift', 'nurse life', 'healthcare worker gift'],
+    designAngles: ['medical icon plus text', 'scrubs friendly layout', 'thank-you phrase', 'clean badge style'],
+  }),
+  marketEvent({
+    id: 'graduation',
+    month: 5,
+    label: 'Graduation',
+    jpLabel: '卒業',
+    searchTerm: 'graduation',
+    targets: ['graduate', 'mom of graduate', 'dad of graduate', 'teacher', 'senior class', 'nursing graduate'],
+    intents: ['graduation gift', 'class of {year}', 'senior {year}', 'grad party', 'proud mom'],
+    designAngles: ['class year typography', 'cap icon', 'party badge layout', 'school color friendly design'],
+  }),
+  marketEvent({
+    id: 'memorial-day',
+    month: 5,
+    label: 'Memorial Day',
+    jpLabel: 'メモリアルデー',
+    searchTerm: 'memorial day',
+    targets: TARGET_GROUPS.patriotic,
+    intents: ['memorial day shirt', 'memorial day weekend', 'patriotic shirt', 'military family gift'],
+    designAngles: ['patriotic color accent', 'respectful badge design', 'weekend party phrase', 'minimal star icon'],
+  }),
+  marketEvent({
+    id: 'cinco-de-mayo',
+    month: 5,
+    label: 'Cinco de Mayo',
+    jpLabel: 'シンコデマヨ',
+    searchTerm: 'cinco de mayo',
+    targets: ['party host', 'teacher', 'mom', 'best friend', 'coworker', 'taco lover'],
+    intents: ['cinco de mayo party', 'taco shirt', 'fiesta shirt', 'margarita party'],
+    designAngles: ['fiesta typography', 'taco icon', 'bright accent layout', 'party phrase design'],
+  }),
+  marketEvent({
+    id: 'fathers-day',
+    month: 6,
+    label: "Father's Day",
+    jpLabel: '父の日',
+    searchTerm: 'fathers day',
+    targets: ['new dad', 'first time dad', 'dog dad', 'girl dad', 'grandpa', 'bonus dad', 'dad to be', 'papa', 'husband dad'],
+    intents: ['first fathers day', 'dad est {year}', 'fathers day gift', 'from daughter', 'from son', 'dad life'],
+    designAngles: ['retro typography', 'simple badge layout', 'small icon plus bold text', 'giftable family wording'],
+  }),
+  marketEvent({
+    id: 'pride-month',
+    month: 6,
+    label: 'Pride Month',
+    jpLabel: 'プライド月間',
+    searchTerm: 'pride month',
+    targets: ['teacher', 'ally', 'mom', 'dad', 'couples', 'best friend', 'community group'],
+    intents: ['pride month shirt', 'pride gift', 'love is love', 'ally shirt', 'rainbow shirt'],
+    designAngles: ['rainbow accent', 'bold statement typography', 'community event layout', 'minimal pride icon'],
+  }),
+  marketEvent({
+    id: 'juneteenth',
+    month: 6,
+    label: 'Juneteenth',
+    jpLabel: 'ジューンティーンス',
+    searchTerm: 'juneteenth',
+    targets: ['teacher', 'student', 'family', 'community group', 'mom', 'dad'],
+    intents: ['juneteenth shirt', 'freedom day', 'juneteenth celebration', 'black history'],
+    designAngles: ['respectful heritage palette', 'freedom day typography', 'community celebration layout', 'minimal star accent'],
+  }),
+  marketEvent({
+    id: 'wedding-season',
+    month: 6,
+    label: 'Wedding Season',
+    jpLabel: '結婚式シーズン',
+    searchTerm: 'wedding season',
+    targets: ['bride', 'groom', 'bridesmaid', 'maid of honor', 'mother of bride', 'wedding guest'],
+    intents: ['bridal party gift', 'wedding party shirt', 'bachelorette gift', 'custom wedding gift'],
+    designAngles: ['elegant typography', 'minimal script accent', 'bridal party wording', 'custom name layout'],
+  }),
+  marketEvent({
+    id: 'canada-day',
+    month: 7,
+    label: 'Canada Day',
+    jpLabel: 'カナダデー',
+    searchTerm: 'canada day',
+    targets: ['family matching', 'mom', 'dad', 'teacher', 'party crew', 'camper'],
+    intents: ['canada day shirt', 'canada day party', 'canadian gift', 'maple leaf shirt'],
+    designAngles: ['maple leaf icon', 'red and white accent', 'party badge layout', 'simple patriotic type'],
+  }),
+  marketEvent({
+    id: 'independence-day',
+    month: 7,
+    label: 'Independence Day',
+    jpLabel: '独立記念日',
+    searchTerm: '4th of july',
+    displayTerm: '4th of July',
+    targets: ['family matching', 'mom', 'dad', 'teacher', 'party crew', 'baby', 'dog mom'],
+    intents: ['4th of july shirt', 'fourth of july party', 'patriotic shirt', 'bbq party', 'fireworks shirt'],
+    designAngles: ['red white blue typography', 'fireworks icon', 'bbq party phrase', 'family matching layout'],
+  }),
+  marketEvent({
+    id: 'summer-camp',
+    month: 7,
+    label: 'Summer Camp',
+    jpLabel: 'サマーキャンプ',
+    searchTerm: 'summer camp',
+    targets: ['camp counselor', 'teacher', 'kids', 'mom', 'camper', 'youth group'],
+    intents: ['summer camp shirt', 'camp counselor gift', 'camp crew', 'family camping'],
+    designAngles: ['camp badge icon', 'outdoor retro type', 'sun and tent motif', 'group shirt layout'],
+  }),
+  marketEvent({
     id: 'back-to-school',
+    month: 8,
     label: 'Back To School',
     jpLabel: 'バック・トゥ・スクール',
     searchTerm: 'back to school',
-    displayTerm: 'Back To School',
-    defaultYear: 2026,
-    targets: ['teacher', 'kindergarten teacher', 'school nurse', 'librarian', 'principal', 'student', 'mom'],
+    targets: TARGET_GROUPS.school,
     intents: ['teacher shirt', 'first day of school', 'school staff', 'classroom gift', 'teacher life'],
     designAngles: ['school supply icon', 'bold classroom typography', 'retro academic palette', 'stacked phrase layout'],
-  },
+  }),
+  marketEvent({
+    id: 'college-move-in',
+    month: 8,
+    label: 'College Move In',
+    jpLabel: '大学入学準備',
+    searchTerm: 'college move in',
+    targets: ['college mom', 'college dad', 'freshman', 'roommate', 'student', 'dorm life'],
+    intents: ['college move in gift', 'freshman year', 'dorm gift', 'college mom shirt'],
+    designAngles: ['campus badge layout', 'dorm life phrase', 'simple collegiate type', 'custom school color friendly'],
+  }),
+  marketEvent({
+    id: 'labor-day',
+    month: 9,
+    label: 'Labor Day',
+    jpLabel: 'レイバーデー',
+    searchTerm: 'labor day',
+    targets: ['teacher', 'nurse', 'worker', 'dad', 'mom', 'party host', 'bbq crew'],
+    intents: ['labor day weekend', 'labor day party', 'bbq shirt', 'long weekend'],
+    designAngles: ['weekend party typography', 'bbq icon', 'simple worker badge', 'summer closeout palette'],
+  }),
+  marketEvent({
+    id: 'grandparents-day',
+    month: 9,
+    label: "Grandparents Day",
+    jpLabel: '祖父母の日',
+    searchTerm: 'grandparents day',
+    targets: ['grandma', 'grandpa', 'new grandma', 'new grandpa', 'nana', 'papa', 'kids'],
+    intents: ['grandparents day gift', 'grandma gift', 'grandpa gift', 'from grandkids', 'est {year}'],
+    designAngles: ['warm family typography', 'grandkids wording', 'simple heart icon', 'custom names layout'],
+  }),
+  marketEvent({
+    id: 'fall-season',
+    month: 9,
+    label: 'Fall Season',
+    jpLabel: '秋シーズン',
+    searchTerm: 'fall season',
+    targets: ['teacher', 'mom', 'book lover', 'coffee lover', 'pumpkin lover', 'nurse'],
+    intents: ['fall shirt', 'pumpkin season', 'fall vibes', 'cozy season', 'coffee and books'],
+    designAngles: ['cozy retro type', 'pumpkin icon', 'warm autumn palette', 'book and coffee layout'],
+  }),
+  marketEvent({
+    id: 'halloween',
+    month: 10,
+    label: 'Halloween',
+    jpLabel: 'ハロウィン',
+    searchTerm: 'halloween',
+    targets: ['teacher', 'nurse', 'book lover', 'mom', 'couples', 'kids party', 'office party', 'pet owner'],
+    intents: ['spooky season', 'halloween party', 'trick or treat', 'matching halloween', 'halloween gift'],
+    designAngles: ['vintage spooky lettering', 'small seasonal icon', 'campy retro composition', 'black and cream print palette'],
+  }),
+  marketEvent({
+    id: 'breast-cancer-awareness',
+    month: 10,
+    label: 'Breast Cancer Awareness',
+    jpLabel: '乳がん啓発月間',
+    searchTerm: 'breast cancer awareness',
+    targets: TARGET_GROUPS.awareness,
+    intents: ['breast cancer awareness shirt', 'pink ribbon', 'support squad', 'survivor gift', 'walk team'],
+    designAngles: ['pink ribbon accent', 'support team wording', 'respectful typography', 'fundraiser friendly layout'],
+  }),
+  marketEvent({
+    id: 'canadian-thanksgiving',
+    month: 10,
+    label: 'Canadian Thanksgiving',
+    jpLabel: 'カナダ感謝祭',
+    searchTerm: 'canadian thanksgiving',
+    targets: ['family matching', 'mom', 'dad', 'grandma', 'hostess', 'teacher'],
+    intents: ['thanksgiving gift', 'thanksgiving dinner', 'family thanksgiving', 'hostess gift'],
+    designAngles: ['fall harvest icon', 'family dinner wording', 'warm autumn palette', 'simple thankful type'],
+  }),
+  marketEvent({
+    id: 'veterans-day',
+    month: 11,
+    label: "Veterans Day",
+    jpLabel: '退役軍人の日',
+    searchTerm: 'veterans day',
+    targets: TARGET_GROUPS.patriotic,
+    intents: ['veterans day shirt', 'veteran gift', 'military family', 'proud veteran', 'thank you veteran'],
+    designAngles: ['respectful patriotic type', 'star icon', 'military family wording', 'minimal badge design'],
+  }),
+  marketEvent({
+    id: 'thanksgiving',
+    month: 11,
+    label: 'Thanksgiving',
+    jpLabel: '感謝祭',
+    searchTerm: 'thanksgiving',
+    targets: ['family matching', 'mom', 'dad', 'grandma', 'hostess', 'teacher', 'kids'],
+    intents: ['thanksgiving gift', 'thanksgiving dinner', 'thankful shirt', 'turkey day', 'friendsgiving'],
+    designAngles: ['fall harvest icon', 'family dinner wording', 'warm autumn palette', 'simple thankful type'],
+  }),
+  marketEvent({
+    id: 'friendsgiving',
+    month: 11,
+    label: 'Friendsgiving',
+    jpLabel: 'フレンズギビング',
+    searchTerm: 'friendsgiving',
+    targets: ['best friend', 'hostess', 'coworker', 'party crew', 'roommate', 'book club'],
+    intents: ['friendsgiving shirt', 'friendsgiving party', 'hostess gift', 'thankful friends'],
+    designAngles: ['party dinner typography', 'wine and pie icon', 'friendship wording', 'warm fall palette'],
+  }),
+  marketEvent({
+    id: 'black-friday',
+    month: 11,
+    label: 'Black Friday',
+    jpLabel: 'ブラックフライデー',
+    searchTerm: 'black friday',
+    targets: ['shop owner', 'boutique owner', 'coworker', 'deal hunter', 'small business owner'],
+    intents: ['black friday sale', 'shopping crew', 'small business saturday', 'deal hunter'],
+    designAngles: ['bold sale typography', 'shopping bag icon', 'black and white contrast', 'retail humor phrase'],
+  }),
+  marketEvent({
+    id: 'christmas',
+    month: 12,
+    label: 'Christmas',
+    jpLabel: 'クリスマス',
+    searchTerm: 'christmas',
+    targets: ['mom', 'dad', 'grandma', 'teacher', 'nurse', 'book lover', 'family matching', 'coworker', 'pet owner'],
+    intents: ['christmas gift', 'family christmas', 'christmas party', 'holiday season', 'matching christmas'],
+    designAngles: ['cozy retro type', 'giftable phrase layout', 'classic holiday colors', 'simple icon cluster'],
+  }),
+  marketEvent({
+    id: 'hanukkah',
+    month: 12,
+    label: 'Hanukkah',
+    jpLabel: 'ハヌカ',
+    searchTerm: 'hanukkah',
+    targets: ['family', 'kids', 'teacher', 'mom', 'dad', 'hostess', 'grandma'],
+    intents: ['hanukkah gift', 'hanukkah party', 'festival of lights', 'family hanukkah'],
+    designAngles: ['blue and silver accent', 'lights motif', 'family celebration wording', 'clean holiday type'],
+  }),
+  marketEvent({
+    id: 'holiday-party',
+    month: 12,
+    label: 'Holiday Party',
+    jpLabel: 'ホリデーパーティー',
+    searchTerm: 'holiday party',
+    targets: ['coworker', 'office party', 'teacher', 'nurse', 'hostess', 'best friend', 'family matching'],
+    intents: ['holiday party shirt', 'office holiday party', 'ugly sweater party', 'hostess gift'],
+    designAngles: ['party typography', 'gift icon cluster', 'office humor wording', 'classic holiday accent'],
+  }),
+  marketEvent({
+    id: 'new-years-eve',
+    month: 12,
+    label: "New Year's Eve",
+    jpLabel: '大晦日',
+    searchTerm: 'new years eve',
+    targets: ['party host', 'couples', 'best friend', 'coworker', 'family matching', 'bride'],
+    intents: ['new years eve party', 'nye shirt', 'party crew', 'midnight kiss', 'new year {year}'],
+    designAngles: ['sparkle typography', 'party badge', 'black and gold accent', 'midnight phrase layout'],
+  }),
 ]
 
 export const PRODUCT_CATEGORIES = [
@@ -207,8 +607,42 @@ function splitSeedText(value) {
     .filter((item) => item.length >= 2)
 }
 
-function getEvent(eventId) {
-  return MARKET_EVENTS.find((event) => event.id === eventId) ?? MARKET_EVENTS[0]
+function buildCustomMarketEvent(value) {
+  const searchTerm = normalizePhrase(value)
+  const label = String(value ?? '').trim()
+  const displayLabel = label || titleCase(searchTerm) || 'Custom Event'
+
+  return marketEvent({
+    id: 'custom-event',
+    month: 0,
+    label: displayLabel,
+    jpLabel: displayLabel,
+    searchTerm,
+    displayTerm: displayLabel,
+    targets: TARGET_GROUPS.gift,
+    intents: [
+      `${searchTerm} gift`,
+      `${searchTerm} shirt`,
+      `${searchTerm} party`,
+      `${searchTerm} custom`,
+      `${searchTerm} personalized`,
+    ],
+  })
+}
+
+function getEvent(optionsOrEventId) {
+  const options = typeof optionsOrEventId === 'object' && optionsOrEventId !== null
+    ? optionsOrEventId
+    : { eventId: optionsOrEventId }
+  const customEventName = String(options.customEventName ?? '').trim()
+
+  if (customEventName) return buildCustomMarketEvent(customEventName)
+
+  return MARKET_EVENTS.find((event) => event.id === options.eventId) ?? MARKET_EVENTS[0]
+}
+
+export function resolveMarketEvent(options = {}) {
+  return getEvent(options)
 }
 
 function getCategory(categoryId) {
@@ -299,7 +733,7 @@ function buildKeywordTemplates(event, category, targets, intents, seedKeywords, 
 }
 
 export function generateKeywordCandidates(options = {}) {
-  const event = getEvent(options.eventId)
+  const event = getEvent(options)
   const category = getCategory(options.categoryId)
   const year = parseOptionalYear(options.year, null)
   const limit = Math.max(10, Math.min(Number(options.limit) || 60, 250))
@@ -336,7 +770,7 @@ export function generateKeywordCandidates(options = {}) {
 }
 
 export function generateBroadMarketQueries(options = {}) {
-  const event = getEvent(options.eventId)
+  const event = getEvent(options)
   const category = getCategory(options.categoryId)
   const year = options.includeYear ? parseOptionalYear(options.year, null) : null
   const limit = Math.max(3, Math.min(Number(options.limit) || 18, 40))
@@ -380,7 +814,7 @@ export function generateBroadMarketQueries(options = {}) {
 }
 
 export function generateFollowUpKeywords(rows = [], options = {}) {
-  const event = getEvent(options.eventId)
+  const event = getEvent(options)
   const category = getCategory(options.categoryId)
   const year = Number(options.year) || event.defaultYear
   const limit = Math.max(10, Math.min(Number(options.limit) || 80, 250))
@@ -890,7 +1324,7 @@ function buildSeoTags(phrases, event, category, year) {
 }
 
 export function buildSeoPlanFromBuckets(buckets = {}, options = {}) {
-  const event = getEvent(options.eventId)
+  const event = getEvent(options)
   const category = getCategory(options.categoryId)
   const year = Number(options.year) || event.defaultYear
   const customRiskTerms = splitSeedText(options.customRiskTerms)
@@ -931,7 +1365,7 @@ export function buildSeoPlanFromBuckets(buckets = {}, options = {}) {
 }
 
 export function buildProductIdea(keyword, options = {}) {
-  const event = getEvent(options.eventId)
+  const event = getEvent(options)
   const category = getCategory(options.categoryId)
   const year = Number(options.year) || event.defaultYear
   const normalizedKeyword = normalizePhrase(keyword)
