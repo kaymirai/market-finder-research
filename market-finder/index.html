@@ -337,7 +337,7 @@
         <div class="results-heading">
           <div>
             <p class="section-kicker">Step 3 - ②の結果</p>
-            <h2>eRankで見つけた入口キーワード</h2>
+            <h2>eRankで見つけた需要キーワード</h2>
             <p class="panel-help">2「eRankで広く見る」で取得した広め語句と関連キーワードです。検索数かクリックがあり、KDや競合が軽いものほどEverBeeへ進めやすい候補です。</p>
           </div>
           <span class="count-badge"><strong id="erankCount">0</strong><small>語句</small></span>
@@ -347,6 +347,13 @@
           <span><strong>Clicks</strong> 実際にクリックされた量</span>
           <span><strong>Competition</strong> eRank上の競合数</span>
           <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
+        </div>
+        <div class="score-guide" aria-label="需要スコアの見方">
+          <span class="guide-chip weak"><strong>0-39</strong> 弱い</span>
+          <span class="guide-chip review"><strong>40-61</strong> 追加確認</span>
+          <span class="guide-chip promising"><strong>62-79</strong> 有望</span>
+          <span class="guide-chip strong"><strong>80-100</strong> 強い</span>
+          <span class="guide-chip danger"><strong>赤</strong> 除外・需要未確認</span>
         </div>
         <div id="erankResultsList" class="erank-results-list"></div>
       </section>
@@ -392,7 +399,7 @@
 
         <div class="bucket-grid">
           <label class="bucket-card">
-            <span>Visibility / 低競合入口</span>
+            <span>Visibility / 低競合キーワード</span>
             <textarea id="visibilityBucketInput" rows="7" placeholder="低競合で検索需要がある語句"></textarea>
           </label>
           <label class="bucket-card">

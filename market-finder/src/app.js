@@ -543,6 +543,14 @@ function scoreReasonLabels(score) {
   return reasons.slice(0, 5)
 }
 
+function opportunityScoreClass(score) {
+  if (score.label.startsWith('D')) return 'd'
+  if (score.score >= 80) return 'a'
+  if (score.score >= 62) return 'b'
+  if (score.score >= 40) return 'c'
+  return 'weak'
+}
+
 function erankResultRows() {
   return rankResearchRows(state.researchRows, currentOptions())
     .filter((row) => row.score.validation.hasErankData && !row.score.validation.hasEverbeeData)
@@ -559,7 +567,7 @@ function renderErankResults() {
 
   elements.erankResultsList.innerHTML = ranked.slice(0, 40).map((row) => {
     const normalized = row.score.normalized
-    const labelClass = row.score.label.startsWith('A') ? 'a' : row.score.label.startsWith('B') ? 'b' : row.score.label.startsWith('D') ? 'd' : ''
+    const labelClass = opportunityScoreClass(row.score)
     const scoreReasons = scoreReasonLabels(row.score)
       .map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`)
       .join('')
@@ -567,7 +575,7 @@ function renderErankResults() {
     return `
       <article class="erank-item">
         <div class="result-top">
-          <div class="opportunity-score ${labelClass}"><span>入口</span><strong>${row.score.score}</strong></div>
+          <div class="opportunity-score ${labelClass}"><span>需要</span><strong>${row.score.score}</strong><small>/100</small></div>
           <div>
             <h3>${escapeHtml(normalized.keyword)}</h3>
             <div class="meta-line">
@@ -605,7 +613,7 @@ function renderResults() {
 
   elements.resultsList.innerHTML = ranked.map((row) => {
     const normalized = row.score.normalized
-    const labelClass = row.score.label.startsWith('A') ? 'a' : row.score.label.startsWith('B') ? 'b' : row.score.label.startsWith('D') ? 'd' : ''
+    const labelClass = opportunityScoreClass(row.score)
     const tags = row.idea.tags.map((tag) => `<span class="pill">${escapeHtml(tag)}</span>`).join('')
     const scoreReasons = scoreReasonLabels(row.score)
       .map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`)
