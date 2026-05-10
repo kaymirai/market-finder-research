@@ -1,0 +1,77 @@
+{
+  "manifest_version": 3,
+  "name": "EtsyMirai Research Helper",
+  "version": "1.5",
+  "description": "Market Finderのキーワード調査とEtsy商品画像取得を補助します。",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.etsy.com/*",
+    "https://*.everbee.io/*",
+    "https://erank.com/*",
+    "https://*.erank.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "http://localhost:3021/*",
+    "http://127.0.0.1:3021/*"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "dist/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.etsy.com/listing/*",
+        "https://*.etsy.com/listing/*"
+      ],
+      "js": [
+        "dist/content.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://*.everbee.io/*"
+      ],
+      "js": [
+        "dist/everbeeContent.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://erank.com/*",
+        "https://*.erank.com/*"
+      ],
+      "js": [
+        "dist/erankContent.js"
+      ]
+    },
+    {
+      "matches": [
+        "http://localhost:3021/*",
+        "http://127.0.0.1:3021/*"
+      ],
+      "js": [
+        "dist/marketFinderBridge.js"
+      ]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "EtsyMirai Research Helper",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}

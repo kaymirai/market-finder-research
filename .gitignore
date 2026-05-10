@@ -1,0 +1,15 @@
+# Keep this repo focused on the standalone Market Finder work.
+/etsy-product-ai/
+/docs/
+/.tmp/
+
+# Large/source data files that are not part of this app checkpoint.
+/*.csv
+/*.pdf
+/*.code-workspace
+
+# Dependencies and local machine noise.
+**/node_modules/
+*.log
+.DS_Store
+Thumbs.db

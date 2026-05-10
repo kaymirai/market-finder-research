@@ -1,0 +1,1087 @@
+export const MARKET_EVENTS = [
+  {
+    id: 'fathers-day',
+    label: "Father's Day",
+    jpLabel: '父の日',
+    searchTerm: 'fathers day',
+    displayTerm: "Father's Day",
+    defaultYear: 2026,
+    targets: ['new dad', 'first time dad', 'dog dad', 'girl dad', 'grandpa', 'bonus dad', 'dad to be', 'papa', 'husband dad'],
+    intents: ['first fathers day', 'dad est {year}', 'fathers day gift', 'from daughter', 'from son', 'dad life'],
+    designAngles: ['retro typography', 'simple badge layout', 'small icon plus bold text', 'giftable family wording'],
+  },
+  {
+    id: 'mothers-day',
+    label: "Mother's Day",
+    jpLabel: '母の日',
+    searchTerm: 'mothers day',
+    displayTerm: "Mother's Day",
+    defaultYear: 2026,
+    targets: ['new mom', 'first time mom', 'mama', 'grandma', 'bonus mom', 'dog mom', 'boy mom', 'girl mom', 'mom to be'],
+    intents: ['first mothers day', 'mama est {year}', 'mothers day gift', 'from daughter', 'from son', 'mom life'],
+    designAngles: ['soft retro lettering', 'floral accent', 'clean script plus block text', 'warm gift wording'],
+  },
+  {
+    id: 'halloween',
+    label: 'Halloween',
+    jpLabel: 'ハロウィン',
+    searchTerm: 'halloween',
+    displayTerm: 'Halloween',
+    defaultYear: 2026,
+    targets: ['teacher', 'nurse', 'book lover', 'mom', 'couples', 'kids party', 'office party', 'pet owner'],
+    intents: ['spooky season', 'halloween party', 'trick or treat', 'matching halloween', 'halloween gift'],
+    designAngles: ['vintage spooky lettering', 'small seasonal icon', 'campy retro composition', 'black and cream print palette'],
+  },
+  {
+    id: 'christmas',
+    label: 'Christmas',
+    jpLabel: 'クリスマス',
+    searchTerm: 'christmas',
+    displayTerm: 'Christmas',
+    defaultYear: 2026,
+    targets: ['mom', 'dad', 'grandma', 'teacher', 'nurse', 'book lover', 'family matching', 'coworker', 'pet owner'],
+    intents: ['christmas gift', 'family christmas', 'christmas party', 'holiday season', 'matching christmas'],
+    designAngles: ['cozy retro type', 'giftable phrase layout', 'classic holiday colors', 'simple icon cluster'],
+  },
+  {
+    id: 'valentines-day',
+    label: "Valentine's Day",
+    jpLabel: 'バレンタイン',
+    searchTerm: 'valentines day',
+    displayTerm: "Valentine's Day",
+    defaultYear: 2026,
+    targets: ['wife', 'husband', 'teacher', 'book lover', 'best friend', 'couples', 'single humor', 'mom'],
+    intents: ['valentines gift', 'matching valentines', 'galentines', 'love shirt', 'heart day'],
+    designAngles: ['simple heart motif', 'playful type lockup', 'soft pink accent', 'clean gift wording'],
+  },
+  {
+    id: 'back-to-school',
+    label: 'Back To School',
+    jpLabel: 'バック・トゥ・スクール',
+    searchTerm: 'back to school',
+    displayTerm: 'Back To School',
+    defaultYear: 2026,
+    targets: ['teacher', 'kindergarten teacher', 'school nurse', 'librarian', 'principal', 'student', 'mom'],
+    intents: ['teacher shirt', 'first day of school', 'school staff', 'classroom gift', 'teacher life'],
+    designAngles: ['school supply icon', 'bold classroom typography', 'retro academic palette', 'stacked phrase layout'],
+  },
+]
+
+export const PRODUCT_CATEGORIES = [
+  { id: 'shirt', label: 'Shirt', searchTerm: 'shirt', tags: ['shirt', 'graphic tee', 'gift shirt'] },
+  { id: 'sweatshirt', label: 'Sweatshirt', searchTerm: 'sweatshirt', tags: ['sweatshirt', 'cozy gift', 'crewneck'] },
+  { id: 'mug', label: 'Mug', searchTerm: 'mug', tags: ['mug', 'coffee gift', 'cup'] },
+  { id: 'tote', label: 'Tote Bag', searchTerm: 'tote bag', tags: ['tote bag', 'canvas tote', 'gift tote'] },
+  { id: 'sticker', label: 'Sticker', searchTerm: 'sticker', tags: ['sticker', 'laptop sticker', 'planner sticker'] },
+]
+
+export const DEFAULT_RISK_TERMS = [
+  'disney',
+  'mickey',
+  'marvel',
+  'star wars',
+  'harry potter',
+  'pokemon',
+  'barbie',
+  'hello kitty',
+  'grinch',
+  'swiftie',
+  'taylor swift',
+  'super bowl',
+  'nfl',
+  'nba',
+  'mlb',
+  'olympics',
+  'lego',
+]
+
+const GENERIC_WORDS = new Set([
+  'shirt',
+  'shirts',
+  'tee',
+  'tshirt',
+  'tshirts',
+  'sweatshirt',
+  'sweatshirts',
+  'hoodie',
+  'mug',
+  'tote',
+  'bag',
+  'gift',
+  'gifts',
+  'custom',
+  'personalized',
+  'vintage',
+  'retro',
+  'funny',
+  'cute',
+  'graphic',
+  'unisex',
+  'women',
+  'men',
+  'for',
+  'and',
+  'the',
+  'with',
+  'from',
+  'day',
+  'holiday',
+  'season',
+])
+
+const DEFAULT_HINT_KEEP_WORDS = new Set([
+  'day',
+  'from',
+  'first',
+  'est',
+  'to',
+])
+
+const FIELD_ALIASES = {
+  keyword: ['keyword', 'search term', 'query', 'キーワード'],
+  listingsAnalyzed: ['listings analyzed', 'listings', 'listing count', 'results', '競合数'],
+  topMonthlySales: ['top monthly sales', 'monthly sales', 'sales', '月間販売数'],
+  topRevenue: ['top revenue', 'revenue', 'monthly revenue', '売上', '収益'],
+  averagePrice: ['average price', 'avg price', 'price', '平均価格'],
+  listingAge: ['listing age', 'age', '公開期間', '掲載期間'],
+  erankSearchVolume: ['erank search volume', 'search volume', 'avg searches', 'average searches', 'searches'],
+  erankClicks: ['erank clicks', 'clicks', 'avg clicks', 'average clicks'],
+  erankCtr: ['erank ctr', 'ctr', 'click through rate', 'click-through rate'],
+  erankCompetition: ['erank competition', 'competition', 'etsy competition'],
+  erankKeywordDifficulty: ['erank kd', 'kd', 'keyword difficulty', 'difficulty'],
+  erankTrend: ['erank trend', 'trend', 'monthly trend'],
+  notes: ['notes', 'note', 'memo', 'メモ'],
+}
+
+const BROAD_LISTING_FIELD_ALIASES = {
+  title: ['title', 'product title', 'product name', 'listing title', 'name', '商品名', 'タイトル'],
+  tags: ['tags', 'tag', 'etsy tags', 'tag words', 'タグ'],
+  sales: ['sales', 'monthly sales', 'total sales', 'estimated sales', 'est sales', 'top monthly sales', '販売数', '月間販売数'],
+  revenue: ['revenue', 'monthly revenue', 'estimated revenue', '売上', '収益'],
+  notes: ['notes', 'note', 'memo', 'メモ'],
+}
+
+function unique(values) {
+  const seen = new Set()
+  return values.filter((value) => {
+    const key = normalizePhrase(value)
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export function normalizePhrase(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function titleCase(value) {
+  return normalizePhrase(value)
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => (word.length <= 3 ? word : `${word[0].toUpperCase()}${word.slice(1)}`))
+    .join(' ')
+}
+
+function fillTemplate(value, year) {
+  if (String(value).includes('{year}') && !year) return ''
+  return String(value).replace(/\{year\}/g, String(year))
+}
+
+function parseOptionalYear(value, fallback = null) {
+  if (value === '' || value === null || value === undefined) return fallback
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function splitSeedText(value) {
+  return String(value ?? '')
+    .split(/[\n,;]+/)
+    .map((item) => normalizePhrase(item))
+    .filter((item) => item.length >= 2)
+}
+
+function getEvent(eventId) {
+  return MARKET_EVENTS.find((event) => event.id === eventId) ?? MARKET_EVENTS[0]
+}
+
+function getCategory(categoryId) {
+  return PRODUCT_CATEGORIES.find((category) => category.id === categoryId) ?? PRODUCT_CATEGORIES[0]
+}
+
+function countWords(value) {
+  return normalizePhrase(value).split(' ').filter(Boolean).length
+}
+
+function hasRepeatedAdjacentPhrase(value) {
+  const tokens = normalizePhrase(value).split(' ').filter(Boolean)
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    if (tokens[index] === tokens[index + 1]) return true
+  }
+  for (let index = 0; index < tokens.length - 3; index += 1) {
+    if (tokens[index] === tokens[index + 2] && tokens[index + 1] === tokens[index + 3]) return true
+  }
+  return false
+}
+
+export function detectRiskTerms(value, customRiskTerms = []) {
+  const source = ` ${normalizePhrase(value)} `
+  return unique([...DEFAULT_RISK_TERMS, ...customRiskTerms])
+    .map((term) => normalizePhrase(term))
+    .filter((term) => term.length >= 2 && source.includes(` ${term} `))
+}
+
+function scoreCandidateKeyword(keyword, customRiskTerms = []) {
+  const words = countWords(keyword)
+  const risks = detectRiskTerms(keyword, customRiskTerms)
+  let score = 20
+
+  if (words >= 4 && words <= 7) score += 25
+  if (words >= 8) score += 10
+  if (/\b(first|est|gift|matching|from|teacher|mom|dad|grandma|grandpa|nurse)\b/.test(keyword)) score += 20
+  if (/\b(2026|2027|party|season|life)\b/.test(keyword)) score += 10
+  if (risks.length > 0) score -= 40
+
+  return Math.max(0, Math.min(100, score))
+}
+
+function buildKeywordTemplates(event, category, targets, intents, seedKeywords, year) {
+  const eventTerm = normalizePhrase(event.searchTerm)
+  const product = normalizePhrase(category.searchTerm)
+  const templates = []
+
+  for (const target of targets) {
+    templates.push(`${target} ${eventTerm} ${product}`)
+    if (year) templates.push(`${target} ${eventTerm} ${product} ${year}`)
+    templates.push(`${eventTerm} ${target} gift ${product}`)
+    templates.push(`${target} gift ${product}`)
+  }
+
+  for (const intent of intents) {
+    const phrase = fillTemplate(intent, year)
+    if (!phrase) continue
+    templates.push(`${phrase} ${product}`)
+    for (const target of targets.slice(0, 8)) {
+      templates.push(`${phrase} ${target} ${product}`)
+    }
+  }
+
+  for (const seed of seedKeywords) {
+    const normalizedSeed = normalizePhrase(seed)
+    const hasEventTerm = normalizedSeed.includes(eventTerm)
+    const hasProductTerm = normalizedSeed.includes(product)
+
+    if (hasEventTerm && hasProductTerm) {
+      templates.push(normalizedSeed)
+    } else if (hasEventTerm) {
+      templates.push(`${normalizedSeed} ${product}`)
+    } else if (hasProductTerm) {
+      templates.push(`${eventTerm} ${normalizedSeed}`)
+    } else {
+      templates.push(`${normalizedSeed} ${eventTerm} ${product}`)
+      templates.push(`${eventTerm} ${normalizedSeed} ${product}`)
+      templates.push(`${normalizedSeed} ${product}`)
+    }
+
+    for (const target of targets.slice(0, 6)) {
+      if (normalizedSeed.includes(normalizePhrase(target))) continue
+      templates.push(`${target} ${normalizedSeed} ${product}`)
+    }
+  }
+
+  return templates
+}
+
+export function generateKeywordCandidates(options = {}) {
+  const event = getEvent(options.eventId)
+  const category = getCategory(options.categoryId)
+  const year = parseOptionalYear(options.year, null)
+  const limit = Math.max(10, Math.min(Number(options.limit) || 60, 250))
+  const seedKeywords = splitSeedText(options.seedKeywords)
+  const selectedTargets = Array.isArray(options.targets) && options.targets.length > 0
+    ? options.targets.map((target) => normalizePhrase(target)).filter(Boolean)
+    : event.targets
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const intents = unique([...event.intents.map((intent) => fillTemplate(intent, year)).filter(Boolean), ...(options.extraIntents ?? [])])
+
+  const keywords = unique(
+    buildKeywordTemplates(event, category, selectedTargets, intents, seedKeywords, year)
+      .map((keyword) => normalizePhrase(keyword))
+      .filter((keyword) => countWords(keyword) >= 3)
+  )
+
+  return keywords
+    .map((keyword) => {
+      const riskTerms = detectRiskTerms(keyword, customRiskTerms)
+      return {
+        keyword,
+        eventId: event.id,
+        eventLabel: event.jpLabel,
+        categoryId: category.id,
+        categoryLabel: category.label,
+        score: scoreCandidateKeyword(keyword, customRiskTerms),
+        wordCount: countWords(keyword),
+        riskTerms,
+        status: riskTerms.length > 0 ? 'review' : 'ready',
+      }
+    })
+    .sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, 'en'))
+    .slice(0, limit)
+}
+
+export function generateBroadMarketQueries(options = {}) {
+  const event = getEvent(options.eventId)
+  const category = getCategory(options.categoryId)
+  const year = options.includeYear ? parseOptionalYear(options.year, null) : null
+  const limit = Math.max(3, Math.min(Number(options.limit) || 18, 40))
+  const selectedTargets = Array.isArray(options.targets) && options.targets.length > 0
+    ? options.targets.map((target) => normalizePhrase(target)).filter(Boolean)
+    : event.targets
+  const eventTerm = normalizePhrase(event.searchTerm)
+  const product = normalizePhrase(category.searchTerm)
+  const intentPhrases = event.intents
+    .map((intent) => fillTemplate(intent, year))
+    .map((intent) => normalizePhrase(intent))
+    .filter(Boolean)
+  const tagQueries = unique((category.tags ?? [])
+    .map((tag) => normalizePhrase(tag))
+    .filter((tag) => tag && tag !== product)
+    .slice(0, 4)
+    .map((tag) => `${eventTerm} ${tag}`))
+  const targetQueries = selectedTargets.slice(0, 8).flatMap((target) => [
+    `${target} ${product}`,
+    `${eventTerm} ${target}`,
+    `${eventTerm} ${target} ${product}`,
+  ])
+  const intentQueries = intentPhrases.slice(0, 8).flatMap((intent) => [
+    intent,
+    `${intent} ${product}`,
+  ])
+
+  const queries = [
+    `${eventTerm} ${product}`,
+    `${eventTerm} gift`,
+    `${eventTerm} gift ${product}`,
+    `${eventTerm} ${category.tags[0] ?? product}`,
+    ...tagQueries,
+    ...targetQueries,
+    ...intentQueries,
+  ]
+
+  return unique(queries)
+    .filter((query) => countWords(query) >= 2)
+    .slice(0, limit)
+}
+
+export function generateFollowUpKeywords(rows = [], options = {}) {
+  const event = getEvent(options.eventId)
+  const category = getCategory(options.categoryId)
+  const year = Number(options.year) || event.defaultYear
+  const limit = Math.max(10, Math.min(Number(options.limit) || 80, 250))
+  const winners = rankResearchRows(rows, options)
+    .filter((row) => {
+      const normalized = row.score.normalized
+      const hasSales = (normalized.topMonthlySales ?? 0) > 0 || (normalized.topRevenue ?? 0) > 0
+      const lowEnoughCompetition = normalized.listingsAnalyzed === null || normalized.listingsAnalyzed < 6000
+      return row.score.exclusionReasons.length === 0 && hasSales && lowEnoughCompetition
+    })
+    .slice(0, 8)
+
+  if (winners.length === 0) return []
+
+  const eventTerm = normalizePhrase(event.searchTerm)
+  const productTerm = normalizePhrase(category.searchTerm)
+  const seeds = []
+
+  for (const row of winners) {
+    const keyword = normalizePhrase(row.keyword)
+    const target = inferTarget(keyword, event)
+    const compact = normalizePhrase(keyword)
+      .replace(new RegExp(`\\b${eventTerm}\\b`, 'g'), ' ')
+      .replace(new RegExp(`\\b${productTerm}\\b`, 'g'), ' ')
+      .replace(/\b(?:19|20)\d{2}\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    seeds.push(compact)
+    if (compact !== normalizePhrase(target)) seeds.push(target)
+
+    const tokens = compact.split(' ').filter((token) => token.length >= 3 && !GENERIC_WORDS.has(token))
+    for (let index = 0; index < tokens.length - 1; index += 1) {
+      seeds.push(`${tokens[index]} ${tokens[index + 1]}`)
+    }
+  }
+
+  return generateKeywordCandidates({
+    ...options,
+    seedKeywords: unique([...splitSeedText(options.seedKeywords), ...seeds]).join('\n'),
+    limit,
+  }).filter((candidate) => !hasRepeatedAdjacentPhrase(candidate.keyword))
+    .slice(0, limit)
+}
+
+function tokenize(value, stopWords = [], keepWords = []) {
+  const stopSet = new Set([
+    ...GENERIC_WORDS,
+    ...stopWords.flatMap((word) => normalizePhrase(word).split(' ').filter(Boolean)),
+  ])
+  const keepSet = new Set([...DEFAULT_HINT_KEEP_WORDS, ...keepWords].map((word) => normalizePhrase(word)))
+
+  return normalizePhrase(value)
+    .split(' ')
+    .filter((token) => token.length >= 3 && (!stopSet.has(token) || keepSet.has(token)))
+}
+
+function pushCount(map, token, weight = 1) {
+  map.set(token, (map.get(token) ?? 0) + weight)
+}
+
+export function extractNicheHintsFromListings(listings = [], limit = 20, options = {}) {
+  const counts = new Map()
+  const stopWords = options.stopWords ?? []
+  const keepWords = options.keepWords ?? []
+  const blockedPhrases = new Set((options.blockedPhrases ?? []).map((phrase) => normalizePhrase(phrase)))
+  const blockedTokens = new Set((options.blockedTokens ?? []).flatMap((phrase) => normalizePhrase(phrase).split(' ').filter(Boolean)))
+
+  const pushHint = (phrase, weight) => {
+    const keyword = normalizePhrase(phrase)
+    const tokens = keyword.split(' ').filter(Boolean)
+    if (!keyword || blockedPhrases.has(keyword)) return
+    if (tokens[0] === 'day' || tokens[tokens.length - 1] === 'from') return
+    if (tokens.length === 1 && blockedTokens.has(tokens[0])) return
+    if (tokens.length > 1 && blockedTokens.has(tokens[tokens.length - 1])) return
+    if ([...blockedPhrases].some((blocked) => keyword.includes(blocked)) && !keyword.startsWith('first ')) return
+    if (tokens.length > 1 && new Set(tokens).size !== tokens.length) return
+    pushCount(counts, keyword, weight)
+  }
+
+  for (const listing of listings) {
+    const title = listing.product_name ?? listing.title ?? listing.name ?? ''
+    const tags = Array.isArray(listing.tags) ? listing.tags.join(' ') : listing.tags ?? ''
+    const weightSource = parseNumber(listing.est_sales ?? listing.sales ?? listing.monthlySales ?? 0) ?? 0
+    const weight = Math.max(1, Math.min(10, Math.round(weightSource / 10) || 1))
+    const tagSegments = String(tags).split(/[,;|]+/).filter(Boolean)
+    const segments = [title, ...tagSegments]
+    const seenTokens = new Set()
+
+    for (const segment of segments) {
+      const tokens = tokenize(segment, stopWords, keepWords)
+      for (const token of tokens) {
+        if (seenTokens.has(token)) continue
+        seenTokens.add(token)
+        pushHint(token, weight)
+      }
+
+      for (let size = 2; size <= 3; size += 1) {
+        for (let index = 0; index <= tokens.length - size; index += 1) {
+          const phrase = tokens.slice(index, index + size).join(' ')
+          if (phrase.length >= 7) pushHint(phrase, weight + size)
+        }
+      }
+    }
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'en'))
+    .slice(0, limit)
+    .map(([keyword, count]) => ({ keyword, count }))
+}
+
+export function parseNumber(value) {
+  if (value === null || value === undefined) return null
+  const cleaned = String(value).replace(/[$,%\s,]/g, '')
+  if (!cleaned) return null
+  const parsed = Number(cleaned)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+export function parseListingAgeMonths(value) {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  const source = String(value).toLowerCase().trim()
+  const numberMatch = source.match(/\d+(?:\.\d+)?/)
+  const number = numberMatch ? Number(numberMatch[0]) : parseNumber(source)
+  if (number === null) return null
+  if (/\b(year|years|yr|yrs)\b/.test(source)) return Math.round(number * 12)
+  if (/\b(day|days)\b/.test(source)) return Math.max(1, Math.round(number / 30))
+  return Math.round(number)
+}
+
+function scoreBand(value, bands) {
+  for (const band of bands) {
+    if (band.test(value)) return band.points
+  }
+  return 0
+}
+
+export function scoreEverbeeResult(row = {}, options = {}) {
+  const keyword = normalizePhrase(row.keyword)
+  const listingsAnalyzed = parseNumber(row.listingsAnalyzed)
+  const topMonthlySales = parseNumber(row.topMonthlySales)
+  const topRevenue = parseNumber(row.topRevenue)
+  const averagePrice = parseNumber(row.averagePrice)
+  const listingAgeMonths = parseListingAgeMonths(row.listingAge)
+  const erankSearchVolume = parseNumber(row.erankSearchVolume)
+  const erankClicks = parseNumber(row.erankClicks)
+  const erankCtr = parseNumber(row.erankCtr)
+  const erankCompetition = parseNumber(row.erankCompetition)
+  const erankKeywordDifficulty = parseNumber(row.erankKeywordDifficulty)
+  const erankTrend = parseNumber(row.erankTrend)
+  const riskTerms = detectRiskTerms(`${keyword} ${row.notes ?? ''}`, splitSeedText(options.customRiskTerms))
+
+  const competitionScore = scoreBand(listingsAnalyzed, [
+    { test: (value) => value !== null && value > 0 && value < 1000, points: 30 },
+    { test: (value) => value !== null && value < 3000, points: 24 },
+    { test: (value) => value !== null && value < 6000, points: 14 },
+    { test: (value) => value !== null && value < 10000, points: 6 },
+  ])
+  const demandScore = scoreBand(topMonthlySales, [
+    { test: (value) => value !== null && value >= 30, points: 25 },
+    { test: (value) => value !== null && value >= 10, points: 20 },
+    { test: (value) => value !== null && value >= 5, points: 10 },
+    { test: (value) => value !== null && value > 0, points: 4 },
+  ])
+  const revenueScore = scoreBand(topRevenue, [
+    { test: (value) => value !== null && value >= 1000, points: 20 },
+    { test: (value) => value !== null && value >= 300, points: 16 },
+    { test: (value) => value !== null && value >= 100, points: 8 },
+    { test: (value) => value !== null && value > 0, points: 3 },
+  ])
+  const trendScore = scoreBand(listingAgeMonths, [
+    { test: (value) => value !== null && value <= 6 && (topMonthlySales ?? 0) >= 10, points: 15 },
+    { test: (value) => value !== null && value <= 12 && (topMonthlySales ?? 0) >= 10, points: 12 },
+    { test: (value) => value !== null && value <= 18 && (topMonthlySales ?? 0) > 0, points: 7 },
+  ])
+  const priceScore = scoreBand(averagePrice, [
+    { test: (value) => value !== null && value >= 18 && value <= 35, points: 10 },
+    { test: (value) => value !== null && value >= 12 && value <= 45, points: 6 },
+    { test: (value) => value !== null && value > 0, points: 2 },
+  ])
+  const erankDemandScore = Math.max(
+    scoreBand(erankSearchVolume, [
+      { test: (value) => value !== null && value >= 1000, points: 12 },
+      { test: (value) => value !== null && value >= 300, points: 8 },
+      { test: (value) => value !== null && value > 0, points: 3 },
+    ]),
+    scoreBand(erankClicks, [
+      { test: (value) => value !== null && value >= 500, points: 12 },
+      { test: (value) => value !== null && value >= 100, points: 8 },
+      { test: (value) => value !== null && value > 0, points: 3 },
+    ])
+  )
+  const erankCompetitionScore = scoreBand(erankCompetition, [
+    { test: (value) => value !== null && value > 0 && value < 5000, points: 8 },
+    { test: (value) => value !== null && value < 20000, points: 5 },
+    { test: (value) => value !== null && value < 50000, points: 2 },
+  ])
+  const erankCtrScore = scoreBand(erankCtr, [
+    { test: (value) => value !== null && value >= 70, points: 5 },
+    { test: (value) => value !== null && value >= 45, points: 3 },
+    { test: (value) => value !== null && value > 0, points: 1 },
+  ])
+  const erankKeywordDifficultyScore = scoreBand(erankKeywordDifficulty, [
+    { test: (value) => value !== null && value >= 0 && value <= 10, points: 8 },
+    { test: (value) => value !== null && value <= 25, points: 6 },
+    { test: (value) => value !== null && value <= 45, points: 3 },
+    { test: (value) => value !== null && value <= 60, points: 1 },
+  ])
+  const erankTrendScore = scoreBand(erankTrend, [
+    { test: (value) => value !== null && value > 0, points: 3 },
+  ])
+
+  const riskPenalty = riskTerms.length * 25
+  const score = Math.max(0, Math.min(100, competitionScore + demandScore + revenueScore + trendScore + priceScore + erankDemandScore + erankCompetitionScore + erankCtrScore + erankKeywordDifficultyScore + erankTrendScore - riskPenalty))
+  const hasEverbeeData = listingsAnalyzed !== null || topMonthlySales !== null || topRevenue !== null
+  const hasErankData = erankSearchVolume !== null || erankClicks !== null || erankCtr !== null || erankCompetition !== null || erankKeywordDifficulty !== null || erankTrend !== null
+  const everbeePositive = (topMonthlySales ?? 0) > 0 || (topRevenue ?? 0) > 0
+  const erankPositive = (erankSearchVolume ?? 0) > 0 || (erankClicks ?? 0) > 0 || (erankCtr ?? 0) > 0
+  const exclusionReasons = []
+  if (riskTerms.length > 0) exclusionReasons.push(`要確認語句: ${riskTerms.join(', ')}`)
+  if ((listingsAnalyzed ?? 0) >= 10000 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('競合が多く需要が弱い')
+  if (!hasEverbeeData && hasErankData && !erankPositive) exclusionReasons.push('eRank検索需要が未確認')
+  if (hasEverbeeData && !everbeePositive && hasErankData && !erankPositive) exclusionReasons.push('売上と検索需要の両方が弱い')
+
+  let label = 'C: 追加調査'
+  if (exclusionReasons.length > 0) label = 'D: 除外候補'
+  else if (score >= 80) label = 'A: 今すぐ候補'
+  else if (score >= 62) label = 'B: 有望'
+  if (hasErankData && erankPositive && hasEverbeeData && !everbeePositive && label !== 'D: 除外候補') label = 'C: 検索需要あり'
+
+  let validationLabel = '未検証'
+  if (hasEverbeeData && hasErankData && everbeePositive && erankPositive) validationLabel = '両方OK'
+  else if (hasEverbeeData && hasErankData) validationLabel = '要判断'
+  else if (hasEverbeeData) validationLabel = 'EverBeeのみ'
+  else if (hasErankData) validationLabel = 'eRankのみ'
+
+  return {
+    score,
+    label,
+    parts: {
+      competitionScore,
+      demandScore,
+      revenueScore,
+      trendScore,
+      priceScore,
+      erankDemandScore,
+      erankCompetitionScore,
+      erankCtrScore,
+      erankKeywordDifficultyScore,
+      erankTrendScore,
+      riskPenalty,
+    },
+    validation: {
+      label: validationLabel,
+      hasEverbeeData,
+      hasErankData,
+      everbeePositive,
+      erankPositive,
+    },
+    normalized: {
+      keyword,
+      listingsAnalyzed,
+      topMonthlySales,
+      topRevenue,
+      averagePrice,
+      listingAgeMonths,
+      erankSearchVolume,
+      erankClicks,
+      erankCtr,
+      erankCompetition,
+      erankKeywordDifficulty,
+      erankTrend,
+      notes: row.notes ?? '',
+    },
+    riskTerms,
+    exclusionReasons,
+  }
+}
+
+function inferTarget(keyword, event) {
+  const source = normalizePhrase(keyword)
+  const match = event.targets.find((target) => source.includes(normalizePhrase(target)))
+  return match ?? event.targets[0]
+}
+
+function cleanTag(value) {
+  return normalizePhrase(value).slice(0, 20).trim()
+}
+
+export function parseBucketKeywords(value) {
+  if (Array.isArray(value)) {
+    return unique(value.flatMap((item) => {
+      if (typeof item === 'string') return splitSeedText(item)
+      return splitSeedText(item?.keyword ?? '')
+    }))
+  }
+
+  return unique(splitSeedText(value))
+}
+
+function buildTags(keyword, event, category, year, target) {
+  const tokens = normalizePhrase(keyword).split(' ').filter(Boolean)
+  const chunks = []
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    chunks.push(`${tokens[index]} ${tokens[index + 1]}`)
+  }
+  for (let index = 0; index < tokens.length - 2; index += 1) {
+    chunks.push(`${tokens[index]} ${tokens[index + 1]} ${tokens[index + 2]}`)
+  }
+
+  return unique([
+    keyword,
+    target,
+    event.searchTerm,
+    `${event.searchTerm} gift`,
+    `${target} gift`,
+    category.searchTerm,
+    ...category.tags,
+    ...chunks,
+    String(year),
+  ])
+    .map(cleanTag)
+    .filter((tag) => tag.length >= 2 && tag.length <= 20)
+    .slice(0, 13)
+}
+
+function titleizeKeyword(value) {
+  const smallWords = new Set(['a', 'an', 'and', 'for', 'of', 'the', 'to', 'with'])
+  return normalizePhrase(value)
+    .split(' ')
+    .filter(Boolean)
+    .map((word, index) => {
+      if (index > 0 && smallWords.has(word)) return word
+      if (/^\d+$/.test(word)) return word
+      return `${word[0].toUpperCase()}${word.slice(1)}`
+    })
+    .join(' ')
+    .replace(/\bFathers\b/g, "Father's")
+    .replace(/\bMothers\b/g, "Mother's")
+    .replace(/\bValentines\b/g, "Valentine's")
+}
+
+function hasDemandFromEverbee(normalized) {
+  return (normalized.topMonthlySales ?? 0) >= 10 || (normalized.topRevenue ?? 0) >= 300
+}
+
+function hasDemandFromErank(normalized) {
+  return (normalized.erankSearchVolume ?? 0) >= 300 || (normalized.erankClicks ?? 0) >= 100
+}
+
+function hasStrongDemand(normalized) {
+  return (normalized.topMonthlySales ?? 0) >= 30
+    || (normalized.topRevenue ?? 0) >= 1000
+    || (normalized.erankSearchVolume ?? 0) >= 1000
+    || (normalized.erankClicks ?? 0) >= 500
+}
+
+function competitionLevel(normalized) {
+  const erankCompetition = normalized.erankCompetition
+  const erankKeywordDifficulty = normalized.erankKeywordDifficulty
+  const listingsAnalyzed = normalized.listingsAnalyzed
+
+  if ((erankKeywordDifficulty !== null && erankKeywordDifficulty <= 25)
+    || (erankCompetition !== null && erankCompetition > 0 && erankCompetition < 5000)
+    || (listingsAnalyzed !== null && listingsAnalyzed > 0 && listingsAnalyzed < 3000)) {
+    return 'low'
+  }
+
+  if ((erankKeywordDifficulty !== null && erankKeywordDifficulty <= 50)
+    || (erankCompetition !== null && erankCompetition < 20000)
+    || (listingsAnalyzed !== null && listingsAnalyzed < 8000)) {
+    return 'medium'
+  }
+
+  if (erankCompetition !== null || erankKeywordDifficulty !== null || listingsAnalyzed !== null) return 'high'
+  return 'unknown'
+}
+
+export function classifyKeywordBucket(row = {}, options = {}) {
+  const score = row.score?.normalized ? row.score : scoreEverbeeResult(row, options)
+  const normalized = score.normalized
+  const keyword = normalized.keyword
+  const hasRisk = score.riskTerms.length > 0
+  const hasDemand = hasDemandFromEverbee(normalized) || hasDemandFromErank(normalized)
+  const strongDemand = hasStrongDemand(normalized)
+  const competition = competitionLevel(normalized)
+
+  if (!keyword) {
+    return { bucket: 'exclude', label: '除外', reason: 'キーワードが空です', score }
+  }
+
+  if (hasRisk) {
+    return { bucket: 'exclude', label: '除外候補', reason: `商標/著作権っぽい語句: ${score.riskTerms.join(', ')}`, score }
+  }
+
+  if (hasDemand && competition === 'low') {
+    return { bucket: 'visibility', label: 'Visibility', reason: '検索需要または売上があり、競合が低めです', score }
+  }
+
+  if (strongDemand && competition === 'high') {
+    return { bucket: 'bestSeller', label: 'Best seller', reason: '需要が大きく、競合も大きい市場語です', score }
+  }
+
+  if (hasDemand && (competition === 'medium' || competition === 'unknown')) {
+    return { bucket: 'reach', label: 'Reach', reason: '需要があり、広げるための中核語に向きます', score }
+  }
+
+  if (strongDemand) {
+    return { bucket: 'bestSeller', label: 'Best seller', reason: '強い需要が確認できます', score }
+  }
+
+  return { bucket: 'review', label: '追加確認', reason: '需要または競合の根拠がまだ弱いです', score }
+}
+
+function phraseTokens(value) {
+  return normalizePhrase(value).split(' ').filter(Boolean)
+}
+
+function phraseAddsSignal(phrase, usedTokens) {
+  const tokens = phraseTokens(phrase).filter((token) => !GENERIC_WORDS.has(token))
+  if (tokens.length === 0) return false
+  return tokens.some((token) => !usedTokens.has(token))
+}
+
+function buildSeoTitle(phrases, event, category) {
+  const usedTokens = new Set()
+  const pieces = []
+  const fallback = `${event.searchTerm} ${category.searchTerm}`
+
+  for (const phrase of unique([...phrases, `${event.searchTerm} gift`, category.searchTerm, fallback])) {
+    const normalized = normalizePhrase(phrase)
+    if (!normalized) continue
+    if (pieces.length > 0 && !phraseAddsSignal(normalized, usedTokens)) continue
+
+    const nextPieces = [...pieces, normalized]
+    const nextTitle = nextPieces.map(titleizeKeyword).join(', ')
+    if (nextTitle.length > 140) continue
+
+    pieces.push(normalized)
+    phraseTokens(normalized).forEach((token) => usedTokens.add(token))
+  }
+
+  let title = pieces.map(titleizeKeyword).join(', ')
+  if (title.length <= 140) return title
+
+  while (pieces.length > 1 && title.length > 140) {
+    pieces.pop()
+    title = pieces.map(titleizeKeyword).join(', ')
+  }
+
+  return title.slice(0, 140).trim()
+}
+
+function isUsefulTagChunk(chunk) {
+  const edgeStopWords = new Set(['to', 'be', 'and', 'for', 'the', 'with', 'of', 'day'])
+  const tokens = phraseTokens(chunk)
+  if (tokens.length === 0) return false
+  const endsWithToBe = tokens.length >= 3 && tokens[tokens.length - 2] === 'to' && tokens[tokens.length - 1] === 'be'
+  if (edgeStopWords.has(tokens[0])) return false
+  if (tokens[0] === 'est') return false
+  if (/^\d{4}$/.test(tokens[0]) && ['dad', 'mom', 'grandpa', 'grandma', 'papa', 'mama'].includes(tokens[1])) return false
+  if (['fathers', 'mothers', 'valentines'].some((eventWord) => tokens.includes(eventWord) && tokens[0] !== eventWord)) return false
+  if (edgeStopWords.has(tokens[tokens.length - 1]) && !endsWithToBe) return false
+  if (tokens.every((token) => GENERIC_WORDS.has(token))) return false
+  if (tokens.length === 1 && (GENERIC_WORDS.has(tokens[0]) || tokens[0].length < 4)) return false
+  return true
+}
+
+function tagChunks(phrase) {
+  const tokens = phraseTokens(phrase)
+  const chunks = []
+  const normalized = normalizePhrase(phrase)
+  if (normalized.length <= 20) chunks.push(normalized)
+
+  for (let size = 3; size >= 2; size -= 1) {
+    for (let index = 0; index <= tokens.length - size; index += 1) {
+      const chunk = tokens.slice(index, index + size).join(' ')
+      if (chunk.length >= 2 && chunk.length <= 20 && isUsefulTagChunk(chunk)) chunks.push(chunk)
+    }
+  }
+
+  return chunks
+}
+
+function buildSeoTags(phrases, event, category, year) {
+  const joinedPhrases = phrases.join(' ')
+  const target = event.targets.find((item) => normalizePhrase(joinedPhrases).includes(normalizePhrase(item)))
+  const targetTags = target
+    ? [target, `${target} gift`, `${target} ${category.searchTerm}`]
+    : []
+
+  return unique([
+    ...phrases.filter((phrase) => normalizePhrase(phrase).length <= 20),
+    ...targetTags,
+    event.searchTerm,
+    `${event.searchTerm} gift`,
+    category.searchTerm,
+    ...category.tags,
+    ...phrases.flatMap(tagChunks),
+    String(year),
+  ])
+    .map(cleanTag)
+    .filter((tag) => tag.length >= 2 && tag.length <= 20)
+    .slice(0, 13)
+}
+
+export function buildSeoPlanFromBuckets(buckets = {}, options = {}) {
+  const event = getEvent(options.eventId)
+  const category = getCategory(options.categoryId)
+  const year = Number(options.year) || event.defaultYear
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const visibility = parseBucketKeywords(buckets.visibility)
+  const reach = parseBucketKeywords(buckets.reach)
+  const bestSeller = parseBucketKeywords(buckets.bestSeller)
+  const warnings = []
+  const selectedPhrases = unique([
+    ...visibility.slice(0, 3),
+    ...reach.slice(0, 4),
+    ...bestSeller.slice(0, 3),
+  ])
+  const riskTerms = detectRiskTerms(selectedPhrases.join(' '), customRiskTerms)
+
+  if (visibility.length === 0) warnings.push('Visibilityに入る低競合キーワードがまだありません')
+  if (reach.length === 0) warnings.push('Reachに入る中核キーワードがまだありません')
+  if (bestSeller.length === 0) warnings.push('Best sellerに入る大きな市場語がまだありません')
+  if (riskTerms.length > 0) warnings.push(`商標/著作権っぽい語句を確認してください: ${riskTerms.join(', ')}`)
+
+  const title = buildSeoTitle(selectedPhrases, event, category)
+  const tags = buildSeoTags(selectedPhrases, event, category, year)
+
+  if (title.length > 140) warnings.push('タイトルが140文字を超えています')
+  if (tags.length < 8) warnings.push('タグ候補が少なめです。eRank/EverBeeから関連語をもう少し追加してください')
+
+  return {
+    title,
+    titleLength: title.length,
+    tags,
+    tagString: tags.join(', '),
+    warnings,
+    buckets: {
+      visibility,
+      reach,
+      bestSeller,
+    },
+  }
+}
+
+export function buildProductIdea(keyword, options = {}) {
+  const event = getEvent(options.eventId)
+  const category = getCategory(options.categoryId)
+  const year = Number(options.year) || event.defaultYear
+  const normalizedKeyword = normalizePhrase(keyword)
+  const target = inferTarget(normalizedKeyword, event)
+  const designDirection = event.designAngles.join(' / ')
+  const seoPlan = buildSeoPlanFromBuckets({
+    visibility: [normalizedKeyword],
+  }, {
+    ...options,
+    eventId: event.id,
+    categoryId: category.id,
+    year,
+  })
+  const seoTitle = seoPlan.title || titleizeKeyword(`${normalizedKeyword} ${category.searchTerm}`).slice(0, 135)
+  const tags = seoPlan.tags.length > 0 ? seoPlan.tags : buildTags(normalizedKeyword, event, category, year, target)
+
+  return {
+    theme: `${event.jpLabel}向け ${target} ${category.label}`,
+    target,
+    designDirection,
+    seoTitle,
+    tags,
+    notes: detectRiskTerms(normalizedKeyword).length > 0
+      ? '商標・著作権の確認が必要です。'
+      : 'EverBee数値が良ければ商品化候補にできます。',
+  }
+}
+
+function detectDelimiter(text) {
+  const firstLine = String(text).split(/\r?\n/).find((line) => line.trim()) ?? ''
+  if ((firstLine.match(/\t/g) ?? []).length > (firstLine.match(/,/g) ?? []).length) return '\t'
+  return ','
+}
+
+function parseDelimitedLine(line, delimiter) {
+  const values = []
+  let current = ''
+  let quoted = false
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    const nextChar = line[index + 1]
+    if (char === '"' && quoted && nextChar === '"') {
+      current += '"'
+      index += 1
+    } else if (char === '"') {
+      quoted = !quoted
+    } else if (char === delimiter && !quoted) {
+      values.push(current.trim())
+      current = ''
+    } else {
+      current += char
+    }
+  }
+
+  values.push(current.trim())
+  return values
+}
+
+function matchHeader(header) {
+  const normalized = normalizePhrase(header)
+  for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
+    if (aliases.some((alias) => normalizePhrase(alias) === normalized)) return field
+  }
+  return null
+}
+
+function matchBroadListingHeader(header) {
+  const normalized = normalizePhrase(header)
+  for (const [field, aliases] of Object.entries(BROAD_LISTING_FIELD_ALIASES)) {
+    if (aliases.some((alias) => normalizePhrase(alias) === normalized)) return field
+  }
+  return null
+}
+
+function parseBroadLineWithoutHeader(line, delimiter) {
+  const values = parseDelimitedLine(line, delimiter)
+  if (delimiter === '\t' && values.length > 1) {
+    return {
+      title: values[0],
+      tags: values[1] ?? '',
+      sales: values[2] ?? '',
+      revenue: values[3] ?? '',
+    }
+  }
+
+  return { title: line }
+}
+
+export function parseBroadMarketListings(text) {
+  const source = String(text ?? '').trim()
+  if (!source) return []
+
+  const delimiter = detectDelimiter(source)
+  const lines = source.split(/\r?\n/).filter((line) => line.trim())
+  if (lines.length === 0) return []
+
+  const firstRow = parseDelimitedLine(lines[0], delimiter)
+  const headerFields = firstRow.map(matchBroadListingHeader)
+  const hasHeader = headerFields.some(Boolean)
+
+  if (!hasHeader) {
+    return lines
+      .map((line) => parseBroadLineWithoutHeader(line, delimiter))
+      .filter((row) => normalizePhrase(`${row.title ?? ''} ${row.tags ?? ''}`))
+  }
+
+  return lines.slice(1).map((line) => {
+    const values = parseDelimitedLine(line, delimiter)
+    const row = {}
+    values.forEach((value, index) => {
+      const field = headerFields[index]
+      if (field) row[field] = value
+    })
+    return row
+  }).filter((row) => normalizePhrase(`${row.title ?? ''} ${row.tags ?? ''}`))
+}
+
+export function parseEverbeeRows(text) {
+  const source = String(text ?? '').trim()
+  if (!source) return []
+
+  const delimiter = detectDelimiter(source)
+  const lines = source.split(/\r?\n/).filter((line) => line.trim())
+  if (lines.length === 0) return []
+
+  const firstRow = parseDelimitedLine(lines[0], delimiter)
+  const headerFields = firstRow.map(matchHeader)
+  const hasHeader = headerFields.some(Boolean)
+  const rows = hasHeader ? lines.slice(1) : lines
+  const fallbackFields = ['keyword', 'listingsAnalyzed', 'topMonthlySales', 'topRevenue', 'averagePrice', 'listingAge', 'erankSearchVolume', 'erankClicks', 'erankCtr', 'erankCompetition', 'erankKeywordDifficulty', 'erankTrend', 'notes']
+  const fields = hasHeader ? headerFields : fallbackFields
+
+  return rows.map((line) => {
+    const values = parseDelimitedLine(line, delimiter)
+    const row = {}
+    values.forEach((value, index) => {
+      const field = fields[index]
+      if (field) row[field] = value
+    })
+    return row
+  }).filter((row) => row.keyword)
+}
+
+export function rankResearchRows(rows = [], options = {}) {
+  return rows
+    .map((row) => {
+      const score = scoreEverbeeResult(row, options)
+      const idea = buildProductIdea(row.keyword, options)
+      return { ...row, score, idea }
+    })
+    .sort((a, b) => b.score.score - a.score.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
+}

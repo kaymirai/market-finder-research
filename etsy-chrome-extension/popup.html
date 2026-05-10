@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <title>EtsyMirai Research Helper</title>
+    <style>
+      :root {
+        --ink: #172026;
+        --muted: #5f6b74;
+        --line: #d9e0e4;
+        --teal: #0f766e;
+        --teal-dark: #0b4f4a;
+        --blue: #2563eb;
+        --paper: #f6f8f7;
+      }
+
+      body {
+        width: 380px;
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: Arial, "Hiragino Sans", "Yu Gothic", sans-serif;
+      }
+
+      .shell {
+        padding: 14px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 15px;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+
+      .desc {
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 10px;
+        color: #334155;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        box-sizing: border-box;
+        padding: 8px;
+        color: var(--ink);
+        font: inherit;
+        font-size: 13px;
+        outline: none;
+      }
+
+      textarea {
+        resize: vertical;
+        line-height: 1.45;
+      }
+
+      input:focus,
+      textarea:focus {
+        border-color: var(--teal);
+        box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+      }
+
+      button {
+        width: 100%;
+        min-height: 38px;
+        border: 0;
+        border-radius: 6px;
+        color: #fff;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+      }
+
+      .btn-primary {
+        background: var(--teal);
+      }
+
+      .btn-primary:hover {
+        background: var(--teal-dark);
+      }
+
+      .btn-secondary {
+        background: var(--blue);
+      }
+
+      .btn-muted {
+        background: #64748b;
+      }
+
+      .btn-danger {
+        background: #be123c;
+      }
+
+      .button-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .status {
+        min-height: 18px;
+        margin-top: 10px;
+        color: var(--teal-dark);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <h1>EtsyMirai Research Helper</h1>
+
+      <section class="panel">
+        <h2>Market Finder → EverBee</h2>
+        <p class="desc">Market Finderの「拡張用JSON」か、改行区切りのキーワードを貼り付けてEverBeeで順番に検索します。</p>
+
+        <label>
+          EverBee URL
+          <input id="everbeeUrl" value="https://app.everbee.io/">
+        </label>
+
+        <label>
+          調査キーワード / JSON
+          <textarea id="marketJobInput" rows="8" placeholder="Market FinderのJSON、またはキーワードを1行ずつ貼り付け"></textarea>
+        </label>
+
+        <label>
+          今回の最大件数
+          <input id="maxKeywords" type="number" min="1" max="150" value="5">
+        </label>
+
+        <div class="button-row">
+          <button id="startMarketBtn" class="btn-primary" type="button">調査開始</button>
+          <button id="stopMarketBtn" class="btn-danger" type="button">停止</button>
+        </div>
+
+        <div id="marketStatus" class="status"></div>
+
+        <label>
+          取得結果CSV
+          <textarea id="marketResults" rows="6" readonly></textarea>
+        </label>
+
+        <div class="button-row">
+          <button id="copyResultsBtn" class="btn-secondary" type="button">結果をコピー</button>
+          <button id="clearResultsBtn" class="btn-muted" type="button">クリア</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Etsy画像取得</h2>
+        <p class="desc">既存のEtsy商品画像取得用です。Market Finderの検証中は使わなくて大丈夫です。</p>
+
+        <label>
+          Project ID
+          <input id="projectId" placeholder="123e4567-e89b-12d3...">
+        </label>
+
+        <label>
+          API URL
+          <input id="apiUrl" value="http://localhost:3000/api/images">
+        </label>
+
+        <div class="button-row">
+          <button id="saveBtn" class="btn-muted" type="button">保存</button>
+          <button id="startBtn" class="btn-secondary" type="button">画像取得</button>
+        </div>
+
+        <div id="status" class="status"></div>
+      </section>
+
+      <p class="small">EverBeeの画面構造が変わる場合があります。失敗した行はCSV内のnotesに理由を残します。</p>
+    </main>
+
+    <script src="dist/popup.js"></script>
+  </body>
+</html>

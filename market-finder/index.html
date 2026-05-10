@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Market Finder</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">EtsyMiraiProducer Lab</p>
+          <h1>Market Finder</h1>
+          <p class="top-summary">広めの市場を見る → eRankで検索需要を確認 → EverBeeで売上確認 → SEOタイトル/タグへ整える流れです。</p>
+        </div>
+        <div class="top-actions advanced-only">
+          <button id="copyKeywordsBtn" type="button" class="ghost-btn" data-optional="予備">候補リストをコピー</button>
+          <button id="downloadJobBtn" type="button" class="dark-btn" data-optional="予備">接続できない時のJSON</button>
+          <small>通常はStep 3の「Step 2の候補を入れる」を使えばOKです。この2つは外部保存・拡張機能へ直接渡す時用です。</small>
+        </div>
+      </header>
+
+      <section class="workflow-strip advanced-only" aria-label="作業の流れ">
+        <div><span>1</span><strong>条件</strong><small>イベント・商品・誰向けか</small></div>
+        <div><span>2</span><strong>候補</strong><small>調査するキーワード一覧</small></div>
+        <div><span>3</span><strong>取得</strong><small>EverBee/eRankの数字</small></div>
+        <div><span>4</span><strong>判断</strong><small>売上と競合で並び替え</small></div>
+        <div><span>5</span><strong>SEO</strong><small>タイトルとタグに変換</small></div>
+      </section>
+
+      <section class="quick-start">
+        <div>
+          <p class="section-kicker">かんたんモード</p>
+          <h2>むずかしい所は触らず、上から押すだけ</h2>
+        </div>
+        <div class="flow-choice-grid" aria-label="使い方を選ぶ">
+          <button id="flowAutoBtn" class="flow-choice is-active" type="button" data-flow-choice="auto">
+            <strong>eRankで検索ワードを選ぶ</strong>
+            <span>まずはこれ。検索需要を見てからEverBeeで売上確認します。</span>
+          </button>
+          <button id="flowCsvBtn" class="flow-choice" type="button" data-flow-choice="csv">
+            <strong>CSVを貼って判定する</strong>
+            <span>EverBee/eRankの表を持っている時だけ。</span>
+          </button>
+          <button id="flowSeoBtn" class="flow-choice" type="button" data-flow-choice="seo">
+            <strong>SEO案だけ作る</strong>
+            <span>調査済みの良いキーワードがある時だけ。</span>
+          </button>
+        </div>
+        <button id="openAdvancedModalBtn" class="text-btn advanced-link" type="button">細かい設定を開く</button>
+      </section>
+
+      <section class="simple-runner">
+        <div class="simple-step flow-auto-only">
+          <span>1</span>
+          <strong>eRank候補を見る</strong>
+          <small>②でeRankにかける候補が下に出ます。条件を変えた時だけ押します。</small>
+          <button id="simpleGenerateBtn" type="button" class="primary-btn">eRank候補を更新</button>
+        </div>
+        <div class="simple-step flow-auto-only">
+          <span>2</span>
+          <strong>eRankで広く見る</strong>
+          <small>広い言葉で、検索数・クリック・競合・KDを確認します。結果は下の「STEP 3」に出ます。</small>
+          <button id="simpleImportErankBtn" type="button" class="primary-btn">eRankで広く見る</button>
+        </div>
+        <div class="simple-step flow-auto-only">
+          <span>3</span>
+          <strong>EverBeeで売上確認</strong>
+          <small>STEP 3で反応があった言葉に近い細かい候補だけ、売上確認します。</small>
+          <button id="simpleStartBtn" type="button" class="primary-btn">EverBeeで売上確認</button>
+        </div>
+        <div class="simple-step flow-csv-only">
+          <span>1</span>
+          <strong>CSVを貼る</strong>
+          <small>EverBee/eRankからコピーした表を貼ります。</small>
+          <textarea id="simpleCsvInput" rows="5" placeholder="Keyword, Listings Analyzed, Top Monthly Sales..."></textarea>
+          <button id="simpleImportCsvBtn" type="button" class="primary-btn">CSVを読み込む</button>
+        </div>
+        <div class="simple-step flow-seo-only">
+          <span>1</span>
+          <strong>キーワードを入れる</strong>
+          <small>調査済みの良いキーワードを1行ずつ入れます。</small>
+          <textarea id="simpleSeoKeywordsInput" rows="5" placeholder="例: bonus dad fathers day shirt&#10;dog dad fathers day shirt"></textarea>
+          <button id="simpleUseSeoKeywordsBtn" type="button" class="primary-btn">SEO用に入れる</button>
+        </div>
+        <div class="simple-step">
+          <span id="simpleSeoStepNumber">4</span>
+          <strong>SEO案を作る</strong>
+          <small>数字が入ったら、タイトルとタグを作ります。</small>
+          <button id="simpleSeoBtn" type="button" class="dark-btn">SEO案を作る</button>
+        </div>
+        <div class="simple-status" id="simpleStatus">まずイベントと商品を選んで、1から押してください。</div>
+      </section>
+
+      <section class="workspace-grid">
+        <aside class="panel controls-panel">
+          <div class="panel-heading">
+            <p class="section-kicker">Step 1 - 調査条件</p>
+            <h2>何の商品を、誰向けに調べるか</h2>
+            <p class="panel-help">ここでは検索の材料を決めます。ターゲットはイベントごとに用意した初期候補で、ONにした相手だけをStep 2の候補作成に使います。</p>
+            <div class="route-note">
+              <strong>ここでやること</strong>
+              <span>イベントと商品を選ぶだけです。下の候補は自動で変わります。</span>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>イベント</span>
+            <select id="eventSelect"></select>
+          </label>
+
+          <div class="two-col">
+            <label class="field">
+              <span>商品</span>
+              <select id="categorySelect"></select>
+            </label>
+            <label class="field">
+              <span>年を入れたい時だけ</span>
+              <input id="yearInput" type="number" min="2025" max="2032" value="2026" placeholder="例: 2026">
+              <small>空欄なら年入り候補は作りません。入れると `dad est 2026` のような候補も作ります。</small>
+            </label>
+          </div>
+
+          <label class="field advanced-only">
+            <span>Step 2に表示する候補数</span>
+            <input id="limitInput" type="number" min="10" max="250" value="80">
+            <small>多すぎると調査が重くなるので、最初は80前後で十分です。</small>
+          </label>
+
+          <div class="field advanced-only">
+            <span>ターゲット候補</span>
+            <div id="targetChips" class="chip-grid"></div>
+            <small>例: new dad は新米パパ向け、dog dad は犬好きパパ向け。不要な相手はOFFにします。</small>
+          </div>
+
+          <label class="field advanced-only">
+            <span>追加したいニッチ語句</span>
+            <textarea id="seedInput" rows="5" placeholder="例: grandpa&#10;first time dad&#10;dad to be"></textarea>
+            <small>自分で気になる言葉、広め調査で見つけた言葉を足します。</small>
+          </label>
+
+          <div class="paste-box compact-box advanced-only">
+            <div class="mini-heading">
+              <span>最初の市場チェック</span>
+              <button id="broadSampleBtn" type="button" class="text-btn" data-optional="任意">サンプル</button>
+            </div>
+            <p class="box-help">最初は `fathers day shirt` のような年なしの広い語句で、売れている商品名やタグを拾います。</p>
+            <label class="field">
+              <span>EverBeeで最初に検索する広めの語句</span>
+              <textarea id="broadQueryInput" rows="4" placeholder="例: fathers day shirt&#10;fathers day gift shirt"></textarea>
+            </label>
+            <div class="button-row">
+              <button id="broadBuildQueriesBtn" type="button" class="ghost-btn" data-optional="任意">広め語句を自動作成</button>
+              <button id="broadStartBtn" type="button" class="ghost-btn" data-optional="任意">広め語句をEverBeeで調査</button>
+            </div>
+            <label class="field">
+              <span>見つけた売れ筋の商品名 / タグ</span>
+              <textarea id="broadMarketInput" rows="7" placeholder="父の日など広めの検索で見つけた売れ筋商品名やタグを貼り付け&#10;CSV例: Product Name, Tags, Sales&#10;または商品タイトルを1行ずつ"></textarea>
+              <small>Chrome連携で拾える場合は自動で入ります。拾えない場合だけ手で貼り付けます。</small>
+            </label>
+            <div class="button-row">
+              <button id="broadExtractBtn" type="button" class="ghost-btn" data-optional="任意">売れ筋ワードを抽出</button>
+              <button id="broadApplyBtn" type="button" class="ghost-btn" data-optional="任意">Step 2の材料に入れる</button>
+            </div>
+            <div id="broadHintList" class="hint-list"></div>
+            <div id="broadStatus" class="inline-status">大きめ検索の売れ筋ワードを先に拾えます。</div>
+          </div>
+
+          <label class="field advanced-only">
+            <span>除外・要確認語句</span>
+            <textarea id="riskInput" rows="3" placeholder="ブランド名やキャラクター名を追加"></textarea>
+            <small>商標・著作権が怪しい言葉を入れると、候補や結果で警告します。</small>
+          </label>
+
+          <button id="generateBtn" type="button" class="primary-btn advanced-only" data-optional="任意">Step 2の候補を作る</button>
+        </aside>
+
+        <section class="panel candidates-panel">
+          <div class="panel-heading row-heading">
+            <div>
+              <p class="section-kicker">Step 2 - 次に調べるリスト</p>
+              <h2>次にeRankで調べる候補</h2>
+              <p class="panel-help">ここは結果ではありません。1で作った「これから調査する候補リスト」です。次に2「eRankで広く見る」を押して、この方向に検索需要があるか確認します。</p>
+            </div>
+            <span class="count-badge"><strong id="candidateCount">0</strong><small>候補</small></span>
+          </div>
+
+          <div class="button-row candidate-actions advanced-only">
+            <button id="buildNextRoundBtn" type="button" class="ghost-btn" data-optional="任意">売れた語句から追加候補</button>
+            <button id="copyReadyBtn" type="button" class="ghost-btn" data-optional="任意">Step 3へ候補を入れる</button>
+          </div>
+          <div class="mini-guide">次は2「eRankで広く見る」です。広い市場の反応を見てから、③の売上確認へ進めるものを絞ります。</div>
+
+          <div id="candidateList" class="candidate-list"></div>
+        </section>
+
+        <aside class="panel research-panel">
+          <div class="panel-heading">
+            <p class="section-kicker">Step 3 - 数字を取る</p>
+            <h2>EverBee/eRankの結果を入れる</h2>
+            <p class="panel-help">Chrome拡張でEverBeeを自動検索するか、手入力/CSV貼り付けで数字を入れます。ここに入った数字だけがStep 4とStep 5の判断材料になります。</p>
+          </div>
+
+          <div class="extension-box advanced-only">
+            <div class="mini-heading">
+              <span>Chrome拡張でEverBeeを自動取得</span>
+              <span id="extensionBadge" class="status-badge">確認中</span>
+            </div>
+            <p class="box-help">`Step 3へ候補を入れる` を押すと、この欄に調査対象が入ります。`EverBee自動取得` を押すと、その欄の中身だけを順番に検索します。</p>
+            <ul class="preflight-list">
+              <li>Chrome拡張を読み込み済み</li>
+              <li>このページを 127.0.0.1:3021 で開いている</li>
+              <li>EverBeeにログイン済み</li>
+              <li>拡張バージョン 1.5</li>
+            </ul>
+
+            <label class="field">
+              <span>EverBee URL</span>
+              <input id="everbeeUrlInput" value="https://app.everbee.io/product-analytics">
+            </label>
+
+            <label class="field">
+              <span>今回EverBeeで調べるキーワード</span>
+              <textarea id="researchJobInput" rows="8" placeholder="ここに入っているキーワードだけ調査します。&#10;1行1キーワード、または拡張用JSONを貼り付け"></textarea>
+              <small>画面外の候補は自動では調査しません。ここに入っているものだけがChrome拡張へ渡ります。</small>
+            </label>
+
+            <div class="button-row advanced-only">
+              <button id="fillResearchJobBtn" type="button" class="ghost-btn" data-optional="再入力">Step 2の候補を入れる</button>
+              <button id="clearResearchJobBtn" type="button" class="ghost-btn" data-optional="任意">欄をクリア</button>
+            </div>
+
+            <label class="field">
+              <span>検索間隔 秒</span>
+              <input id="delayInput" type="number" min="3" max="20" value="5">
+              <small>EverBee画面が追いつくように、検索ごとの待ち時間を空けます。</small>
+            </label>
+
+            <div class="button-row">
+              <button id="startExtensionBtn" type="button" class="primary-btn" data-optional="任意">この欄をEverBee取得</button>
+              <button id="stopExtensionBtn" type="button" class="danger-btn">停止</button>
+            </div>
+            <div id="extensionStatus" class="inline-status">Chrome拡張の再読み込み後に使えます。</div>
+          </div>
+
+          <label class="field advanced-only">
+            <span>手入力するキーワード</span>
+            <select id="keywordSelect"></select>
+            <small>Chromeで取れない場合や、少数だけ確認したい場合に使います。</small>
+          </label>
+
+          <div class="two-col advanced-only">
+            <label class="field">
+              <span>Listings / EverBeeの商品数</span>
+              <input id="listingsInput" inputmode="numeric" placeholder="1250">
+            </label>
+            <label class="field">
+              <span>Monthly Sales / 月間販売数</span>
+              <input id="salesInput" inputmode="numeric" placeholder="18">
+            </label>
+          </div>
+
+          <div class="two-col advanced-only">
+            <label class="field">
+              <span>Revenue / 売上</span>
+              <input id="revenueInput" inputmode="decimal" placeholder="540">
+            </label>
+            <label class="field">
+              <span>Avg Price / 平均価格</span>
+              <input id="priceInput" inputmode="decimal" placeholder="24.99">
+            </label>
+          </div>
+
+          <label class="field advanced-only">
+            <span>Listing Age / 出品期間</span>
+            <input id="ageInput" placeholder="8 months">
+          </label>
+
+          <div class="paste-box compact-box advanced-only">
+            <div class="mini-heading">
+              <span>eRank確認（任意）</span>
+            </div>
+            <div class="two-col">
+              <label class="field">
+                <span>Search Volume / 検索数</span>
+                <input id="erankSearchInput" inputmode="numeric" placeholder="320">
+              </label>
+              <label class="field">
+                <span>Clicks / クリック数</span>
+                <input id="erankClicksInput" inputmode="numeric" placeholder="180">
+              </label>
+            </div>
+            <div class="two-col">
+              <label class="field">
+                <span>CTR %</span>
+                <input id="erankCtrInput" inputmode="decimal" placeholder="56">
+              </label>
+              <label class="field">
+                <span>Competition / eRank競合数</span>
+                <input id="erankCompetitionInput" inputmode="numeric" placeholder="4200">
+              </label>
+            </div>
+            <div class="two-col">
+              <label class="field">
+                <span>KD / 難しさ</span>
+                <input id="erankKeywordDifficultyInput" inputmode="numeric" placeholder="18">
+                <small>低いほど検索数に対して競合が軽めです。</small>
+              </label>
+              <label class="field">
+                <span>Trend</span>
+                <input id="erankTrendInput" inputmode="decimal" placeholder="12">
+              </label>
+            </div>
+          </div>
+
+          <label class="field advanced-only">
+            <span>Notes</span>
+            <textarea id="notesInput" rows="3"></textarea>
+          </label>
+
+          <button id="addResearchBtn" type="button" class="primary-btn advanced-only" data-optional="手入力">結果を追加</button>
+
+          <div class="paste-box advanced-only">
+            <div class="mini-heading">
+              <span>CSV貼り付け</span>
+              <button id="sampleCsvBtn" type="button" class="text-btn" data-optional="任意">サンプル</button>
+            </div>
+            <p class="box-help">EverBeeやeRankの表をコピーできる場合は、ここへ貼り付けて一括で読み込みます。手入力より早い入力方法です。</p>
+            <textarea id="csvInput" rows="7" placeholder="Keyword, Listings Analyzed, Top Monthly Sales, Top Revenue, Average Price, Listing Age, eRank Search Volume, eRank Clicks, eRank CTR, eRank Competition, eRank KD, eRank Trend, Notes"></textarea>
+            <button id="importCsvBtn" type="button" class="ghost-btn full-width" data-optional="CSV">貼り付けを読み込む</button>
+          </div>
+        </aside>
+      </section>
+
+      <section class="erank-section">
+        <div class="results-heading">
+          <div>
+            <p class="section-kicker">Step 3 - ②の結果</p>
+            <h2>eRankで見つけた入口キーワード</h2>
+            <p class="panel-help">2「eRankで広く見る」で取得した広め語句と関連キーワードです。検索数かクリックがあり、KDや競合が軽いものほどEverBeeへ進めやすい候補です。</p>
+          </div>
+          <span class="count-badge"><strong id="erankCount">0</strong><small>語句</small></span>
+        </div>
+        <div class="metric-glossary">
+          <span><strong>Search</strong> 検索されている量</span>
+          <span><strong>Clicks</strong> 実際にクリックされた量</span>
+          <span><strong>Competition</strong> eRank上の競合数</span>
+          <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
+        </div>
+        <div id="erankResultsList" class="erank-results-list"></div>
+      </section>
+
+      <section class="results-section">
+        <div class="results-heading">
+          <div>
+            <p class="section-kicker">Step 4 - ③の結果</p>
+            <h2>EverBeeで売上確認した候補</h2>
+            <p class="panel-help">3「EverBeeで売上確認」で入った売上数字だけを、競合・売上・収益・新しさ・リスクでスコア化しています。ここから商品化する候補を選びます。</p>
+          </div>
+          <div class="legend">
+            <span>A: すぐ商品化候補</span>
+            <span>B: 有望</span>
+            <span>C: 追加確認</span>
+            <span>D: 除外候補</span>
+          </div>
+        </div>
+        <div class="metric-glossary">
+          <span><strong>狙い目スコア</strong> 商品化しやすさ</span>
+          <span><strong>Listings</strong> 競合数</span>
+          <span><strong>Sales</strong> 上位商品の月間販売数</span>
+          <span><strong>Revenue</strong> 上位商品の売上</span>
+          <span><strong>Age</strong> 売れている商品の出品期間</span>
+          <span><strong>eRank</strong> 検索需要と競合の補助指標</span>
+          <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
+        </div>
+        <div id="resultsList" class="results-list"></div>
+      </section>
+
+      <section class="seo-section">
+        <div class="results-heading">
+          <div>
+            <p class="section-kicker">Step 5 - Etsy出品準備</p>
+            <h2>SEOタイトル / タグ設計</h2>
+            <p class="panel-help">Step 4の良い候補を、eRank式の3バケットに整理して、Etsyのタイトルとタグに変換します。</p>
+          </div>
+          <div class="button-row seo-actions">
+            <button id="autoBucketBtn" type="button" class="ghost-btn" data-optional="任意">結果からバケット作成</button>
+            <button id="buildSeoPlanBtn" type="button" class="primary-btn" data-optional="任意">SEO案を作る</button>
+          </div>
+        </div>
+
+        <div class="bucket-grid">
+          <label class="bucket-card">
+            <span>Visibility / 低競合入口</span>
+            <textarea id="visibilityBucketInput" rows="7" placeholder="低競合で検索需要がある語句"></textarea>
+          </label>
+          <label class="bucket-card">
+            <span>Reach / 中競合リーチ</span>
+            <textarea id="reachBucketInput" rows="7" placeholder="検索されやすく広げるための語句"></textarea>
+          </label>
+          <label class="bucket-card">
+            <span>Best seller / 大きい市場語</span>
+            <textarea id="bestSellerBucketInput" rows="7" placeholder="競合は強いが市場の中心になる語句"></textarea>
+          </label>
+        </div>
+
+        <div class="seo-output-grid">
+          <div class="seo-output">
+            <div class="mini-heading">
+              <span>タイトル案</span>
+              <span id="seoTitleCount" class="char-count">0 / 140</span>
+            </div>
+            <p id="seoTitleOutput" class="seo-title-output">SEO案を作るとここにタイトルが出ます。</p>
+            <button id="copySeoTitleBtn" type="button" class="ghost-btn full-width" data-optional="任意">タイトルコピー</button>
+          </div>
+
+          <div class="seo-output">
+            <div class="mini-heading">
+              <span>タグ案</span>
+              <button id="copySeoTagsBtn" type="button" class="text-btn" data-optional="任意">タグコピー</button>
+            </div>
+            <div id="seoTagList" class="seo-tag-list">
+              <div class="empty-state small">タグ候補はここに13個まで表示されます。</div>
+            </div>
+          </div>
+        </div>
+
+        <ul id="seoWarnings" class="seo-warnings"></ul>
+        <div id="seoStatus" class="inline-status">eRank/EverBeeの結果を入れたあと、ここでタイトルとタグに整えます。</div>
+      </section>
+    </main>
+
+    <div id="advancedModal" class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="advancedModalTitle" hidden>
+      <div class="settings-card">
+        <div class="progress-head">
+          <div>
+            <p class="section-kicker">細かい設定</p>
+            <h2 id="advancedModalTitle">今は触らなくて大丈夫です</h2>
+          </div>
+          <button id="closeAdvancedModalBtn" type="button" class="text-btn">閉じる</button>
+        </div>
+        <div class="settings-list">
+          <div>
+            <strong>ターゲット候補</strong>
+            <p>基本はそのままでOKです。特定の相手だけを狙う時だけ変更します。</p>
+          </div>
+          <div>
+            <strong>サンプル</strong>
+            <p>動作確認用です。普段の調査では押しません。</p>
+          </div>
+          <div>
+            <strong>JSON / CSV / 手入力</strong>
+            <p>Chrome連携がうまくいかない時や、別サービスの表を貼る時だけ使います。</p>
+          </div>
+          <div>
+            <strong>広め市場チェック</strong>
+            <p>慣れてきたら使います。最初は「eRankで検索ワードを選ぶ」を選べば十分です。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="progressModal" class="progress-modal" role="dialog" aria-modal="true" aria-labelledby="progressTitle" hidden>
+      <div class="progress-card">
+        <div class="progress-head">
+          <div>
+            <p class="section-kicker">Research Status</p>
+            <h2 id="progressTitle">EverBee調査</h2>
+          </div>
+          <span id="progressBadge" class="status-badge">待機中</span>
+        </div>
+
+        <div class="progress-current">
+          <span>現在</span>
+          <strong id="progressCurrentKeyword">-</strong>
+        </div>
+
+        <div class="progress-bar" aria-hidden="true">
+          <div id="progressBar"></div>
+        </div>
+
+        <div class="progress-stats">
+          <div><span>完了</span><strong id="progressDone">0</strong></div>
+          <div><span>残り</span><strong id="progressRemaining">0</strong></div>
+          <div><span>合計</span><strong id="progressTotal">0</strong></div>
+        </div>
+
+        <div id="progressDetail" class="inline-status">まだ開始していません。</div>
+
+        <div class="button-row progress-actions">
+          <button id="progressHideBtn" type="button" class="ghost-btn">閉じる</button>
+          <button id="progressStopBtn" type="button" class="danger-btn">停止</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
