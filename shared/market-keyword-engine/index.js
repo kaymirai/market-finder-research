@@ -1096,6 +1096,124 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   }
 }
 
+export function scoreErankOpportunity(row = {}, options = {}) {
+  const keyword = normalizePhrase(row.keyword)
+  const erankSearchVolume = parseNumber(row.erankSearchVolume)
+  const erankClicks = parseNumber(row.erankClicks)
+  const erankCtr = parseNumber(row.erankCtr)
+  const erankCompetition = parseNumber(row.erankCompetition)
+  const erankKeywordDifficulty = parseNumber(row.erankKeywordDifficulty)
+  const erankTrend = parseNumber(row.erankTrend)
+  const riskTerms = detectRiskTerms(`${keyword} ${row.notes ?? ''}`, splitSeedText(options.customRiskTerms))
+
+  const searchScore = scoreBand(erankSearchVolume, [
+    { test: (value) => value !== null && value >= 1000, points: 22 },
+    { test: (value) => value !== null && value >= 300, points: 16 },
+    { test: (value) => value !== null && value >= 100, points: 10 },
+    { test: (value) => value !== null && value > 0, points: 5 },
+  ])
+  const clickScore = scoreBand(erankClicks, [
+    { test: (value) => value !== null && value >= 500, points: 22 },
+    { test: (value) => value !== null && value >= 100, points: 16 },
+    { test: (value) => value !== null && value >= 30, points: 10 },
+    { test: (value) => value !== null && value > 0, points: 5 },
+  ])
+  const ctrScore = scoreBand(erankCtr, [
+    { test: (value) => value !== null && value >= 100, points: 14 },
+    { test: (value) => value !== null && value >= 70, points: 12 },
+    { test: (value) => value !== null && value >= 45, points: 8 },
+    { test: (value) => value !== null && value > 0, points: 3 },
+  ])
+  const competitionScore = scoreBand(erankCompetition, [
+    { test: (value) => value !== null && value > 0 && value < 5000, points: 22 },
+    { test: (value) => value !== null && value < 20000, points: 14 },
+    { test: (value) => value !== null && value < 50000, points: 8 },
+    { test: (value) => value !== null && value > 0, points: 2 },
+  ])
+  const keywordDifficultyScore = scoreBand(erankKeywordDifficulty, [
+    { test: (value) => value !== null && value >= 0 && value <= 10, points: 22 },
+    { test: (value) => value !== null && value <= 25, points: 18 },
+    { test: (value) => value !== null && value <= 45, points: 10 },
+    { test: (value) => value !== null && value <= 60, points: 4 },
+  ])
+  const trendScore = scoreBand(erankTrend, [
+    { test: (value) => value !== null && value >= 500, points: 8 },
+    { test: (value) => value !== null && value > 0, points: 5 },
+  ])
+  const hasErankData = erankSearchVolume !== null
+    || erankClicks !== null
+    || erankCtr !== null
+    || erankCompetition !== null
+    || erankKeywordDifficulty !== null
+    || erankTrend !== null
+  const hasDemand = (erankSearchVolume ?? 0) > 0 || (erankClicks ?? 0) > 0 || (erankCtr ?? 0) > 0
+  const riskPenalty = riskTerms.length * 30
+  const competitionConfidenceScore = Math.max(competitionScore, keywordDifficultyScore)
+  const missingCompetitionSignal = erankCompetition === null && erankKeywordDifficulty === null
+  const rawScore = searchScore + clickScore + ctrScore + competitionConfidenceScore + trendScore - riskPenalty
+  const cappedScore = missingCompetitionSignal && rawScore >= 62 ? 61 : rawScore
+  const score = hasErankData && hasDemand
+    ? Math.max(0, Math.min(100, cappedScore))
+    : 0
+
+  const reasons = []
+  if ((erankSearchVolume ?? 0) >= 1000) reasons.push('検索数が強い')
+  else if ((erankSearchVolume ?? 0) >= 300) reasons.push('検索数あり')
+  else if ((erankSearchVolume ?? 0) > 0) reasons.push('少量の検索あり')
+  if ((erankClicks ?? 0) >= 500) reasons.push('クリックが強い')
+  else if ((erankClicks ?? 0) >= 100) reasons.push('クリックあり')
+  if ((erankCtr ?? 0) >= 70) reasons.push('CTR高め')
+  if (erankKeywordDifficulty !== null && erankKeywordDifficulty <= 25) reasons.push('KD低め')
+  if (erankCompetition !== null && erankCompetition > 0 && erankCompetition < 5000) reasons.push('競合少なめ')
+  if (erankCompetition === null) reasons.push('競合数は未取得')
+  if (erankTrend !== null && erankTrend > 0) reasons.push('トレンド反応あり')
+  if (!hasDemand) reasons.push('検索需要が未確認')
+  if (riskTerms.length > 0) reasons.push(`要確認語句: ${riskTerms.join(', ')}`)
+
+  let action = 'hold'
+  let label = '今回は保留'
+  if (riskTerms.length > 0) {
+    action = 'reject'
+    label = '除外候補'
+  } else if (!hasDemand) {
+    action = 'reject'
+    label = '需要未確認'
+  } else if (score >= 62) {
+    action = 'everbee'
+    label = 'EverBeeへ送る'
+  } else if (score >= 40) {
+    action = 'expand'
+    label = '関連語を追加探索'
+  }
+
+  return {
+    score,
+    label,
+    action,
+    reasons,
+    riskTerms,
+    missingCompetitionSignal,
+    normalized: {
+      keyword,
+      erankSearchVolume,
+      erankClicks,
+      erankCtr,
+      erankCompetition,
+      erankKeywordDifficulty,
+      erankTrend,
+    },
+    parts: {
+      searchScore,
+      clickScore,
+      ctrScore,
+      competitionScore,
+      keywordDifficultyScore,
+      trendScore,
+      riskPenalty,
+    },
+  }
+}
+
 function inferTarget(keyword, event) {
   const source = normalizePhrase(keyword)
   const match = event.targets.find((target) => source.includes(normalizePhrase(target)))

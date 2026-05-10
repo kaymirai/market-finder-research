@@ -12,6 +12,7 @@ import {
   classifyKeywordBucket,
   buildSeoPlanFromBuckets,
   scoreEverbeeResult,
+  scoreErankOpportunity,
   normalizePhrase,
   resolveMarketEvent,
 } from '../../shared/market-keyword-engine/index.js'
@@ -97,6 +98,7 @@ const elements = {
   importCsvBtn: document.querySelector('#importCsvBtn'),
   sampleCsvBtn: document.querySelector('#sampleCsvBtn'),
   erankResultsList: document.querySelector('#erankResultsList'),
+  erankSummary: document.querySelector('#erankSummary'),
   erankCount: document.querySelector('#erankCount'),
   resultsList: document.querySelector('#resultsList'),
   copyKeywordsBtn: document.querySelector('#copyKeywordsBtn'),
@@ -265,13 +267,26 @@ function erankShortlistKeywords() {
 }
 
 function erankWinnerRows() {
-  return rankResearchRows(state.researchRows, currentOptions())
-    .filter((row) => {
-      const normalized = row.score.normalized
-      const hasDemand = (normalized.erankSearchVolume ?? 0) > 0 || (normalized.erankClicks ?? 0) > 0
-      return row.score.validation.hasErankData && hasDemand && row.score.exclusionReasons.length === 0
-    })
+  return erankRowsWithOpportunity()
+    .filter((row) => row.erankOpportunity.action === 'everbee')
     .slice(0, 12)
+}
+
+function erankExploreRows() {
+  return erankRowsWithOpportunity()
+    .filter((row) => row.erankOpportunity.action === 'expand')
+    .slice(0, 12)
+}
+
+function erankRowsWithOpportunity() {
+  const options = currentOptions()
+  return rankResearchRows(state.researchRows, options)
+    .filter((row) => row.score.validation.hasErankData && !row.score.validation.hasEverbeeData)
+    .map((row) => ({
+      ...row,
+      erankOpportunity: scoreErankOpportunity(row, options),
+    }))
+    .sort((a, b) => b.erankOpportunity.score - a.erankOpportunity.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
 }
 
 function erankSpecificTokens(keyword) {
@@ -302,15 +317,16 @@ function erankSpecificTokens(keyword) {
 
 function narrowEverbeeKeywordsFromErank() {
   const winners = erankWinnerRows()
+  const signalRows = uniqueRowsByKeyword([...winners, ...erankExploreRows()]).slice(0, 12)
   const ready = state.candidates.filter((candidate) => candidate.status === 'ready')
-  if (winners.length === 0 || ready.length === 0) return readyKeywords()
+  if (signalRows.length === 0 || ready.length === 0) return readyKeywords()
 
-  const hasSpecificWinner = winners.some((row) => erankSpecificTokens(row.keyword).length > 0)
+  const hasSpecificWinner = signalRows.some((row) => erankSpecificTokens(row.keyword).length > 0)
   const scored = ready.map((candidate) => {
     const candidateText = normalizePhrase(candidate.keyword)
     let score = candidate.score
 
-    for (const [index, row] of winners.entries()) {
+    for (const [index, row] of signalRows.entries()) {
       const tokens = erankSpecificTokens(row.keyword)
       if (tokens.length === 0) {
         score += hasSpecificWinner ? 0 : Math.max(1, 10 - index)
@@ -331,7 +347,49 @@ function narrowEverbeeKeywordsFromErank() {
     .sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, 'en'))
     .map((item) => item.keyword)
 
-  return cleanKeywordList(scored.length > 0 ? scored : readyKeywords()).slice(0, 50)
+  const expanded = buildEverbeeKeywordsFromErankRows(signalRows)
+  return cleanKeywordList([...expanded, ...(scored.length > 0 ? scored : readyKeywords())]).slice(0, 50)
+}
+
+function uniqueRowsByKeyword(rows) {
+  const seen = new Set()
+  return rows.filter((row) => {
+    const keyword = normalizePhrase(row.keyword)
+    if (!keyword || seen.has(keyword)) return false
+    seen.add(keyword)
+    return true
+  })
+}
+
+function buildEverbeeKeywordsFromErankRows(rows) {
+  const event = selectedEvent()
+  const category = selectedCategory()
+  const product = normalizePhrase(category.searchTerm)
+  const eventSignals = event.searchTerm
+    .split(/\s+/)
+    .map((token) => token.replace(/s$/, ''))
+    .filter((token) => token.length > 3)
+  const year = selectedYearOption()
+  const seedKeywords = rows.map((row) => row.keyword).join('\n')
+  const generated = generateKeywordCandidates({
+    ...currentOptions(),
+    seedKeywords,
+    limit: Math.max(40, Math.min(Number(elements.limitInput.value) || 80, 120)),
+  })
+    .filter((candidate) => candidate.status === 'ready')
+    .map((candidate) => candidate.keyword)
+
+  const productized = rows.flatMap((row) => {
+    const keyword = normalizePhrase(row.keyword)
+    if (!keyword) return []
+    const hasEventSignal = keyword.includes(event.searchTerm)
+      || (eventSignals.length > 0 && eventSignals.every((token) => keyword.includes(token)))
+    const withProduct = keyword.includes(product) ? keyword : `${keyword} ${product}`
+    const withEvent = hasEventSignal ? withProduct : `${event.searchTerm} ${withProduct}`
+    return [withProduct, withEvent, year ? `${withProduct} ${year}` : '']
+  })
+
+  return cleanKeywordList([...productized, ...generated]).slice(0, 50)
 }
 
 function salesCheckKeywords() {
@@ -596,52 +654,133 @@ function opportunityScoreClass(score) {
 }
 
 function erankResultRows() {
-  return rankResearchRows(state.researchRows, currentOptions())
-    .filter((row) => row.score.validation.hasErankData && !row.score.validation.hasEverbeeData)
+  return erankRowsWithOpportunity()
+}
+
+function erankOpportunityScoreClass(opportunity) {
+  if (opportunity.action === 'reject') return 'd'
+  if (opportunity.score >= 80) return 'a'
+  if (opportunity.score >= 62) return 'b'
+  if (opportunity.score >= 40) return 'c'
+  return 'weak'
+}
+
+function renderErankSummary(rows) {
+  if (!elements.erankSummary) return
+
+  if (rows.length === 0) {
+    elements.erankSummary.innerHTML = ''
+    return
+  }
+
+  const proceedRows = rows.filter((row) => row.erankOpportunity.action === 'everbee')
+  const expandRows = rows.filter((row) => row.erankOpportunity.action === 'expand')
+  const holdRows = rows.filter((row) => row.erankOpportunity.action === 'hold' || row.erankOpportunity.action === 'reject')
+  const nextKeywords = salesCheckKeywords()
+  const conclusion = proceedRows.length > 0
+    ? `有望そうな語句を${proceedRows.length}件見つけました。関連語も使って、EverBeeで売上確認する候補を${nextKeywords.length}件に絞りました。`
+    : expandRows.length > 0
+      ? `強い語句はまだ少なめですが、追加探索に使える語句を${expandRows.length}件見つけました。関連語からEverBee候補を${nextKeywords.length}件作っています。`
+      : `今回の広い検索は弱めでした。無理に進めず、イベント・商品・手入力イベントを変えてもう一度広く見てください。`
+
+  elements.erankSummary.innerHTML = `
+    <div class="summary-main">
+      <strong>${escapeHtml(conclusion)}</strong>
+      <span>弱い結果が出ても、ここで終わりではありません。eRankの関連キーワードも見て、次に調べる候補を作ります。</span>
+    </div>
+    <div class="summary-stats">
+      <span><strong>${rows.length}</strong><small>確認した語句</small></span>
+      <span><strong>${proceedRows.length}</strong><small>売上確認へ</small></span>
+      <span><strong>${expandRows.length}</strong><small>追加探索</small></span>
+      <span><strong>${holdRows.length}</strong><small>今回は保留</small></span>
+    </div>
+  `
+}
+
+function renderErankCard(row) {
+  const normalized = row.score.normalized
+  const opportunity = row.erankOpportunity
+  const labelClass = erankOpportunityScoreClass(opportunity)
+  const scoreReasons = opportunity.reasons
+    .slice(0, 6)
+    .map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`)
+    .join('')
+
+  return `
+    <article class="erank-item">
+      <div class="result-top">
+        <div class="opportunity-score ${labelClass}"><span>需要</span><strong>${opportunity.score}</strong><small>/100</small></div>
+        <div>
+          <h3>${escapeHtml(normalized.keyword)}</h3>
+          <div class="meta-line">
+            <span class="pill action-${escapeHtml(opportunity.action)}">${escapeHtml(opportunity.label)}</span>
+            <span class="pill">eRankのみ</span>
+            ${normalized.erankKeywordDifficulty !== null ? `<span class="pill">KD ${escapeHtml(normalized.erankKeywordDifficulty)}</span>` : ''}
+          </div>
+          ${scoreReasons ? `<div class="reason-line">${scoreReasons}</div>` : ''}
+        </div>
+      </div>
+
+      <div class="metric-grid erank-metric-grid">
+        <div class="metric"><span>Search</span><strong>${escapeHtml(normalized.erankSearchVolume ?? '-')}</strong></div>
+        <div class="metric"><span>Clicks</span><strong>${escapeHtml(normalized.erankClicks ?? '-')}</strong></div>
+        <div class="metric"><span>CTR</span><strong>${escapeHtml(normalized.erankCtr ?? '-')}</strong></div>
+        <div class="metric"><span>Competition</span><strong>${escapeHtml(normalized.erankCompetition ?? '-')}</strong></div>
+        <div class="metric"><span>KD</span><strong>${escapeHtml(normalized.erankKeywordDifficulty ?? '-')}</strong></div>
+        <div class="metric"><span>Trend</span><strong>${escapeHtml(normalized.erankTrend ?? '-')}</strong></div>
+      </div>
+    </article>
+  `
+}
+
+function renderErankGroup(title, help, rows, options = {}) {
+  if (rows.length === 0) return ''
+  const limit = options.limit ?? 12
+  const cards = rows.slice(0, limit).map(renderErankCard).join('')
+  const moreLabel = rows.length > limit ? `<small>${rows.length - limit}件は省略しています。</small>` : ''
+  const body = `
+    <div class="erank-group-heading">
+      <div>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(help)}</p>
+      </div>
+      <span>${rows.length}件</span>
+    </div>
+    <div class="erank-group-list">${cards}</div>
+    ${moreLabel}
+  `
+
+  if (options.collapsible) {
+    return `
+      <details class="erank-group erank-group-collapsed">
+        <summary>${escapeHtml(title)} ${rows.length}件を見る</summary>
+        ${body}
+      </details>
+    `
+  }
+
+  return `<section class="erank-group">${body}</section>`
 }
 
 function renderErankResults() {
   const ranked = erankResultRows()
   elements.erankCount.textContent = String(ranked.length)
+  renderErankSummary(ranked)
 
   if (ranked.length === 0) {
     elements.erankResultsList.innerHTML = '<div class="empty-state">2「eRankで広く見る」が終わると、ここに検索数・クリック・競合・KDが表示されます。</div>'
     return
   }
 
-  elements.erankResultsList.innerHTML = ranked.slice(0, 40).map((row) => {
-    const normalized = row.score.normalized
-    const labelClass = opportunityScoreClass(row.score)
-    const scoreReasons = scoreReasonLabels(row.score)
-      .map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`)
-      .join('')
+  const proceedRows = ranked.filter((row) => row.erankOpportunity.action === 'everbee')
+  const expandRows = ranked.filter((row) => row.erankOpportunity.action === 'expand')
+  const holdRows = ranked.filter((row) => row.erankOpportunity.action === 'hold' || row.erankOpportunity.action === 'reject')
 
-    return `
-      <article class="erank-item">
-        <div class="result-top">
-          <div class="opportunity-score ${labelClass}"><span>需要</span><strong>${row.score.score}</strong><small>/100</small></div>
-          <div>
-            <h3>${escapeHtml(normalized.keyword)}</h3>
-            <div class="meta-line">
-              <span class="pill">${escapeHtml(row.score.label)}</span>
-              <span class="pill">${escapeHtml(row.score.validation.label)}</span>
-              ${normalized.erankKeywordDifficulty !== null ? `<span class="pill">KD ${escapeHtml(normalized.erankKeywordDifficulty)}</span>` : ''}
-            </div>
-            ${scoreReasons ? `<div class="reason-line">${scoreReasons}</div>` : ''}
-          </div>
-        </div>
-
-        <div class="metric-grid erank-metric-grid">
-          <div class="metric"><span>Search</span><strong>${escapeHtml(normalized.erankSearchVolume ?? '-')}</strong></div>
-          <div class="metric"><span>Clicks</span><strong>${escapeHtml(normalized.erankClicks ?? '-')}</strong></div>
-          <div class="metric"><span>CTR</span><strong>${escapeHtml(normalized.erankCtr ?? '-')}</strong></div>
-          <div class="metric"><span>Competition</span><strong>${escapeHtml(normalized.erankCompetition ?? '-')}</strong></div>
-          <div class="metric"><span>KD</span><strong>${escapeHtml(normalized.erankKeywordDifficulty ?? '-')}</strong></div>
-          <div class="metric"><span>Trend</span><strong>${escapeHtml(normalized.erankTrend ?? '-')}</strong></div>
-        </div>
-      </article>
-    `
-  }).join('')
+  elements.erankResultsList.innerHTML = [
+    renderErankGroup('次にEverBeeで売上確認する候補', '検索・クリック・KDの反応がよい語句です。ここから細かい商品候補へ変換します。', proceedRows, { limit: 16 }),
+    renderErankGroup('関連語から追加探索する候補', '弱くはないけれど、もう少し関連語を広げたい語句です。EverBee候補づくりの材料にも使います。', expandRows, { limit: 10 }),
+    renderErankGroup('今回は保留した候補', '需要が弱い、または除外リスクがある語句です。必要な時だけ確認します。', holdRows, { limit: 12, collapsible: true }),
+  ].join('') || '<div class="empty-state">eRank結果は入りましたが、次に進める候補がありませんでした。</div>'
 }
 
 function renderResults() {
@@ -905,7 +1044,14 @@ function importExtensionResults(extensionState) {
     const keywords = salesCheckKeywords()
     elements.researchJobInput.value = keywords.join('\n')
     const relatedCount = extensionState.results.reduce((count, row) => count + (Array.isArray(row.relatedKeywords) ? row.relatedKeywords.length : 0), 0)
-    setSimpleStatus(`eRank確認中です。関連キーワード${relatedCount}件を見つけました。EverBeeで売上確認する候補は現在${keywords.length}件です。`)
+    const proceedCount = erankWinnerRows().length
+    const exploreCount = erankExploreRows().length
+    const nextMessage = proceedCount > 0
+      ? `eRank確認中です。関連キーワード${relatedCount}件も見て、有望語句${proceedCount}件からEverBee候補${keywords.length}件を作っています。`
+      : exploreCount > 0
+        ? `eRank確認中です。強い語句は少なめですが、追加探索に使える語句${exploreCount}件からEverBee候補${keywords.length}件を作っています。`
+        : `eRank確認中です。関連キーワード${relatedCount}件を見ていますが、今はまだ強い候補が少なめです。`
+    setSimpleStatus(nextMessage)
   }
   renderAll()
 }
@@ -1178,15 +1324,22 @@ function renderProgressModal(extensionState = state.extensionState) {
     if (state.progress.mode === 'erank') {
       const keywords = salesCheckKeywords()
       const relatedCount = (extensionState?.results ?? []).reduce((count, row) => count + (Array.isArray(row.relatedKeywords) ? row.relatedKeywords.length : 0), 0)
+      const proceedCount = erankWinnerRows().length
+      const exploreCount = erankExploreRows().length
       elements.researchJobInput.value = keywords.join('\n')
-      setSimpleStatus(`eRank確認が完了しました。関連キーワード${relatedCount}件を拾いました。EverBeeで売上確認する候補は${keywords.length}件です。`)
+      const message = proceedCount > 0
+        ? `eRank確認が完了しました。関連キーワード${relatedCount}件も見て、有望語句${proceedCount}件からEverBee候補${keywords.length}件を作りました。`
+        : exploreCount > 0
+          ? `eRank確認が完了しました。強い語句は少なめですが、追加探索語句${exploreCount}件からEverBee候補${keywords.length}件を作りました。`
+          : `eRank確認が完了しました。今回は弱めなので、イベント・商品・手入力イベントを変えてもう一度広く見るのがおすすめです。`
+      setSimpleStatus(message)
     } else if (state.progress.mode === 'keyword') {
       setSimpleStatus(`${done}件のEverBee売上確認が完了しました。次は4「SEO案を作る」です。`)
     }
     elements.progressDetail.textContent = state.progress.mode === 'broad'
       ? `広め調査が完了しました。商品名を取り込めた場合は、種ワード欄も更新済みです。`
       : state.progress.mode === 'erank'
-        ? `eRank確認が完了しました。KDも見ながら良さそうな候補をEverBeeへ渡せる状態です。`
+        ? `eRank確認が完了しました。弱い語句で止めず、関連語も見てEverBee候補を作りました。`
         : `${done}件のEverBee調査が完了しました。`
     elements.progressHideBtn.textContent = '閉じる'
     return
