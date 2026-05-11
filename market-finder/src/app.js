@@ -77,7 +77,6 @@ const elements = {
   broadHintList: document.querySelector('#broadHintList'),
   broadStatus: document.querySelector('#broadStatus'),
   riskInput: document.querySelector('#riskInput'),
-  generateBtn: document.querySelector('#generateBtn'),
   candidateList: document.querySelector('#candidateList'),
   candidateCount: document.querySelector('#candidateCount'),
   keywordSelect: document.querySelector('#keywordSelect'),
@@ -140,7 +139,6 @@ const elements = {
   flowAutoBtn: document.querySelector('#flowAutoBtn'),
   flowCsvBtn: document.querySelector('#flowCsvBtn'),
   flowSeoBtn: document.querySelector('#flowSeoBtn'),
-  simpleGenerateBtn: document.querySelector('#simpleGenerateBtn'),
   simpleStartBtn: document.querySelector('#simpleStartBtn'),
   simpleImportErankBtn: document.querySelector('#simpleImportErankBtn'),
   simpleCsvInput: document.querySelector('#simpleCsvInput'),
@@ -228,11 +226,8 @@ function fillSelects() {
   )).join('')
 }
 
-function renderTargets({ syncYear = true } = {}) {
+function renderTargets() {
   const event = selectedEvent()
-  if (syncYear && !customEventName()) {
-    elements.yearInput.value = event.defaultYear
-  }
   elements.targetChips.innerHTML = event.targets.map((target, index) => `
     <label class="chip">
       <input type="checkbox" value="${escapeHtml(target)}" ${index < 7 ? 'checked' : ''}>
@@ -1161,7 +1156,7 @@ function setFlowMode(mode) {
 
   if (mode === 'auto') {
     elements.simpleSeoStepNumber.textContent = '4'
-    setSimpleStatus('次にeRankで調べる候補が下に出ています。次は2「eRankで広く見る」です。')
+    setSimpleStatus('条件を変えるとeRank候補は自動で変わります。次は2「eRankで広く見る」です。')
   } else if (mode === 'csv') {
     elements.simpleSeoStepNumber.textContent = '2'
     setSimpleStatus('CSVを貼って、1「CSVを読み込む」を押してください。')
@@ -1169,11 +1164,6 @@ function setFlowMode(mode) {
     elements.simpleSeoStepNumber.textContent = '2'
     setSimpleStatus('良いキーワードを貼って、1「SEO用に入れる」を押してください。')
   }
-}
-
-function simpleGenerate() {
-  generateCandidates()
-  setSimpleStatus(`${state.candidates.length}件のeRank候補に更新しました。次は2「eRankで広く見る」です。`)
 }
 
 async function simpleStartErankResearch() {
@@ -1518,7 +1508,7 @@ async function startErankResearch() {
   if (state.candidates.length === 0) generateCandidates()
   const keywords = erankResearchKeywords()
   if (keywords.length === 0) {
-    setSimpleStatus('候補がありません。イベントと商品を選び直すか、1「eRank候補を更新」を押してください。')
+    setSimpleStatus('候補がありません。イベントと商品を選び直してください。候補は自動で更新されます。')
     return
   }
 
@@ -1608,7 +1598,6 @@ function bindEvents() {
   })
   elements.categorySelect.addEventListener('change', generateCandidates)
   elements.yearInput.addEventListener('input', generateCandidates)
-  elements.generateBtn.addEventListener('click', generateCandidates)
   elements.broadBuildQueriesBtn.addEventListener('click', buildBroadQueries)
   elements.broadStartBtn.addEventListener('click', startBroadEverbeeResearch)
   elements.broadExtractBtn.addEventListener('click', extractBroadMarketHints)
@@ -1634,7 +1623,6 @@ function bindEvents() {
   elements.flowAutoBtn.addEventListener('click', () => setFlowMode('auto'))
   elements.flowCsvBtn.addEventListener('click', () => setFlowMode('csv'))
   elements.flowSeoBtn.addEventListener('click', () => setFlowMode('seo'))
-  elements.simpleGenerateBtn.addEventListener('click', simpleGenerate)
   elements.simpleImportErankBtn.addEventListener('click', simpleStartErankResearch)
   elements.simpleStartBtn.addEventListener('click', simpleStartResearch)
   elements.simpleImportCsvBtn.addEventListener('click', simpleImportCsv)

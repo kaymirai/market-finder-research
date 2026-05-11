@@ -55,8 +55,8 @@
         <div class="simple-step flow-auto-only">
           <span>1</span>
           <strong>eRank候補を見る</strong>
-          <small>②でeRankにかける候補が下に出ます。条件を変えた時だけ押します。</small>
-          <button id="simpleGenerateBtn" type="button" class="primary-btn">eRank候補を更新</button>
+          <small>②でeRankにかける候補が下に出ます。条件を変えると自動で更新されます。</small>
+          <div class="auto-update-note">候補は条件を変えると自動で更新されます</div>
         </div>
         <div class="simple-step flow-auto-only">
           <span>2</span>
@@ -90,7 +90,7 @@
           <small>数字が入ったら、タイトルとタグを作ります。</small>
           <button id="simpleSeoBtn" type="button" class="dark-btn">SEO案を作る</button>
         </div>
-        <div class="simple-status" id="simpleStatus">まずイベントと商品を選んで、1から押してください。</div>
+        <div class="simple-status" id="simpleStatus">まずイベントと商品を選んでください。候補は自動で変わります。次は2「eRankで広く見る」です。</div>
       </section>
 
       <section class="workspace-grid">
@@ -124,7 +124,7 @@
             </label>
             <label class="field">
               <span>年を入れたい時だけ</span>
-              <input id="yearInput" type="number" min="2025" max="2032" value="2026" placeholder="例: 2026">
+              <input id="yearInput" type="number" min="2025" max="2032" placeholder="例: 2026">
               <small>空欄なら年入り候補は作りません。入れると `dad est 2026` のような候補も作ります。</small>
             </label>
           </div>
@@ -180,7 +180,7 @@
             <small>商標・著作権が怪しい言葉を入れると、候補や結果で警告します。</small>
           </label>
 
-          <button id="generateBtn" type="button" class="primary-btn advanced-only" data-optional="任意">Step 2の候補を作る</button>
+          <div class="auto-update-note advanced-only">Step 2の候補は条件を変えると自動で更新されます</div>
         </aside>
 
         <section class="panel candidates-panel">
