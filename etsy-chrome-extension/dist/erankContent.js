@@ -281,6 +281,38 @@
             return parsed >= 0 && parsed <= 500;
         return true;
     }
+    function metricNumberTokens(value) {
+        var _a;
+        return ((_a = normalizeText(value).match(/-?\d[\d,.]*%?/g)) !== null && _a !== void 0 ? _a : [])
+            .map((token) => token.replace(/[,%]/g, ''))
+            .filter((token) => token !== '');
+    }
+    function orderedMetricsFromText(rowText, keyword) {
+        const result = emptyErankMetrics();
+        const keywordIndex = rowText.toLowerCase().indexOf(keyword.toLowerCase());
+        const metricText = keywordIndex >= 0 ? rowText.slice(keywordIndex + keyword.length) : rowText;
+        const numbers = metricNumberTokens(metricText);
+        if (numbers.length < 5)
+            return result;
+        const ordered = numbers.length >= 6 ? numbers.slice(-6) : ['', ...numbers.slice(-5)];
+        const [trend, searches, clicks, ctr, competition, kd] = ordered;
+        const assignments = [
+            ['erankTrend', trend],
+            ['erankSearchVolume', searches],
+            ['erankClicks', clicks],
+            ['erankCtr', ctr],
+            ['erankCompetition', competition],
+            ['erankKeywordDifficulty', kd],
+        ];
+        for (const [key, value] of assignments) {
+            if (metricValueLooksUsable(value, key))
+                result[key] = value;
+        }
+        return result;
+    }
+    function orderedMetricsFromRowText(row, keyword) {
+        return orderedMetricsFromText(elementText(row), keyword);
+    }
     function metricValueFromPoint(row, key, columnCenter) {
         const rowRect = row.getBoundingClientRect();
         const y = Math.max(rowRect.top + 4, Math.min(rowRect.bottom - 4, rowRect.top + rowRect.height / 2));
@@ -351,6 +383,8 @@
         const pointedValue = metricValueFromPoint(row, key, columnCenter);
         if (pointedValue)
             return pointedValue;
+        if (key === 'erankCompetition' || key === 'erankKeywordDifficulty')
+            return '';
         const rowRect = row.getBoundingClientRect();
         const cells = Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a'))
             .filter(isVisibleElement)
@@ -370,7 +404,7 @@
             return /\d|unknown|n\/a|no data|-/i.test(item.text);
         })
             .sort((a, b) => Math.abs((a.rect.left + a.rect.width / 2) - columnCenter) - Math.abs((b.rect.left + b.rect.width / 2) - columnCenter));
-        const maxDistance = key === 'erankKeywordDifficulty' ? 95 : 145;
+        const maxDistance = 145;
         const match = cells.find((item) => Math.abs((item.rect.left + item.rect.width / 2) - columnCenter) <= maxDistance);
         return (_a = match === null || match === void 0 ? void 0 : match.value) !== null && _a !== void 0 ? _a : '';
     }
@@ -494,11 +528,10 @@
         if (!row)
             return emptyErankMetrics();
         const result = emptyErankMetrics();
+        const orderedMetrics = orderedMetricsFromRowText(row, keyword);
         for (const key of ERANK_METRIC_KEYS) {
             const column = columns.get(key);
-            if (!column)
-                continue;
-            result[key] = closestMetricValue(row, key, column.center);
+            result[key] = orderedMetrics[key] || (column ? closestMetricValue(row, key, column.center) : '');
         }
         return result;
     }
@@ -531,11 +564,10 @@
                 notes: `Extracted from eRank related keywords for ${sourceKeyword}`,
                 rawText: '',
             };
+            const orderedMetrics = orderedMetricsFromRowText(row, keyword);
             for (const metricKey of ERANK_METRIC_KEYS) {
                 const column = columns.get(metricKey);
-                if (!column)
-                    continue;
-                result[metricKey] = closestMetricValue(row, metricKey, column.center);
+                result[metricKey] = orderedMetrics[metricKey] || (column ? closestMetricValue(row, metricKey, column.center) : '');
             }
             const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty;
             if (!hasUsefulMetric)
@@ -578,12 +610,14 @@
             if (!cells)
                 continue;
             const result = Object.assign({}, empty);
+            const orderedMetrics = orderedMetricsFromText(cells.join(' '), keyword);
             headerMap.forEach((key, index) => {
                 if (!key || !cells[index])
                     return;
                 if (key === 'keyword')
                     return;
-                result[key] = normalizeMetricForKey(cells[index], key);
+                const metricKey = key;
+                result[metricKey] = orderedMetrics[metricKey] || normalizeMetricForKey(cells[index], metricKey);
             });
             if (Object.values(result).some(Boolean))
                 return result;
@@ -650,12 +684,13 @@
                     notes: `Extracted from eRank related keywords for ${sourceKeyword}`,
                     rawText: '',
                 };
+                const orderedMetrics = orderedMetricsFromText(cells.join(' '), keyword);
                 headerMap.forEach((field, index) => {
                     if (!field || field === 'keyword' || !cells[index])
                         return;
                     if (field in result) {
-                        ;
-                        result[field] = normalizeMetricForKey(cells[index], field);
+                        const metricKey = field;
+                        result[field] = orderedMetrics[metricKey] || normalizeMetricForKey(cells[index], metricKey);
                     }
                 });
                 const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty;

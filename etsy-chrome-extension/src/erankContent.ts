@@ -311,6 +311,41 @@
         return true
     }
 
+    function metricNumberTokens(value: string) {
+        return (normalizeText(value).match(/-?\d[\d,.]*%?/g) ?? [])
+            .map((token) => token.replace(/[,%]/g, ''))
+            .filter((token) => token !== '')
+    }
+
+    function orderedMetricsFromText(rowText: string, keyword: string): ErankMetrics {
+        const result = emptyErankMetrics()
+        const keywordIndex = rowText.toLowerCase().indexOf(keyword.toLowerCase())
+        const metricText = keywordIndex >= 0 ? rowText.slice(keywordIndex + keyword.length) : rowText
+        const numbers = metricNumberTokens(metricText)
+        if (numbers.length < 5) return result
+
+        const ordered = numbers.length >= 6 ? numbers.slice(-6) : ['', ...numbers.slice(-5)]
+        const [trend, searches, clicks, ctr, competition, kd] = ordered
+        const assignments: Array<[ErankMetricKey, string]> = [
+            ['erankTrend', trend],
+            ['erankSearchVolume', searches],
+            ['erankClicks', clicks],
+            ['erankCtr', ctr],
+            ['erankCompetition', competition],
+            ['erankKeywordDifficulty', kd],
+        ]
+
+        for (const [key, value] of assignments) {
+            if (metricValueLooksUsable(value, key)) result[key] = value
+        }
+
+        return result
+    }
+
+    function orderedMetricsFromRowText(row: HTMLElement, keyword: string): ErankMetrics {
+        return orderedMetricsFromText(elementText(row), keyword)
+    }
+
     function metricValueFromPoint(row: HTMLElement, key: ErankMetricKey, columnCenter: number) {
         const rowRect = row.getBoundingClientRect()
         const y = Math.max(rowRect.top + 4, Math.min(rowRect.bottom - 4, rowRect.top + rowRect.height / 2))
@@ -384,6 +419,8 @@
         const pointedValue = metricValueFromPoint(row, key, columnCenter)
         if (pointedValue) return pointedValue
 
+        if (key === 'erankCompetition' || key === 'erankKeywordDifficulty') return ''
+
         const rowRect = row.getBoundingClientRect()
         const cells = (Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a')) as HTMLElement[])
             .filter(isVisibleElement)
@@ -401,7 +438,7 @@
             })
             .sort((a, b) => Math.abs((a.rect.left + a.rect.width / 2) - columnCenter) - Math.abs((b.rect.left + b.rect.width / 2) - columnCenter))
 
-        const maxDistance = key === 'erankKeywordDifficulty' ? 95 : 145
+        const maxDistance = 145
         const match = cells.find((item) => Math.abs((item.rect.left + item.rect.width / 2) - columnCenter) <= maxDistance)
         return match?.value ?? ''
     }
@@ -523,10 +560,10 @@
         if (!row) return emptyErankMetrics()
 
         const result = emptyErankMetrics()
+        const orderedMetrics = orderedMetricsFromRowText(row, keyword)
         for (const key of ERANK_METRIC_KEYS) {
             const column = columns.get(key)
-            if (!column) continue
-            result[key] = closestMetricValue(row, key, column.center)
+            result[key] = orderedMetrics[key] || (column ? closestMetricValue(row, key, column.center) : '')
         }
 
         return result
@@ -563,10 +600,10 @@
                 rawText: '',
             }
 
+            const orderedMetrics = orderedMetricsFromRowText(row, keyword)
             for (const metricKey of ERANK_METRIC_KEYS) {
                 const column = columns.get(metricKey)
-                if (!column) continue
-                result[metricKey] = closestMetricValue(row, metricKey, column.center)
+                result[metricKey] = orderedMetrics[metricKey] || (column ? closestMetricValue(row, metricKey, column.center) : '')
             }
 
             const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty
@@ -615,10 +652,12 @@
             if (!cells) continue
 
             const result = { ...empty }
+            const orderedMetrics = orderedMetricsFromText(cells.join(' '), keyword)
             headerMap.forEach((key, index) => {
                 if (!key || !cells[index]) return
                 if (key === 'keyword') return
-                result[key as ErankMetricKey] = normalizeMetricForKey(cells[index], key as ErankMetricKey)
+                const metricKey = key as ErankMetricKey
+                result[metricKey] = orderedMetrics[metricKey] || normalizeMetricForKey(cells[index], metricKey)
             })
 
             if (Object.values(result).some(Boolean)) return result
@@ -688,10 +727,12 @@
                     rawText: '',
                 }
 
+                const orderedMetrics = orderedMetricsFromText(cells.join(' '), keyword)
                 headerMap.forEach((field, index) => {
                     if (!field || field === 'keyword' || !cells[index]) return
                     if (field in result) {
-                        ;(result as unknown as Record<string, string>)[field] = normalizeMetricForKey(cells[index], field as ErankMetricKey)
+                        const metricKey = field as ErankMetricKey
+                        ;(result as unknown as Record<string, string>)[field] = orderedMetrics[metricKey] || normalizeMetricForKey(cells[index], metricKey)
                     }
                 })
 

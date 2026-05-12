@@ -1166,6 +1166,7 @@ export function scoreErankOpportunity(row = {}, options = {}) {
   if (erankKeywordDifficulty !== null && erankKeywordDifficulty <= 25) reasons.push('KD低め')
   if (erankCompetition !== null && erankCompetition > 0 && erankCompetition < 5000) reasons.push('競合少なめ')
   if (erankCompetition === null) reasons.push('競合数は未取得')
+  if (erankKeywordDifficulty === null) reasons.push('KD未取得')
   if (erankTrend !== null && erankTrend > 0) reasons.push('トレンド反応あり')
   if (!hasDemand) reasons.push('検索需要が未確認')
   if (riskTerms.length > 0) reasons.push(`要確認語句: ${riskTerms.join(', ')}`)
