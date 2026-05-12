@@ -56,6 +56,48 @@
         return normalized.replace(/[$,%]/g, '').trim()
     }
 
+    type ErankMetricKey = 'erankSearchVolume' | 'erankClicks' | 'erankCtr' | 'erankCompetition' | 'erankKeywordDifficulty' | 'erankTrend'
+    type ErankColumnKey = ErankMetricKey | 'keyword'
+    type ErankMetrics = Record<ErankMetricKey, string>
+
+    const ERANK_METRIC_KEYS: ErankMetricKey[] = [
+        'erankSearchVolume',
+        'erankClicks',
+        'erankCtr',
+        'erankCompetition',
+        'erankKeywordDifficulty',
+        'erankTrend',
+    ]
+
+    function emptyErankMetrics(): ErankMetrics {
+        return {
+            erankSearchVolume: '',
+            erankClicks: '',
+            erankCtr: '',
+            erankCompetition: '',
+            erankKeywordDifficulty: '',
+            erankTrend: '',
+        }
+    }
+
+    function normalizeMetricForKey(value: string, key: ErankMetricKey) {
+        const normalized = normalizeText(value)
+        if (/^(unknown|n\/a|no data|-)$/i.test(normalized)) return ''
+        const numbers = (normalized.match(/-?\d[\d,.]*/g) ?? []).map((match) => match.replace(/,/g, ''))
+        if (numbers.length === 0) return normalizeMetric(normalized)
+
+        if (key === 'erankKeywordDifficulty') {
+            const kdValue = numbers.find((number) => {
+                const parsed = Number(number)
+                return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100
+            })
+            return kdValue ?? numbers[numbers.length - 1]
+        }
+
+        if (key === 'erankTrend') return numbers[numbers.length - 1]
+        return numbers[0]
+    }
+
     function isTextInput(element: EditableSearchField): element is HTMLInputElement | HTMLTextAreaElement {
         return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
     }
@@ -158,6 +200,21 @@
         }
     }
 
+    async function revealKeywordIdeasTable() {
+        const elements = Array.from(document.querySelectorAll('button, [role="tab"], a, h1, h2, h3, div, span')) as HTMLElement[]
+        const keywordIdeasTab = elements.find((element) => /^keyword ideas$/i.test(elementText(element)))
+        if (keywordIdeasTab) {
+            keywordIdeasTab.click()
+            await wait(300)
+        }
+
+        const tableAnchor = elements.find((element) => /keywords related to|keyword ideas|near matches/i.test(elementText(element)))
+        if (tableAnchor) {
+            tableAnchor.scrollIntoView({ block: 'center' })
+            await wait(700)
+        }
+    }
+
     function describeElement(element: Element) {
         const html = element as HTMLElement
         const input = element as HTMLInputElement
@@ -209,6 +266,290 @@
         return ''
     }
 
+    function headerColumnKey(value: string): ErankColumnKey | '' {
+        const text = normalizeText(value).toLowerCase()
+        if (/^keywords?\b|^keyword ideas?\b|^search term\b/.test(text)) return 'keyword'
+        if (/^search\s*trend\b|^trend$/.test(text)) return 'erankTrend'
+        if (/^(avg\.?|average)\s*searches?$/.test(text)) return 'erankSearchVolume'
+        if (/^(avg\.?|average)\s*clicks?$/.test(text)) return 'erankClicks'
+        if (/^(avg\.?|average)\s*ctr$|^ctr$|^click.*through/.test(text)) return 'erankCtr'
+        if (/^etsy\s*competition$|^competition$/.test(text)) return 'erankCompetition'
+        if (/^kd$|^keyword difficulty$|^difficulty$/.test(text)) return 'erankKeywordDifficulty'
+        return ''
+    }
+
+    function isVisibleElement(element: HTMLElement) {
+        const rect = element.getBoundingClientRect()
+        if (rect.width <= 1 || rect.height <= 1) return false
+        const style = window.getComputedStyle(element)
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0
+    }
+
+    function elementText(element: Element) {
+        const html = element as HTMLElement
+        return normalizeText(html.innerText || element.textContent || '')
+    }
+
+    function hasSameTextChild(element: HTMLElement, text: string) {
+        return Array.from(element.children).some((child) => elementText(child) === text)
+    }
+
+    function normalizeKeywordText(value: string) {
+        return normalizeText(value).toLowerCase().replace(/[^\w\s'-]/g, '').replace(/\s+/g, ' ').trim()
+    }
+
+    function metricValueLooksUsable(value: string, key: ErankMetricKey) {
+        if (!value) return false
+        const parsed = Number(value)
+        if (!Number.isFinite(parsed)) return true
+        if (key === 'erankKeywordDifficulty') return parsed >= 0 && parsed <= 100
+        if (key === 'erankCtr') return parsed >= 0 && parsed <= 500
+        return true
+    }
+
+    function collectVisualColumns() {
+        const candidates = (Array.from(document.querySelectorAll('th, [role="columnheader"], span, div, button')) as HTMLElement[])
+            .filter(isVisibleElement)
+            .map((element) => {
+                const text = elementText(element)
+                const key = headerColumnKey(text)
+                const rect = element.getBoundingClientRect()
+                return { element, text, key, rect }
+            })
+            .filter((item): item is { element: HTMLElement, text: string, key: ErankColumnKey, rect: DOMRect } => {
+                if (!item.key || item.text.length > 45 || hasSameTextChild(item.element, item.text)) return false
+                return item.rect.width > 5 && item.rect.height > 5
+            })
+
+        let bestGroup: typeof candidates = []
+        let bestScore = -1
+
+        for (const candidate of candidates) {
+            const group = candidates.filter((item) => Math.abs(item.rect.top - candidate.rect.top) <= 28)
+            const keys = new Set(group.map((item) => item.key))
+            const metricCount = ERANK_METRIC_KEYS.filter((key) => keys.has(key)).length
+            const score = metricCount * 10 + (keys.has('keyword') ? 5 : 0) + candidate.rect.top / 1000
+            if (score > bestScore) {
+                bestScore = score
+                bestGroup = group
+            }
+        }
+
+        const columns = new Map<ErankColumnKey, { left: number, right: number, center: number, top: number }>()
+        for (const key of ['keyword', ...ERANK_METRIC_KEYS] as ErankColumnKey[]) {
+            const matches = bestGroup
+                .filter((item) => item.key === key)
+                .sort((a, b) => a.rect.width - b.rect.width || a.rect.left - b.rect.left)
+            const match = matches[0]
+            if (!match) continue
+            columns.set(key, {
+                left: match.rect.left,
+                right: match.rect.right,
+                center: match.rect.left + match.rect.width / 2,
+                top: match.rect.top,
+            })
+        }
+
+        return columns
+    }
+
+    function closestMetricValue(row: HTMLElement, key: ErankMetricKey, columnCenter: number) {
+        const rowRect = row.getBoundingClientRect()
+        const cells = (Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a')) as HTMLElement[])
+            .filter(isVisibleElement)
+            .map((element) => {
+                const text = elementText(element)
+                const rect = element.getBoundingClientRect()
+                const value = normalizeMetricForKey(text, key)
+                return { element, text, rect, value }
+            })
+            .filter((item) => {
+                if (!item.text || item.text.length > 80 || hasSameTextChild(item.element, item.text)) return false
+                if (item.rect.top < rowRect.top - 2 || item.rect.bottom > rowRect.bottom + 2) return false
+                if (!metricValueLooksUsable(item.value, key)) return false
+                return /\d|unknown|n\/a|no data|-/i.test(item.text)
+            })
+            .sort((a, b) => Math.abs((a.rect.left + a.rect.width / 2) - columnCenter) - Math.abs((b.rect.left + b.rect.width / 2) - columnCenter))
+
+        const maxDistance = key === 'erankKeywordDifficulty' ? 95 : 145
+        const match = cells.find((item) => Math.abs((item.rect.left + item.rect.width / 2) - columnCenter) <= maxDistance)
+        return match?.value ?? ''
+    }
+
+    function findVisualRowForKeyword(keyword: string, columns: Map<ErankColumnKey, { left: number, right: number, center: number, top: number }>) {
+        const target = normalizeKeywordText(keyword)
+        const headerTop = columns.get('keyword')?.top ?? 0
+        const keywordCenter = columns.get('keyword')?.center
+        const exactKeywordElements = (Array.from(document.querySelectorAll('a, span, strong, td, [role="cell"], [role="gridcell"], div')) as HTMLElement[])
+            .filter(isVisibleElement)
+            .filter((element) => normalizeKeywordText(elementText(element)) === target)
+            .filter((element) => {
+                if (keywordCenter === undefined) return true
+                const rect = element.getBoundingClientRect()
+                return Math.abs((rect.left + rect.width / 2) - keywordCenter) <= 220
+            })
+
+        const rows: HTMLElement[] = []
+        for (const element of exactKeywordElements) {
+            let current: HTMLElement | null = element
+            for (let depth = 0; current && depth < 9; depth += 1) {
+                const rect = current.getBoundingClientRect()
+                const text = elementText(current)
+                const numericCount = (text.match(/\d[\d,.]*/g) ?? []).length
+                const looksLikeRow = rect.top > headerTop
+                    && rect.width >= 500
+                    && rect.height >= 28
+                    && rect.height <= 150
+                    && numericCount >= 3
+                    && !/avg\.?\s*searches|avg\.?\s*clicks|etsy competition/i.test(text)
+                if (looksLikeRow) {
+                    rows.push(current)
+                    break
+                }
+                current = current.parentElement
+            }
+        }
+
+        return rows.sort((a, b) => a.getBoundingClientRect().height - b.getBoundingClientRect().height)[0] ?? null
+    }
+
+    function textLooksLikeKeywordCell(text: string) {
+        const keyword = meaningfulKeyword(text)
+        if (!keyword || !/[a-z]/i.test(keyword)) return false
+        if (/^\d[\d,.]*%?$/.test(keyword)) return false
+        if (/avg\.?|average|competition|clicks?|searches?|ctr|^kd$/i.test(keyword)) return false
+        return true
+    }
+
+    function closestKeywordValue(row: HTMLElement, columnCenter: number) {
+        const rowRect = row.getBoundingClientRect()
+        const cells = (Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a')) as HTMLElement[])
+            .filter(isVisibleElement)
+            .map((element) => {
+                const text = elementText(element)
+                const rect = element.getBoundingClientRect()
+                return { element, text, rect }
+            })
+            .filter((item) => {
+                if (!textLooksLikeKeywordCell(item.text) || item.text.length > 120 || hasSameTextChild(item.element, item.text)) return false
+                if (item.rect.top < rowRect.top - 2 || item.rect.bottom > rowRect.bottom + 2) return false
+                return true
+            })
+            .sort((a, b) => Math.abs((a.rect.left + a.rect.width / 2) - columnCenter) - Math.abs((b.rect.left + b.rect.width / 2) - columnCenter))
+
+        return meaningfulKeyword(cells[0]?.text ?? '')
+    }
+
+    function collectVisualRows(columns: Map<ErankColumnKey, { left: number, right: number, center: number, top: number }>) {
+        const headerTop = columns.get('keyword')?.top ?? 0
+        const keywordCenter = columns.get('keyword')?.center
+        const seen = new Set<HTMLElement>()
+        const rows: HTMLElement[] = []
+
+        function addRow(row: HTMLElement) {
+            if (seen.has(row) || !isVisibleElement(row)) return
+            const rect = row.getBoundingClientRect()
+            const text = elementText(row)
+            const numericCount = (text.match(/\d[\d,.]*/g) ?? []).length
+            const looksLikeRow = rect.top > headerTop
+                && rect.width >= 500
+                && rect.height >= 28
+                && rect.height <= 150
+                && numericCount >= 3
+                && !/avg\.?\s*searches|avg\.?\s*clicks|etsy competition/i.test(text)
+            if (!looksLikeRow) return
+            seen.add(row)
+            rows.push(row)
+        }
+
+        ;(Array.from(document.querySelectorAll('tr, [role="row"]')) as HTMLElement[]).forEach(addRow)
+
+        const keywordCells = (Array.from(document.querySelectorAll('a, span, strong, td, [role="cell"], [role="gridcell"], div')) as HTMLElement[])
+            .filter(isVisibleElement)
+            .filter((element) => textLooksLikeKeywordCell(elementText(element)))
+            .filter((element) => {
+                if (keywordCenter === undefined) return true
+                const rect = element.getBoundingClientRect()
+                return Math.abs((rect.left + rect.width / 2) - keywordCenter) <= 240
+            })
+
+        for (const element of keywordCells) {
+            let current: HTMLElement | null = element
+            for (let depth = 0; current && depth < 9; depth += 1) {
+                addRow(current)
+                if (seen.has(current)) break
+                current = current.parentElement
+            }
+        }
+
+        return rows.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+    }
+
+    function extractFromVisualGrid(keyword: string): ErankMetrics {
+        const columns = collectVisualColumns()
+        if (!columns.has('erankSearchVolume') || !columns.has('erankClicks')) return emptyErankMetrics()
+
+        const row = findVisualRowForKeyword(keyword, columns)
+        if (!row) return emptyErankMetrics()
+
+        const result = emptyErankMetrics()
+        for (const key of ERANK_METRIC_KEYS) {
+            const column = columns.get(key)
+            if (!column) continue
+            result[key] = closestMetricValue(row, key, column.center)
+        }
+
+        return result
+    }
+
+    function extractVisualRelatedKeywordRows(sourceKeyword: string): ErankResult[] {
+        const columns = collectVisualColumns()
+        const keywordColumn = columns.get('keyword')
+        if (!keywordColumn || !columns.has('erankSearchVolume') || !columns.has('erankClicks')) return []
+
+        const results: ErankResult[] = []
+        const seen = new Set<string>()
+        const sourceKey = normalizeKeywordText(sourceKeyword)
+
+        for (const row of collectVisualRows(columns)) {
+            const keyword = closestKeywordValue(row, keywordColumn.center)
+            const key = normalizeKeywordText(keyword)
+            if (!keyword || !key || key === sourceKey || seen.has(key)) continue
+
+            const result: ErankResult = {
+                keyword,
+                listingsAnalyzed: '',
+                topMonthlySales: '',
+                topRevenue: '',
+                averagePrice: '',
+                listingAge: '',
+                erankSearchVolume: '',
+                erankClicks: '',
+                erankCtr: '',
+                erankCompetition: '',
+                erankKeywordDifficulty: '',
+                erankTrend: '',
+                notes: `Extracted from eRank related keywords for ${sourceKeyword}`,
+                rawText: '',
+            }
+
+            for (const metricKey of ERANK_METRIC_KEYS) {
+                const column = columns.get(metricKey)
+                if (!column) continue
+                result[metricKey] = closestMetricValue(row, metricKey, column.center)
+            }
+
+            const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty
+            if (!hasUsefulMetric) continue
+
+            seen.add(key)
+            results.push(result)
+            if (results.length >= 40) return results
+        }
+
+        return results
+    }
+
     function keywordTokenScore(value: string, keyword: string) {
         const source = value.toLowerCase()
         const tokens = keyword.toLowerCase().split(/\s+/).filter((token) => token.length >= 3)
@@ -217,14 +558,7 @@
 
     function extractFromTables(keyword: string) {
         const tables = Array.from(document.querySelectorAll('table, [role="table"], [role="grid"]')) as HTMLElement[]
-        const empty = {
-            erankSearchVolume: '',
-            erankClicks: '',
-            erankCtr: '',
-            erankCompetition: '',
-            erankKeywordDifficulty: '',
-            erankTrend: '',
-        }
+        const empty = emptyErankMetrics()
 
         for (const table of tables) {
             const headerCells = Array.from(table.querySelectorAll('th, [role="columnheader"]')) as HTMLElement[]
@@ -254,7 +588,7 @@
             headerMap.forEach((key, index) => {
                 if (!key || !cells[index]) return
                 if (key === 'keyword') return
-                result[key as keyof typeof result] = normalizeMetric(cells[index])
+                result[key as ErankMetricKey] = normalizeMetricForKey(cells[index], key as ErankMetricKey)
             })
 
             if (Object.values(result).some(Boolean)) return result
@@ -275,6 +609,9 @@
     }
 
     function extractRelatedKeywordRows(sourceKeyword: string): ErankResult[] {
+        const visualResults = extractVisualRelatedKeywordRows(sourceKeyword)
+        if (visualResults.length > 0) return visualResults
+
         const tables = Array.from(document.querySelectorAll('table, [role="table"], [role="grid"]')) as HTMLElement[]
         const results: ErankResult[] = []
         const seen = new Set<string>()
@@ -324,7 +661,7 @@
                 headerMap.forEach((field, index) => {
                     if (!field || field === 'keyword' || !cells[index]) return
                     if (field in result) {
-                        ;(result as unknown as Record<string, string>)[field] = normalizeMetric(cells[index])
+                        ;(result as unknown as Record<string, string>)[field] = normalizeMetricForKey(cells[index], field as ErankMetricKey)
                     }
                 })
 
@@ -343,13 +680,14 @@
     function extractMetrics(keyword: string): ErankResult {
         const rawBodyText = document.body.innerText || ''
         const bodyText = normalizeText(rawBodyText)
+        const visualMetrics = extractFromVisualGrid(keyword)
         const tableMetrics = extractFromTables(keyword)
-        const erankSearchVolume = tableMetrics.erankSearchVolume || metricByRegex(['Average Searches', 'Avg Searches', 'Searches'], bodyText)
-        const erankClicks = tableMetrics.erankClicks || metricByRegex(['Average Clicks', 'Avg Clicks', 'Clicks'], bodyText)
-        const erankCtr = tableMetrics.erankCtr || metricByRegex(['Average CTR', 'Avg CTR', 'CTR'], bodyText)
-        const erankCompetition = tableMetrics.erankCompetition || metricByRegex(['Etsy Competition', 'Competition'], bodyText)
-        const erankKeywordDifficulty = tableMetrics.erankKeywordDifficulty || metricByRegex(['Keyword Difficulty', 'KD'], bodyText)
-        const erankTrend = tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText)
+        const erankSearchVolume = visualMetrics.erankSearchVolume || tableMetrics.erankSearchVolume || metricByRegex(['Average Searches', 'Avg Searches', 'Searches'], bodyText)
+        const erankClicks = visualMetrics.erankClicks || tableMetrics.erankClicks || metricByRegex(['Average Clicks', 'Avg Clicks', 'Clicks'], bodyText)
+        const erankCtr = visualMetrics.erankCtr || tableMetrics.erankCtr || metricByRegex(['Average CTR', 'Avg CTR', 'CTR'], bodyText)
+        const erankCompetition = visualMetrics.erankCompetition || tableMetrics.erankCompetition || metricByRegex(['Etsy Competition', 'Competition'], bodyText)
+        const erankKeywordDifficulty = visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty || metricByRegex(['Keyword Difficulty', 'KD'], bodyText)
+        const erankTrend = visualMetrics.erankTrend || tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText)
         const relatedKeywords = extractRelatedKeywordRows(keyword)
 
         const notes = erankSearchVolume || erankClicks || erankCompetition || erankKeywordDifficulty || relatedKeywords.length > 0
@@ -386,6 +724,7 @@
         await submitSearch(field)
         await wait(4500)
         await waitForLikelyResults(keyword)
+        await revealKeywordIdeasTable()
         return extractMetrics(keyword)
     }
 

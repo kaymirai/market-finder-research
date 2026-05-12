@@ -29,6 +29,43 @@
             return numberMatch[0].replace(/,/g, '');
         return normalized.replace(/[$,%]/g, '').trim();
     }
+    const ERANK_METRIC_KEYS = [
+        'erankSearchVolume',
+        'erankClicks',
+        'erankCtr',
+        'erankCompetition',
+        'erankKeywordDifficulty',
+        'erankTrend',
+    ];
+    function emptyErankMetrics() {
+        return {
+            erankSearchVolume: '',
+            erankClicks: '',
+            erankCtr: '',
+            erankCompetition: '',
+            erankKeywordDifficulty: '',
+            erankTrend: '',
+        };
+    }
+    function normalizeMetricForKey(value, key) {
+        var _a;
+        const normalized = normalizeText(value);
+        if (/^(unknown|n\/a|no data|-)$/i.test(normalized))
+            return '';
+        const numbers = ((_a = normalized.match(/-?\d[\d,.]*/g)) !== null && _a !== void 0 ? _a : []).map((match) => match.replace(/,/g, ''));
+        if (numbers.length === 0)
+            return normalizeMetric(normalized);
+        if (key === 'erankKeywordDifficulty') {
+            const kdValue = numbers.find((number) => {
+                const parsed = Number(number);
+                return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100;
+            });
+            return kdValue !== null && kdValue !== void 0 ? kdValue : numbers[numbers.length - 1];
+        }
+        if (key === 'erankTrend')
+            return numbers[numbers.length - 1];
+        return numbers[0];
+    }
     function isTextInput(element) {
         return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
     }
@@ -123,6 +160,19 @@
                 return;
         }
     }
+    async function revealKeywordIdeasTable() {
+        const elements = Array.from(document.querySelectorAll('button, [role="tab"], a, h1, h2, h3, div, span'));
+        const keywordIdeasTab = elements.find((element) => /^keyword ideas$/i.test(elementText(element)));
+        if (keywordIdeasTab) {
+            keywordIdeasTab.click();
+            await wait(300);
+        }
+        const tableAnchor = elements.find((element) => /keywords related to|keyword ideas|near matches/i.test(elementText(element)));
+        if (tableAnchor) {
+            tableAnchor.scrollIntoView({ block: 'center' });
+            await wait(700);
+        }
+    }
     function describeElement(element) {
         var _a;
         const html = element;
@@ -180,6 +230,294 @@
             return 'erankKeywordDifficulty';
         return '';
     }
+    function headerColumnKey(value) {
+        const text = normalizeText(value).toLowerCase();
+        if (/^keywords?\b|^keyword ideas?\b|^search term\b/.test(text))
+            return 'keyword';
+        if (/^search\s*trend\b|^trend$/.test(text))
+            return 'erankTrend';
+        if (/^(avg\.?|average)\s*searches?$/.test(text))
+            return 'erankSearchVolume';
+        if (/^(avg\.?|average)\s*clicks?$/.test(text))
+            return 'erankClicks';
+        if (/^(avg\.?|average)\s*ctr$|^ctr$|^click.*through/.test(text))
+            return 'erankCtr';
+        if (/^etsy\s*competition$|^competition$/.test(text))
+            return 'erankCompetition';
+        if (/^kd$|^keyword difficulty$|^difficulty$/.test(text))
+            return 'erankKeywordDifficulty';
+        return '';
+    }
+    function isVisibleElement(element) {
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 1 || rect.height <= 1)
+            return false;
+        const style = window.getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0;
+    }
+    function elementText(element) {
+        const html = element;
+        return normalizeText(html.innerText || element.textContent || '');
+    }
+    function hasSameTextChild(element, text) {
+        return Array.from(element.children).some((child) => elementText(child) === text);
+    }
+    function normalizeKeywordText(value) {
+        return normalizeText(value).toLowerCase().replace(/[^\w\s'-]/g, '').replace(/\s+/g, ' ').trim();
+    }
+    function metricValueLooksUsable(value, key) {
+        if (!value)
+            return false;
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed))
+            return true;
+        if (key === 'erankKeywordDifficulty')
+            return parsed >= 0 && parsed <= 100;
+        if (key === 'erankCtr')
+            return parsed >= 0 && parsed <= 500;
+        return true;
+    }
+    function collectVisualColumns() {
+        const candidates = Array.from(document.querySelectorAll('th, [role="columnheader"], span, div, button'))
+            .filter(isVisibleElement)
+            .map((element) => {
+            const text = elementText(element);
+            const key = headerColumnKey(text);
+            const rect = element.getBoundingClientRect();
+            return { element, text, key, rect };
+        })
+            .filter((item) => {
+            if (!item.key || item.text.length > 45 || hasSameTextChild(item.element, item.text))
+                return false;
+            return item.rect.width > 5 && item.rect.height > 5;
+        });
+        let bestGroup = [];
+        let bestScore = -1;
+        for (const candidate of candidates) {
+            const group = candidates.filter((item) => Math.abs(item.rect.top - candidate.rect.top) <= 28);
+            const keys = new Set(group.map((item) => item.key));
+            const metricCount = ERANK_METRIC_KEYS.filter((key) => keys.has(key)).length;
+            const score = metricCount * 10 + (keys.has('keyword') ? 5 : 0) + candidate.rect.top / 1000;
+            if (score > bestScore) {
+                bestScore = score;
+                bestGroup = group;
+            }
+        }
+        const columns = new Map();
+        for (const key of ['keyword', ...ERANK_METRIC_KEYS]) {
+            const matches = bestGroup
+                .filter((item) => item.key === key)
+                .sort((a, b) => a.rect.width - b.rect.width || a.rect.left - b.rect.left);
+            const match = matches[0];
+            if (!match)
+                continue;
+            columns.set(key, {
+                left: match.rect.left,
+                right: match.rect.right,
+                center: match.rect.left + match.rect.width / 2,
+                top: match.rect.top,
+            });
+        }
+        return columns;
+    }
+    function closestMetricValue(row, key, columnCenter) {
+        var _a;
+        const rowRect = row.getBoundingClientRect();
+        const cells = Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a'))
+            .filter(isVisibleElement)
+            .map((element) => {
+            const text = elementText(element);
+            const rect = element.getBoundingClientRect();
+            const value = normalizeMetricForKey(text, key);
+            return { element, text, rect, value };
+        })
+            .filter((item) => {
+            if (!item.text || item.text.length > 80 || hasSameTextChild(item.element, item.text))
+                return false;
+            if (item.rect.top < rowRect.top - 2 || item.rect.bottom > rowRect.bottom + 2)
+                return false;
+            if (!metricValueLooksUsable(item.value, key))
+                return false;
+            return /\d|unknown|n\/a|no data|-/i.test(item.text);
+        })
+            .sort((a, b) => Math.abs((a.rect.left + a.rect.width / 2) - columnCenter) - Math.abs((b.rect.left + b.rect.width / 2) - columnCenter));
+        const maxDistance = key === 'erankKeywordDifficulty' ? 95 : 145;
+        const match = cells.find((item) => Math.abs((item.rect.left + item.rect.width / 2) - columnCenter) <= maxDistance);
+        return (_a = match === null || match === void 0 ? void 0 : match.value) !== null && _a !== void 0 ? _a : '';
+    }
+    function findVisualRowForKeyword(keyword, columns) {
+        var _a, _b, _c, _d, _e;
+        const target = normalizeKeywordText(keyword);
+        const headerTop = (_b = (_a = columns.get('keyword')) === null || _a === void 0 ? void 0 : _a.top) !== null && _b !== void 0 ? _b : 0;
+        const keywordCenter = (_c = columns.get('keyword')) === null || _c === void 0 ? void 0 : _c.center;
+        const exactKeywordElements = Array.from(document.querySelectorAll('a, span, strong, td, [role="cell"], [role="gridcell"], div'))
+            .filter(isVisibleElement)
+            .filter((element) => normalizeKeywordText(elementText(element)) === target)
+            .filter((element) => {
+            if (keywordCenter === undefined)
+                return true;
+            const rect = element.getBoundingClientRect();
+            return Math.abs((rect.left + rect.width / 2) - keywordCenter) <= 220;
+        });
+        const rows = [];
+        for (const element of exactKeywordElements) {
+            let current = element;
+            for (let depth = 0; current && depth < 9; depth += 1) {
+                const rect = current.getBoundingClientRect();
+                const text = elementText(current);
+                const numericCount = ((_d = text.match(/\d[\d,.]*/g)) !== null && _d !== void 0 ? _d : []).length;
+                const looksLikeRow = rect.top > headerTop
+                    && rect.width >= 500
+                    && rect.height >= 28
+                    && rect.height <= 150
+                    && numericCount >= 3
+                    && !/avg\.?\s*searches|avg\.?\s*clicks|etsy competition/i.test(text);
+                if (looksLikeRow) {
+                    rows.push(current);
+                    break;
+                }
+                current = current.parentElement;
+            }
+        }
+        return (_e = rows.sort((a, b) => a.getBoundingClientRect().height - b.getBoundingClientRect().height)[0]) !== null && _e !== void 0 ? _e : null;
+    }
+    function textLooksLikeKeywordCell(text) {
+        const keyword = meaningfulKeyword(text);
+        if (!keyword || !/[a-z]/i.test(keyword))
+            return false;
+        if (/^\d[\d,.]*%?$/.test(keyword))
+            return false;
+        if (/avg\.?|average|competition|clicks?|searches?|ctr|^kd$/i.test(keyword))
+            return false;
+        return true;
+    }
+    function closestKeywordValue(row, columnCenter) {
+        var _a, _b;
+        const rowRect = row.getBoundingClientRect();
+        const cells = Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a'))
+            .filter(isVisibleElement)
+            .map((element) => {
+            const text = elementText(element);
+            const rect = element.getBoundingClientRect();
+            return { element, text, rect };
+        })
+            .filter((item) => {
+            if (!textLooksLikeKeywordCell(item.text) || item.text.length > 120 || hasSameTextChild(item.element, item.text))
+                return false;
+            if (item.rect.top < rowRect.top - 2 || item.rect.bottom > rowRect.bottom + 2)
+                return false;
+            return true;
+        })
+            .sort((a, b) => Math.abs((a.rect.left + a.rect.width / 2) - columnCenter) - Math.abs((b.rect.left + b.rect.width / 2) - columnCenter));
+        return meaningfulKeyword((_b = (_a = cells[0]) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '');
+    }
+    function collectVisualRows(columns) {
+        var _a, _b, _c;
+        const headerTop = (_b = (_a = columns.get('keyword')) === null || _a === void 0 ? void 0 : _a.top) !== null && _b !== void 0 ? _b : 0;
+        const keywordCenter = (_c = columns.get('keyword')) === null || _c === void 0 ? void 0 : _c.center;
+        const seen = new Set();
+        const rows = [];
+        function addRow(row) {
+            var _a;
+            if (seen.has(row) || !isVisibleElement(row))
+                return;
+            const rect = row.getBoundingClientRect();
+            const text = elementText(row);
+            const numericCount = ((_a = text.match(/\d[\d,.]*/g)) !== null && _a !== void 0 ? _a : []).length;
+            const looksLikeRow = rect.top > headerTop
+                && rect.width >= 500
+                && rect.height >= 28
+                && rect.height <= 150
+                && numericCount >= 3
+                && !/avg\.?\s*searches|avg\.?\s*clicks|etsy competition/i.test(text);
+            if (!looksLikeRow)
+                return;
+            seen.add(row);
+            rows.push(row);
+        }
+        ;
+        Array.from(document.querySelectorAll('tr, [role="row"]')).forEach(addRow);
+        const keywordCells = Array.from(document.querySelectorAll('a, span, strong, td, [role="cell"], [role="gridcell"], div'))
+            .filter(isVisibleElement)
+            .filter((element) => textLooksLikeKeywordCell(elementText(element)))
+            .filter((element) => {
+            if (keywordCenter === undefined)
+                return true;
+            const rect = element.getBoundingClientRect();
+            return Math.abs((rect.left + rect.width / 2) - keywordCenter) <= 240;
+        });
+        for (const element of keywordCells) {
+            let current = element;
+            for (let depth = 0; current && depth < 9; depth += 1) {
+                addRow(current);
+                if (seen.has(current))
+                    break;
+                current = current.parentElement;
+            }
+        }
+        return rows.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    }
+    function extractFromVisualGrid(keyword) {
+        const columns = collectVisualColumns();
+        if (!columns.has('erankSearchVolume') || !columns.has('erankClicks'))
+            return emptyErankMetrics();
+        const row = findVisualRowForKeyword(keyword, columns);
+        if (!row)
+            return emptyErankMetrics();
+        const result = emptyErankMetrics();
+        for (const key of ERANK_METRIC_KEYS) {
+            const column = columns.get(key);
+            if (!column)
+                continue;
+            result[key] = closestMetricValue(row, key, column.center);
+        }
+        return result;
+    }
+    function extractVisualRelatedKeywordRows(sourceKeyword) {
+        const columns = collectVisualColumns();
+        const keywordColumn = columns.get('keyword');
+        if (!keywordColumn || !columns.has('erankSearchVolume') || !columns.has('erankClicks'))
+            return [];
+        const results = [];
+        const seen = new Set();
+        const sourceKey = normalizeKeywordText(sourceKeyword);
+        for (const row of collectVisualRows(columns)) {
+            const keyword = closestKeywordValue(row, keywordColumn.center);
+            const key = normalizeKeywordText(keyword);
+            if (!keyword || !key || key === sourceKey || seen.has(key))
+                continue;
+            const result = {
+                keyword,
+                listingsAnalyzed: '',
+                topMonthlySales: '',
+                topRevenue: '',
+                averagePrice: '',
+                listingAge: '',
+                erankSearchVolume: '',
+                erankClicks: '',
+                erankCtr: '',
+                erankCompetition: '',
+                erankKeywordDifficulty: '',
+                erankTrend: '',
+                notes: `Extracted from eRank related keywords for ${sourceKeyword}`,
+                rawText: '',
+            };
+            for (const metricKey of ERANK_METRIC_KEYS) {
+                const column = columns.get(metricKey);
+                if (!column)
+                    continue;
+                result[metricKey] = closestMetricValue(row, metricKey, column.center);
+            }
+            const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty;
+            if (!hasUsefulMetric)
+                continue;
+            seen.add(key);
+            results.push(result);
+            if (results.length >= 40)
+                return results;
+        }
+        return results;
+    }
     function keywordTokenScore(value, keyword) {
         const source = value.toLowerCase();
         const tokens = keyword.toLowerCase().split(/\s+/).filter((token) => token.length >= 3);
@@ -188,14 +526,7 @@
     function extractFromTables(keyword) {
         var _a;
         const tables = Array.from(document.querySelectorAll('table, [role="table"], [role="grid"]'));
-        const empty = {
-            erankSearchVolume: '',
-            erankClicks: '',
-            erankCtr: '',
-            erankCompetition: '',
-            erankKeywordDifficulty: '',
-            erankTrend: '',
-        };
+        const empty = emptyErankMetrics();
         for (const table of tables) {
             const headerCells = Array.from(table.querySelectorAll('th, [role="columnheader"]'));
             let headers = headerCells.map((cell) => normalizeText(cell.innerText || cell.textContent || ''));
@@ -223,7 +554,7 @@
                     return;
                 if (key === 'keyword')
                     return;
-                result[key] = normalizeMetric(cells[index]);
+                result[key] = normalizeMetricForKey(cells[index], key);
             });
             if (Object.values(result).some(Boolean))
                 return result;
@@ -245,6 +576,9 @@
     }
     function extractRelatedKeywordRows(sourceKeyword) {
         var _a;
+        const visualResults = extractVisualRelatedKeywordRows(sourceKeyword);
+        if (visualResults.length > 0)
+            return visualResults;
         const tables = Array.from(document.querySelectorAll('table, [role="table"], [role="grid"]'));
         const results = [];
         const seen = new Set();
@@ -292,7 +626,7 @@
                         return;
                     if (field in result) {
                         ;
-                        result[field] = normalizeMetric(cells[index]);
+                        result[field] = normalizeMetricForKey(cells[index], field);
                     }
                 });
                 const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty;
@@ -309,13 +643,14 @@
     function extractMetrics(keyword) {
         const rawBodyText = document.body.innerText || '';
         const bodyText = normalizeText(rawBodyText);
+        const visualMetrics = extractFromVisualGrid(keyword);
         const tableMetrics = extractFromTables(keyword);
-        const erankSearchVolume = tableMetrics.erankSearchVolume || metricByRegex(['Average Searches', 'Avg Searches', 'Searches'], bodyText);
-        const erankClicks = tableMetrics.erankClicks || metricByRegex(['Average Clicks', 'Avg Clicks', 'Clicks'], bodyText);
-        const erankCtr = tableMetrics.erankCtr || metricByRegex(['Average CTR', 'Avg CTR', 'CTR'], bodyText);
-        const erankCompetition = tableMetrics.erankCompetition || metricByRegex(['Etsy Competition', 'Competition'], bodyText);
-        const erankKeywordDifficulty = tableMetrics.erankKeywordDifficulty || metricByRegex(['Keyword Difficulty', 'KD'], bodyText);
-        const erankTrend = tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText);
+        const erankSearchVolume = visualMetrics.erankSearchVolume || tableMetrics.erankSearchVolume || metricByRegex(['Average Searches', 'Avg Searches', 'Searches'], bodyText);
+        const erankClicks = visualMetrics.erankClicks || tableMetrics.erankClicks || metricByRegex(['Average Clicks', 'Avg Clicks', 'Clicks'], bodyText);
+        const erankCtr = visualMetrics.erankCtr || tableMetrics.erankCtr || metricByRegex(['Average CTR', 'Avg CTR', 'CTR'], bodyText);
+        const erankCompetition = visualMetrics.erankCompetition || tableMetrics.erankCompetition || metricByRegex(['Etsy Competition', 'Competition'], bodyText);
+        const erankKeywordDifficulty = visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty || metricByRegex(['Keyword Difficulty', 'KD'], bodyText);
+        const erankTrend = visualMetrics.erankTrend || tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText);
         const relatedKeywords = extractRelatedKeywordRows(keyword);
         const notes = erankSearchVolume || erankClicks || erankCompetition || erankKeywordDifficulty || relatedKeywords.length > 0
             ? `Extracted from eRank screen${relatedKeywords.length > 0 ? ` / related ${relatedKeywords.length}` : ''}`
@@ -349,6 +684,7 @@
         await submitSearch(field);
         await wait(4500);
         await waitForLikelyResults(keyword);
+        await revealKeywordIdeasTable();
         return extractMetrics(keyword);
     }
     chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
