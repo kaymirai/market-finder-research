@@ -692,9 +692,17 @@ function renderErankSummary(rows) {
   `
 }
 
+function erankSourceLabel(row) {
+  const notes = String(row.notes ?? '')
+  const match = notes.match(/related keywords for\s+(.+)$/i)
+  if (match?.[1]) return `eRank派生: ${match[1]} から発見`
+  return 'eRankで調べた元語句'
+}
+
 function renderErankCard(row) {
   const normalized = row.score.normalized
   const opportunity = row.erankOpportunity
+  const sourceLabel = erankSourceLabel(row)
   const labelClass = erankOpportunityScoreClass(opportunity)
   const scoreReasons = opportunity.reasons
     .slice(0, 6)
@@ -709,7 +717,7 @@ function renderErankCard(row) {
           <h3>${escapeHtml(normalized.keyword)}</h3>
           <div class="meta-line">
             <span class="pill action-${escapeHtml(opportunity.action)}">${escapeHtml(opportunity.label)}</span>
-            <span class="pill">eRankのみ</span>
+            <span class="pill">${escapeHtml(sourceLabel)}</span>
             ${normalized.erankKeywordDifficulty !== null ? `<span class="pill">KD ${escapeHtml(normalized.erankKeywordDifficulty)}</span>` : ''}
           </div>
           ${scoreReasons ? `<div class="reason-line">${scoreReasons}</div>` : ''}
