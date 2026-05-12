@@ -1269,6 +1269,17 @@ function setRunningControls(active) {
   elements.progressStopBtn.disabled = !active
 }
 
+function releaseRunningControls() {
+  if (state.extensionState?.active) {
+    state.extensionState = {
+      ...state.extensionState,
+      active: false,
+      currentKeyword: '',
+    }
+  }
+  setRunningControls(false)
+}
+
 function openProgressModal({ mode, title, total, message }) {
   state.progress = {
     mode,
@@ -1288,12 +1299,16 @@ function openProgressModal({ mode, title, total, message }) {
 function closeProgressModal() {
   elements.progressModal.hidden = true
   state.progress.visible = false
+  if (state.progress.failed || state.progress.stopped || !state.extensionState?.active) {
+    releaseRunningControls()
+  }
 }
 
 function failProgress(message) {
   state.progress.failed = true
   state.progress.message = message
   state.progress.visible = true
+  releaseRunningControls()
   elements.progressModal.hidden = false
   renderProgressModal(state.extensionState)
 }
@@ -1311,7 +1326,8 @@ function renderProgressModal(extensionState = state.extensionState) {
   const failed = state.progress.failed || Boolean(extensionState?.error && !active)
   const currentKeyword = active ? extensionState?.currentKeyword || '次のキーワードを準備中' : '-'
 
-  setRunningControls(active)
+  const starting = state.progress.visible && state.progress.started && !state.progress.wasActive && !state.progress.failed && !state.progress.stopped
+  setRunningControls(active || starting)
 
   elements.progressTitle.textContent = state.progress.title
   elements.progressCurrentKeyword.textContent = currentKeyword
@@ -1467,9 +1483,12 @@ async function pollExtensionState() {
     renderExtensionState()
     if (response.state?.active) window.setTimeout(pollExtensionState, 2000)
   } catch (error) {
+    const message = friendlyExtensionError(error)
     state.extensionConnected = false
+    releaseRunningControls()
     updateExtensionBadge()
-    elements.extensionStatus.textContent = friendlyExtensionError(error)
+    elements.extensionStatus.textContent = message
+    if (state.progress.visible) failProgress(message)
   }
 }
 
