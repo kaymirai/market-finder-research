@@ -46,13 +46,14 @@
     let marketResults: MarketResult[] = []
     let marketTabId: number | null = null
     let erankTabId: number | null = null
+    let marketFinderTabId: number | null = null
     let marketEverbeeUrl = 'https://app.everbee.io/'
     let marketErankUrl = 'https://erank.com/tools/keyword-tool'
     let marketCurrentKeyword = ''
     let marketError = ''
     let marketDelayMs = 4500
 
-    chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.action === 'START_PROCESS') {
             if (isProcessingImages) {
                 sendResponse({ started: false, error: '画像取得はすでに実行中です。' })
@@ -73,6 +74,7 @@
         }
 
         if (request.action === 'START_MARKET_RESEARCH') {
+            rememberMarketFinderTab(sender)
             const keywords = normalizeKeywordList(request.keywords)
             if (marketActive) {
                 sendResponse({ started: false, error: 'Market Finder調査はすでに実行中です。' })
@@ -98,6 +100,7 @@
         }
 
         if (request.action === 'START_ERANK_RESEARCH') {
+            rememberMarketFinderTab(sender)
             const keywords = normalizeKeywordList(request.keywords)
             if (marketActive) {
                 sendResponse({ started: false, error: 'Market Finder調査はすでに実行中です。' })
@@ -146,6 +149,25 @@
 
         return false
     })
+
+    function rememberMarketFinderTab(sender: chrome.runtime.MessageSender) {
+        if (sender.tab?.id) marketFinderTabId = sender.tab.id
+    }
+
+    function focusMarketFinderTab() {
+        if (marketFinderTabId === null) return
+        chrome.tabs.get(marketFinderTabId, (tab) => {
+            if (chrome.runtime.lastError || !tab?.id) {
+                marketFinderTabId = null
+                return
+            }
+
+            if (tab.windowId !== undefined) {
+                chrome.windows.update(tab.windowId, { focused: true })
+            }
+            chrome.tabs.update(tab.id, { active: true })
+        })
+    }
 
     function normalizeKeywordList(value: unknown) {
         if (!Array.isArray(value)) return []
@@ -311,6 +333,7 @@
             marketActive = false
             marketCurrentKeyword = ''
             saveMarketState()
+            focusMarketFinderTab()
             return
         }
 
@@ -421,7 +444,7 @@
     function navigateEverbeeProductAnalytics(tabId: number, keyword: string) {
         return new Promise<void>((resolve, reject) => {
             const url = `https://app.everbee.io/product-analytics?search_term=${encodeURIComponent(keyword)}`
-            chrome.tabs.update(tabId, { url, active: true }, (tab) => {
+            chrome.tabs.update(tabId, { url, active: false }, (tab) => {
                 if (chrome.runtime.lastError || !tab?.id) {
                     reject(new Error(chrome.runtime.lastError?.message || 'EverBee Product Analyticsを開けませんでした。'))
                     return
@@ -452,7 +475,7 @@
     }
 
     function createEverbeeTab(resolve: (tabId: number) => void, reject: (error: Error) => void) {
-        chrome.tabs.create({ url: marketEverbeeUrl, active: true }, async (tab) => {
+        chrome.tabs.create({ url: marketEverbeeUrl, active: false }, async (tab) => {
             if (!tab?.id) {
                 reject(new Error('EverBeeタブを開けませんでした。'))
                 return
@@ -473,7 +496,7 @@
             if (erankTabId !== null) {
                 chrome.tabs.get(erankTabId, (tab) => {
                     if (!chrome.runtime.lastError && tab?.id) {
-                        chrome.tabs.update(tab.id, { active: true }, () => resolve(tab.id as number))
+                        chrome.tabs.update(tab.id, { active: false }, () => resolve(tab.id as number))
                         return
                     }
 
@@ -487,7 +510,7 @@
                 .then((tabId) => {
                     if (tabId !== null) {
                         erankTabId = tabId
-                        chrome.tabs.update(tabId, { active: true }, () => resolve(tabId))
+                        chrome.tabs.update(tabId, { active: false }, () => resolve(tabId))
                         return
                     }
 
@@ -515,7 +538,7 @@
     }
 
     function createErankTab(resolve: (tabId: number) => void, reject: (error: Error) => void) {
-        chrome.tabs.create({ url: marketErankUrl, active: true }, async (tab) => {
+        chrome.tabs.create({ url: marketErankUrl, active: false }, async (tab) => {
             if (!tab?.id) {
                 reject(new Error('eRankタブを開けませんでした。'))
                 return

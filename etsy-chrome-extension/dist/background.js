@@ -12,12 +12,13 @@
     let marketResults = [];
     let marketTabId = null;
     let erankTabId = null;
+    let marketFinderTabId = null;
     let marketEverbeeUrl = 'https://app.everbee.io/';
     let marketErankUrl = 'https://erank.com/tools/keyword-tool';
     let marketCurrentKeyword = '';
     let marketError = '';
     let marketDelayMs = 4500;
-    chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.action === 'START_PROCESS') {
             if (isProcessingImages) {
                 sendResponse({ started: false, error: '画像取得はすでに実行中です。' });
@@ -35,6 +36,7 @@
             return true;
         }
         if (request.action === 'START_MARKET_RESEARCH') {
+            rememberMarketFinderTab(sender);
             const keywords = normalizeKeywordList(request.keywords);
             if (marketActive) {
                 sendResponse({ started: false, error: 'Market Finder調査はすでに実行中です。' });
@@ -58,6 +60,7 @@
             return true;
         }
         if (request.action === 'START_ERANK_RESEARCH') {
+            rememberMarketFinderTab(sender);
             const keywords = normalizeKeywordList(request.keywords);
             if (marketActive) {
                 sendResponse({ started: false, error: 'Market Finder調査はすでに実行中です。' });
@@ -101,6 +104,25 @@
         }
         return false;
     });
+    function rememberMarketFinderTab(sender) {
+        var _a;
+        if ((_a = sender.tab) === null || _a === void 0 ? void 0 : _a.id)
+            marketFinderTabId = sender.tab.id;
+    }
+    function focusMarketFinderTab() {
+        if (marketFinderTabId === null)
+            return;
+        chrome.tabs.get(marketFinderTabId, (tab) => {
+            if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                marketFinderTabId = null;
+                return;
+            }
+            if (tab.windowId !== undefined) {
+                chrome.windows.update(tab.windowId, { focused: true });
+            }
+            chrome.tabs.update(tab.id, { active: true });
+        });
+    }
     function normalizeKeywordList(value) {
         if (!Array.isArray(value))
             return [];
@@ -257,6 +279,7 @@
             marketActive = false;
             marketCurrentKeyword = '';
             saveMarketState();
+            focusMarketFinderTab();
             return;
         }
         marketCurrentKeyword = keyword;
@@ -357,7 +380,7 @@
     function navigateEverbeeProductAnalytics(tabId, keyword) {
         return new Promise((resolve, reject) => {
             const url = `https://app.everbee.io/product-analytics?search_term=${encodeURIComponent(keyword)}`;
-            chrome.tabs.update(tabId, { url, active: true }, (tab) => {
+            chrome.tabs.update(tabId, { url, active: false }, (tab) => {
                 var _a;
                 if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
                     reject(new Error(((_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message) || 'EverBee Product Analyticsを開けませんでした。'));
@@ -386,7 +409,7 @@
         });
     }
     function createEverbeeTab(resolve, reject) {
-        chrome.tabs.create({ url: marketEverbeeUrl, active: true }, async (tab) => {
+        chrome.tabs.create({ url: marketEverbeeUrl, active: false }, async (tab) => {
             if (!(tab === null || tab === void 0 ? void 0 : tab.id)) {
                 reject(new Error('EverBeeタブを開けませんでした。'));
                 return;
@@ -406,7 +429,7 @@
             if (erankTabId !== null) {
                 chrome.tabs.get(erankTabId, (tab) => {
                     if (!chrome.runtime.lastError && (tab === null || tab === void 0 ? void 0 : tab.id)) {
-                        chrome.tabs.update(tab.id, { active: true }, () => resolve(tab.id));
+                        chrome.tabs.update(tab.id, { active: false }, () => resolve(tab.id));
                         return;
                     }
                     erankTabId = null;
@@ -418,7 +441,7 @@
                 .then((tabId) => {
                 if (tabId !== null) {
                     erankTabId = tabId;
-                    chrome.tabs.update(tabId, { active: true }, () => resolve(tabId));
+                    chrome.tabs.update(tabId, { active: false }, () => resolve(tabId));
                     return;
                 }
                 createErankTab(resolve, reject);
@@ -443,7 +466,7 @@
         });
     }
     function createErankTab(resolve, reject) {
-        chrome.tabs.create({ url: marketErankUrl, active: true }, async (tab) => {
+        chrome.tabs.create({ url: marketErankUrl, active: false }, async (tab) => {
             if (!(tab === null || tab === void 0 ? void 0 : tab.id)) {
                 reject(new Error('eRankタブを開けませんでした。'));
                 return;

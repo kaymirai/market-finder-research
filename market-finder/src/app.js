@@ -99,6 +99,7 @@ const elements = {
   erankResultsList: document.querySelector('#erankResultsList'),
   erankSummary: document.querySelector('#erankSummary'),
   erankCount: document.querySelector('#erankCount'),
+  downloadErankCsvBtn: document.querySelector('#downloadErankCsvBtn'),
   resultsList: document.querySelector('#resultsList'),
   copyKeywordsBtn: document.querySelector('#copyKeywordsBtn'),
   copyReadyBtn: document.querySelector('#copyReadyBtn'),
@@ -693,10 +694,15 @@ function renderErankSummary(rows) {
 }
 
 function erankSourceLabel(row) {
+  const sourceKeyword = erankSourceKeyword(row)
+  if (sourceKeyword) return `eRank派生: ${sourceKeyword} から発見`
+  return 'eRankで調べた元語句'
+}
+
+function erankSourceKeyword(row) {
   const notes = String(row.notes ?? '')
   const match = notes.match(/related keywords for\s+(.+)$/i)
-  if (match?.[1]) return `eRank派生: ${match[1]} から発見`
-  return 'eRankで調べた元語句'
+  return match?.[1]?.trim() ?? ''
 }
 
 function renderErankCard(row) {
@@ -768,6 +774,7 @@ function renderErankGroup(title, help, rows, options = {}) {
 function renderErankResults() {
   const ranked = erankResultRows()
   elements.erankCount.textContent = String(ranked.length)
+  elements.downloadErankCsvBtn.disabled = ranked.length === 0
   renderErankSummary(ranked)
 
   if (ranked.length === 0) {
@@ -1139,6 +1146,60 @@ async function downloadJob() {
     'JSONコピー済み',
     '接続できない時のJSON'
   )
+}
+
+function downloadTextFile(filename, content, type = 'text/plain;charset=utf-8') {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function exportErankCsv() {
+  const rows = erankResultRows()
+  if (rows.length === 0) return
+
+  const header = [
+    'Source Type',
+    'Source Keyword',
+    'Keyword',
+    'Action',
+    'Opportunity Score',
+    'Search',
+    'Clicks',
+    'CTR',
+    'Competition',
+    'KD',
+    'Trend',
+    'Notes',
+  ]
+
+  const lines = rows.map((row) => {
+    const normalized = row.erankOpportunity.normalized
+    const sourceKeyword = erankSourceKeyword(row)
+    return [
+      sourceKeyword ? 'eRank related keyword' : 'eRank searched keyword',
+      sourceKeyword,
+      normalized.keyword,
+      row.erankOpportunity.label,
+      row.erankOpportunity.score,
+      normalized.erankSearchVolume ?? '',
+      normalized.erankClicks ?? '',
+      normalized.erankCtr ?? '',
+      normalized.erankCompetition ?? '',
+      normalized.erankKeywordDifficulty ?? '',
+      normalized.erankTrend ?? '',
+      row.notes ?? '',
+    ].map(csvCell).join(',')
+  })
+
+  const date = new Date().toISOString().slice(0, 10)
+  downloadTextFile(`market-finder-erank-${date}.csv`, [header.map(csvCell).join(','), ...lines].join('\n'), 'text/csv;charset=utf-8')
 }
 
 function fillResearchJob() {
@@ -1636,6 +1697,7 @@ function bindEvents() {
   elements.copyKeywordsBtn.addEventListener('click', copyKeywords)
   elements.copyReadyBtn.addEventListener('click', copyReadyKeywords)
   elements.downloadJobBtn.addEventListener('click', downloadJob)
+  elements.downloadErankCsvBtn.addEventListener('click', exportErankCsv)
   elements.buildNextRoundBtn.addEventListener('click', buildNextRound)
   elements.autoBucketBtn.addEventListener('click', () => autoBucketKeywords(true))
   elements.buildSeoPlanBtn.addEventListener('click', buildSeoPlan)
