@@ -83,6 +83,7 @@
     function normalizeMetricForKey(value: string, key: ErankMetricKey) {
         const normalized = normalizeText(value)
         if (/^(unknown|n\/a|no data|-)$/i.test(normalized)) return ''
+        if (/\bunknown\b|n\/a|no data/i.test(normalized)) return ''
         const numbers = (normalized.match(/-?\d[\d,.]*/g) ?? []).map((match) => match.replace(/,/g, ''))
         if (numbers.length === 0) return normalizeMetric(normalized)
 
@@ -251,6 +252,41 @@
         return ''
     }
 
+    function metricBetweenLabels(bodyText: string, labelPattern: string, nextLabelPattern: string) {
+        const regex = new RegExp(`(?:${labelPattern})[\\s\\S]*?(-?\\d[\\d,.]*(?:\\.\\d+)?%?)[\\s\\S]*?(?=(?:${nextLabelPattern}))`, 'i')
+        const match = bodyText.match(regex)
+        return match?.[1] ? normalizeMetric(match[1]) : ''
+    }
+
+    function keywordStatisticsSection(bodyText: string) {
+        const start = bodyText.search(/keyword\s+statistics/i)
+        if (start < 0) return bodyText
+
+        const rest = bodyText.slice(start)
+        const next = rest.search(/\b(keyword\s+ideas|related\s+keywords|near\s+matches|broad\s+matches|search\s+trend|trend\s+buzz)\b/i)
+        return next > 0 ? rest.slice(0, next) : rest
+    }
+
+    function extractKeywordStatisticsMetrics(bodyText: string): ErankMetrics {
+        const result = emptyErankMetrics()
+        const statisticsText = keywordStatisticsSection(bodyText)
+        const searchesLabel = 'Avg\\.?\\s*Searches|Average\\s*Searches'
+        const clicksLabel = 'Avg\\.?\\s*Clicks|Average\\s*Clicks'
+        const ctrLabel = 'CTR|Avg\\.?\\s*CTR|Average\\s*CTR'
+        const competitionLabel = 'Competition|Etsy\\s*Competition'
+
+        result.erankSearchVolume = metricBetweenLabels(statisticsText, searchesLabel, clicksLabel)
+            || metricByRegex(['Avg. Searches', 'Avg Searches', 'Average Searches', 'Searches'], statisticsText)
+        result.erankClicks = metricBetweenLabels(statisticsText, clicksLabel, ctrLabel)
+            || metricByRegex(['Avg. Clicks', 'Avg Clicks', 'Average Clicks', 'Clicks'], statisticsText)
+        result.erankCtr = metricBetweenLabels(statisticsText, ctrLabel, competitionLabel)
+            || metricByRegex(['CTR', 'Avg. CTR', 'Avg CTR', 'Average CTR'], statisticsText)
+        result.erankCompetition = metricBetweenLabels(statisticsText, competitionLabel, 'Keyword\\s*Ideas|Related\\s*Keywords|Search\\s*Trend|Trend|$')
+            || metricByRegex(['Competition', 'Etsy Competition'], statisticsText)
+
+        return result
+    }
+
     function headerKey(value: string) {
         const text = value.toLowerCase()
         if (/keywords?|keyword ideas?|search term/.test(text)) return 'keyword'
@@ -311,39 +347,109 @@
         return true
     }
 
-    function metricNumberTokens(value: string) {
+    type MetricToken = {
+        value: string
+        number: number
+        hasPercent: boolean
+    }
+
+    function metricTokens(value: string): MetricToken[] {
         return (normalizeText(value).match(/-?\d[\d,.]*%?/g) ?? [])
-            .map((token) => token.replace(/[,%]/g, ''))
-            .filter((token) => token !== '')
+            .map((token) => {
+                const cleaned = token.replace(/[,%]/g, '')
+                return {
+                    value: cleaned,
+                    number: Number(cleaned),
+                    hasPercent: token.includes('%'),
+                }
+            })
+            .filter((token) => token.value !== '' && Number.isFinite(token.number))
+    }
+
+    function metricNumberTokens(value: string) {
+        return metricTokens(value).map((token) => token.value)
     }
 
     function orderedMetricsFromText(rowText: string, keyword: string): ErankMetrics {
         const result = emptyErankMetrics()
         const keywordIndex = rowText.toLowerCase().indexOf(keyword.toLowerCase())
         const metricText = keywordIndex >= 0 ? rowText.slice(keywordIndex + keyword.length) : rowText
-        const numbers = metricNumberTokens(metricText)
-        if (numbers.length < 5) return result
+        const tokens = metricTokens(metricText)
+        if (tokens.length < 5) return result
 
-        const ordered = numbers.length >= 6 ? numbers.slice(-6) : ['', ...numbers.slice(-5)]
-        const [trend, searches, clicks, ctr, competition, kd] = ordered
-        const assignments: Array<[ErankMetricKey, string]> = [
-            ['erankTrend', trend],
-            ['erankSearchVolume', searches],
-            ['erankClicks', clicks],
-            ['erankCtr', ctr],
-            ['erankCompetition', competition],
-            ['erankKeywordDifficulty', kd],
+        let bestMatch: { index: number, score: number } | null = null
+        for (let index = 2; index <= tokens.length - 3; index += 1) {
+            const search = tokens[index - 2]
+            const clicks = tokens[index - 1]
+            const ctr = tokens[index]
+            const competition = tokens[index + 1]
+            const kd = tokens[index + 2]
+            if (search.number <= 0 || clicks.number <= 0) continue
+            if (ctr.number < 0 || ctr.number > 500) continue
+            if (competition.number <= 0) continue
+            if (kd.number < 0 || kd.number > 100) continue
+
+            const score = (ctr.hasPercent ? 20 : 0)
+                + (competition.number >= 1000 ? 12 : 0)
+                + (search.number >= 100 ? 4 : 0)
+                + (clicks.number >= 100 ? 4 : 0)
+                + (kd.number >= 0 && kd.number <= 100 ? 4 : 0)
+                - index * 0.01
+            if (!bestMatch || score > bestMatch.score) bestMatch = { index, score }
+        }
+
+        if (!bestMatch) return result
+
+        const ctrIndex = bestMatch.index
+        const trend = tokens[ctrIndex - 3]
+        const assignments: Array<[ErankMetricKey, string | undefined]> = [
+            ['erankTrend', trend?.value],
+            ['erankSearchVolume', tokens[ctrIndex - 2]?.value],
+            ['erankClicks', tokens[ctrIndex - 1]?.value],
+            ['erankCtr', tokens[ctrIndex]?.value],
+            ['erankCompetition', tokens[ctrIndex + 1]?.value],
+            ['erankKeywordDifficulty', tokens[ctrIndex + 2]?.value],
         ]
 
         for (const [key, value] of assignments) {
-            if (metricValueLooksUsable(value, key)) result[key] = value
+            if (value && metricValueLooksUsable(value, key)) result[key] = value
         }
 
         return result
     }
 
+    function extractKeywordDifficultyFromRowText(rowText: string, keyword: string) {
+        return orderedMetricsFromText(rowText, keyword).erankKeywordDifficulty
+    }
+
     function orderedMetricsFromRowText(row: HTMLElement, keyword: string): ErankMetrics {
         return orderedMetricsFromText(elementText(row), keyword)
+    }
+
+    function hasUnknownDemandLabels(rawText: string) {
+        const text = normalizeText(rawText).toLowerCase()
+        const unknownCount = (text.match(/\b(?:unknown|n\/a|no data|-)\b/g) ?? []).length
+        return /(avg\.?\s*searches?|average\s*searches?|searches?)\s*(unknown|n\/a|no data|-)\b/.test(text)
+            || /(avg\.?\s*clicks?|average\s*clicks?|clicks?)\s*(unknown|n\/a|no data|-)\b/.test(text)
+            || /\b(?:avg\.?\s*)?ctr\s*(unknown|n\/a|no data|-)\b/.test(text)
+            || unknownCount >= 3
+    }
+
+    function sanitizeCompetitionLeak<T extends ErankMetrics>(metrics: T, rawText: string): T {
+        const competition = metrics.erankCompetition
+        if (!competition) return metrics
+
+        const demandKeys: ErankMetricKey[] = ['erankSearchVolume', 'erankClicks', 'erankCtr']
+        const leakedKeys = demandKeys.filter((key) => metrics[key] && metrics[key] === competition)
+        const allDemandMatchesCompetition = leakedKeys.length === demandKeys.length
+
+        if (!allDemandMatchesCompetition && !(leakedKeys.length > 0 && hasUnknownDemandLabels(rawText))) return metrics
+
+        for (const key of leakedKeys) {
+            metrics[key] = ''
+        }
+
+        return metrics
     }
 
     function metricValueFromPoint(row: HTMLElement, key: ErankMetricKey, columnCenter: number) {
@@ -360,8 +466,14 @@
         }
 
         for (const candidate of candidates) {
+            const rect = candidate.getBoundingClientRect()
+            const center = rect.left + rect.width / 2
+            const distance = Math.abs(center - columnCenter)
+            if (rect.width > 180 || distance > 90) continue
             const text = elementText(candidate)
             if (!text || text.length > 80) continue
+            if (/\bunknown\b|n\/a|no data/i.test(text)) continue
+            if (metricNumberTokens(text).length > 1) continue
             const value = normalizeMetricForKey(text, key)
             if (metricValueLooksUsable(value, key)) return value
         }
@@ -416,10 +528,10 @@
     }
 
     function closestMetricValue(row: HTMLElement, key: ErankMetricKey, columnCenter: number) {
+        if (key === 'erankCompetition' || key === 'erankKeywordDifficulty') return ''
+
         const pointedValue = metricValueFromPoint(row, key, columnCenter)
         if (pointedValue) return pointedValue
-
-        if (key === 'erankCompetition' || key === 'erankKeywordDifficulty') return ''
 
         const rowRect = row.getBoundingClientRect()
         const cells = (Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a')) as HTMLElement[])
@@ -433,12 +545,14 @@
             .filter((item) => {
                 if (!item.text || item.text.length > 80 || hasSameTextChild(item.element, item.text)) return false
                 if (item.rect.top < rowRect.top - 2 || item.rect.bottom > rowRect.bottom + 2) return false
+                if (/\bunknown\b|n\/a|no data/i.test(item.text)) return false
+                if (metricNumberTokens(item.text).length > 1) return false
                 if (!metricValueLooksUsable(item.value, key)) return false
                 return /\d|unknown|n\/a|no data|-/i.test(item.text)
             })
             .sort((a, b) => Math.abs((a.rect.left + a.rect.width / 2) - columnCenter) - Math.abs((b.rect.left + b.rect.width / 2) - columnCenter))
 
-        const maxDistance = 145
+        const maxDistance = 90
         const match = cells.find((item) => Math.abs((item.rect.left + item.rect.width / 2) - columnCenter) <= maxDistance)
         return match?.value ?? ''
     }
@@ -565,8 +679,9 @@
             const column = columns.get(key)
             result[key] = orderedMetrics[key] || (column ? closestMetricValue(row, key, column.center) : '')
         }
+        const rowText = elementText(row)
 
-        return result
+        return sanitizeCompetitionLeak(result, rowText)
     }
 
     function extractVisualRelatedKeywordRows(sourceKeyword: string): ErankResult[] {
@@ -597,7 +712,7 @@
                 erankKeywordDifficulty: '',
                 erankTrend: '',
                 notes: `Extracted from eRank related keywords for ${sourceKeyword}`,
-                rawText: '',
+                rawText: elementText(row),
             }
 
             const orderedMetrics = orderedMetricsFromRowText(row, keyword)
@@ -605,6 +720,7 @@
                 const column = columns.get(metricKey)
                 result[metricKey] = orderedMetrics[metricKey] || (column ? closestMetricValue(row, metricKey, column.center) : '')
             }
+            sanitizeCompetitionLeak(result, result.rawText)
 
             const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty
             if (!hasUsefulMetric) continue
@@ -659,6 +775,7 @@
                 const metricKey = key as ErankMetricKey
                 result[metricKey] = orderedMetrics[metricKey] || normalizeMetricForKey(cells[index], metricKey)
             })
+            sanitizeCompetitionLeak(result, cells.join(' '))
 
             if (Object.values(result).some(Boolean)) return result
         }
@@ -724,7 +841,7 @@
                     erankKeywordDifficulty: '',
                     erankTrend: '',
                     notes: `Extracted from eRank related keywords for ${sourceKeyword}`,
-                    rawText: '',
+                    rawText: cells.join(' '),
                 }
 
                 const orderedMetrics = orderedMetricsFromText(cells.join(' '), keyword)
@@ -735,6 +852,7 @@
                         ;(result as unknown as Record<string, string>)[field] = orderedMetrics[metricKey] || normalizeMetricForKey(cells[index], metricKey)
                     }
                 })
+                sanitizeCompetitionLeak(result, result.rawText)
 
                 const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty
                 if (!hasUsefulMetric) continue
@@ -751,12 +869,13 @@
     function extractMetrics(keyword: string): ErankResult {
         const rawBodyText = document.body.innerText || ''
         const bodyText = normalizeText(rawBodyText)
+        const statisticsMetrics = extractKeywordStatisticsMetrics(bodyText)
         const visualMetrics = extractFromVisualGrid(keyword)
         const tableMetrics = extractFromTables(keyword)
-        const erankSearchVolume = visualMetrics.erankSearchVolume || tableMetrics.erankSearchVolume || metricByRegex(['Average Searches', 'Avg Searches', 'Searches'], bodyText)
-        const erankClicks = visualMetrics.erankClicks || tableMetrics.erankClicks || metricByRegex(['Average Clicks', 'Avg Clicks', 'Clicks'], bodyText)
-        const erankCtr = visualMetrics.erankCtr || tableMetrics.erankCtr || metricByRegex(['Average CTR', 'Avg CTR', 'CTR'], bodyText)
-        const erankCompetition = visualMetrics.erankCompetition || tableMetrics.erankCompetition
+        const erankSearchVolume = statisticsMetrics.erankSearchVolume || visualMetrics.erankSearchVolume || tableMetrics.erankSearchVolume
+        const erankClicks = statisticsMetrics.erankClicks || visualMetrics.erankClicks || tableMetrics.erankClicks
+        const erankCtr = statisticsMetrics.erankCtr || visualMetrics.erankCtr || tableMetrics.erankCtr
+        const erankCompetition = statisticsMetrics.erankCompetition || visualMetrics.erankCompetition || tableMetrics.erankCompetition
         const erankKeywordDifficulty = visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty
         const erankTrend = visualMetrics.erankTrend || tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText)
         const relatedKeywords = extractRelatedKeywordRows(keyword)

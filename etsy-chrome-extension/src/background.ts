@@ -169,6 +169,19 @@
         })
     }
 
+    function activateTab(tabId: number) {
+        return new Promise<void>((resolve) => {
+            chrome.tabs.get(tabId, (tab) => {
+                if (!chrome.runtime.lastError && tab?.windowId !== undefined) {
+                    chrome.windows.update(tab.windowId, { focused: true })
+                }
+                chrome.tabs.update(tabId, { active: true }, () => {
+                    setTimeout(resolve, 500)
+                })
+            })
+        })
+    }
+
     function normalizeKeywordList(value: unknown) {
         if (!Array.isArray(value)) return []
         const seen = new Set<string>()
@@ -444,10 +457,14 @@
     function navigateEverbeeProductAnalytics(tabId: number, keyword: string) {
         return new Promise<void>((resolve, reject) => {
             const url = `https://app.everbee.io/product-analytics?search_term=${encodeURIComponent(keyword)}`
-            chrome.tabs.update(tabId, { url, active: false }, (tab) => {
+            chrome.tabs.update(tabId, { url, active: true }, (tab) => {
                 if (chrome.runtime.lastError || !tab?.id) {
                     reject(new Error(chrome.runtime.lastError?.message || 'EverBee Product Analyticsを開けませんでした。'))
                     return
+                }
+
+                if (tab.windowId !== undefined) {
+                    chrome.windows.update(tab.windowId, { focused: true })
                 }
 
                 waitForTabComplete(tabId)
@@ -475,7 +492,7 @@
     }
 
     function createEverbeeTab(resolve: (tabId: number) => void, reject: (error: Error) => void) {
-        chrome.tabs.create({ url: marketEverbeeUrl, active: false }, async (tab) => {
+        chrome.tabs.create({ url: marketEverbeeUrl, active: true }, async (tab) => {
             if (!tab?.id) {
                 reject(new Error('EverBeeタブを開けませんでした。'))
                 return
@@ -483,6 +500,7 @@
 
             marketTabId = tab.id
             try {
+                await activateTab(tab.id)
                 await waitForTabComplete(tab.id)
                 resolve(tab.id)
             } catch (error) {
@@ -496,7 +514,7 @@
             if (erankTabId !== null) {
                 chrome.tabs.get(erankTabId, (tab) => {
                     if (!chrome.runtime.lastError && tab?.id) {
-                        chrome.tabs.update(tab.id, { active: false }, () => resolve(tab.id as number))
+                        activateTab(tab.id).then(() => resolve(tab.id as number))
                         return
                     }
 
@@ -510,7 +528,7 @@
                 .then((tabId) => {
                     if (tabId !== null) {
                         erankTabId = tabId
-                        chrome.tabs.update(tabId, { active: false }, () => resolve(tabId))
+                        activateTab(tabId).then(() => resolve(tabId))
                         return
                     }
 
@@ -538,7 +556,7 @@
     }
 
     function createErankTab(resolve: (tabId: number) => void, reject: (error: Error) => void) {
-        chrome.tabs.create({ url: marketErankUrl, active: false }, async (tab) => {
+        chrome.tabs.create({ url: marketErankUrl, active: true }, async (tab) => {
             if (!tab?.id) {
                 reject(new Error('eRankタブを開けませんでした。'))
                 return
@@ -546,6 +564,7 @@
 
             erankTabId = tab.id
             try {
+                await activateTab(tab.id)
                 await waitForTabComplete(tab.id)
                 resolve(tab.id)
             } catch (error) {
@@ -593,6 +612,7 @@
     }
 
     async function runKeywordInEverbeeTab(tabId: number, keyword: string): Promise<EverbeeTabResponse> {
+        await activateTab(tabId)
         const firstTry = await sendEverbeeMessage(tabId, keyword)
         if (firstTry.ok || !firstTry.error?.includes('Receiving end does not exist')) return firstTry
 
@@ -601,10 +621,12 @@
             files: ['dist/everbeeContent.js'],
         })
 
+        await activateTab(tabId)
         return sendEverbeeMessage(tabId, keyword)
     }
 
     async function runKeywordInErankTab(tabId: number, keyword: string): Promise<ErankTabResponse> {
+        await activateTab(tabId)
         const firstTry = await sendErankMessage(tabId, keyword)
         if (firstTry.ok || !firstTry.error?.includes('Receiving end does not exist')) return firstTry
 
@@ -613,6 +635,7 @@
             files: ['dist/erankContent.js'],
         })
 
+        await activateTab(tabId)
         return sendErankMessage(tabId, keyword)
     }
 

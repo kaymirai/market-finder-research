@@ -1069,6 +1069,31 @@ function fillEverbeeJobFromErank() {
   return keywords.length
 }
 
+function hasUnknownErankDemandLabels(rawText = '') {
+  const text = normalizePhrase(rawText)
+  const unknownCount = (text.match(/\b(?:unknown|n\/a|no data|-)\b/g) ?? []).length
+  return /(avg\.?\s*searches?|average\s*searches?|searches?)\s*(unknown|n\/a|no data|-)\b/.test(text)
+    || /(avg\.?\s*clicks?|average\s*clicks?|clicks?)\s*(unknown|n\/a|no data|-)\b/.test(text)
+    || /\b(?:avg\.?\s*)?ctr\s*(unknown|n\/a|no data|-)\b/.test(text)
+    || unknownCount >= 3
+}
+
+function sanitizeErankMetricLeak(row) {
+  const next = { ...row }
+  const competition = String(next.erankCompetition ?? '').trim()
+  if (!competition) return next
+
+  const demandKeys = ['erankSearchVolume', 'erankClicks', 'erankCtr']
+  const leakedKeys = demandKeys.filter((key) => String(next[key] ?? '').trim() === competition)
+  const allDemandMatchesCompetition = leakedKeys.length === demandKeys.length
+  if (!allDemandMatchesCompetition && !(leakedKeys.length > 0 && hasUnknownErankDemandLabels(next.rawText))) return next
+
+  leakedKeys.forEach((key) => {
+    next[key] = ''
+  })
+  return next
+}
+
 function extensionResearchRows(extensionState) {
   if (!extensionState?.results?.length) return []
   return extensionState.results.flatMap((row) => [
@@ -1079,7 +1104,7 @@ function extensionResearchRows(extensionState) {
 
 function importExtensionResults(extensionState) {
   if (!extensionState?.results?.length) return
-  extensionResearchRows(extensionState).forEach(addResearchRow)
+  extensionResearchRows(extensionState).map(sanitizeErankMetricLeak).forEach(addResearchRow)
   ingestBroadSnippetsFromExtensionState(extensionState)
   if (state.progress.mode === 'erank') {
     const keywords = salesCheckKeywords()

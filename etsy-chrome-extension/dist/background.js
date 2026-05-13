@@ -123,6 +123,18 @@
             chrome.tabs.update(tab.id, { active: true });
         });
     }
+    function activateTab(tabId) {
+        return new Promise((resolve) => {
+            chrome.tabs.get(tabId, (tab) => {
+                if (!chrome.runtime.lastError && (tab === null || tab === void 0 ? void 0 : tab.windowId) !== undefined) {
+                    chrome.windows.update(tab.windowId, { focused: true });
+                }
+                chrome.tabs.update(tabId, { active: true }, () => {
+                    setTimeout(resolve, 500);
+                });
+            });
+        });
+    }
     function normalizeKeywordList(value) {
         if (!Array.isArray(value))
             return [];
@@ -380,11 +392,14 @@
     function navigateEverbeeProductAnalytics(tabId, keyword) {
         return new Promise((resolve, reject) => {
             const url = `https://app.everbee.io/product-analytics?search_term=${encodeURIComponent(keyword)}`;
-            chrome.tabs.update(tabId, { url, active: false }, (tab) => {
+            chrome.tabs.update(tabId, { url, active: true }, (tab) => {
                 var _a;
                 if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
                     reject(new Error(((_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message) || 'EverBee Product Analyticsを開けませんでした。'));
                     return;
+                }
+                if (tab.windowId !== undefined) {
+                    chrome.windows.update(tab.windowId, { focused: true });
                 }
                 waitForTabComplete(tabId)
                     .then(() => setTimeout(resolve, 3500))
@@ -409,13 +424,14 @@
         });
     }
     function createEverbeeTab(resolve, reject) {
-        chrome.tabs.create({ url: marketEverbeeUrl, active: false }, async (tab) => {
+        chrome.tabs.create({ url: marketEverbeeUrl, active: true }, async (tab) => {
             if (!(tab === null || tab === void 0 ? void 0 : tab.id)) {
                 reject(new Error('EverBeeタブを開けませんでした。'));
                 return;
             }
             marketTabId = tab.id;
             try {
+                await activateTab(tab.id);
                 await waitForTabComplete(tab.id);
                 resolve(tab.id);
             }
@@ -429,7 +445,7 @@
             if (erankTabId !== null) {
                 chrome.tabs.get(erankTabId, (tab) => {
                     if (!chrome.runtime.lastError && (tab === null || tab === void 0 ? void 0 : tab.id)) {
-                        chrome.tabs.update(tab.id, { active: false }, () => resolve(tab.id));
+                        activateTab(tab.id).then(() => resolve(tab.id));
                         return;
                     }
                     erankTabId = null;
@@ -441,7 +457,7 @@
                 .then((tabId) => {
                 if (tabId !== null) {
                     erankTabId = tabId;
-                    chrome.tabs.update(tabId, { active: false }, () => resolve(tabId));
+                    activateTab(tabId).then(() => resolve(tabId));
                     return;
                 }
                 createErankTab(resolve, reject);
@@ -466,13 +482,14 @@
         });
     }
     function createErankTab(resolve, reject) {
-        chrome.tabs.create({ url: marketErankUrl, active: false }, async (tab) => {
+        chrome.tabs.create({ url: marketErankUrl, active: true }, async (tab) => {
             if (!(tab === null || tab === void 0 ? void 0 : tab.id)) {
                 reject(new Error('eRankタブを開けませんでした。'));
                 return;
             }
             erankTabId = tab.id;
             try {
+                await activateTab(tab.id);
                 await waitForTabComplete(tab.id);
                 resolve(tab.id);
             }
@@ -506,6 +523,7 @@
     }
     async function runKeywordInEverbeeTab(tabId, keyword) {
         var _a;
+        await activateTab(tabId);
         const firstTry = await sendEverbeeMessage(tabId, keyword);
         if (firstTry.ok || !((_a = firstTry.error) === null || _a === void 0 ? void 0 : _a.includes('Receiving end does not exist')))
             return firstTry;
@@ -513,10 +531,12 @@
             target: { tabId },
             files: ['dist/everbeeContent.js'],
         });
+        await activateTab(tabId);
         return sendEverbeeMessage(tabId, keyword);
     }
     async function runKeywordInErankTab(tabId, keyword) {
         var _a;
+        await activateTab(tabId);
         const firstTry = await sendErankMessage(tabId, keyword);
         if (firstTry.ok || !((_a = firstTry.error) === null || _a === void 0 ? void 0 : _a.includes('Receiving end does not exist')))
             return firstTry;
@@ -524,6 +544,7 @@
             target: { tabId },
             files: ['dist/erankContent.js'],
         });
+        await activateTab(tabId);
         return sendErankMessage(tabId, keyword);
     }
     function sendEverbeeMessage(tabId, keyword) {
