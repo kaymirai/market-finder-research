@@ -178,7 +178,7 @@
             await wait(700);
         }
     }
-    function keywordIdeasMetricSnapshot() {
+    function keywordIdeasMetricSnapshot(keyword = '') {
         const columns = collectVisualColumns();
         const rows = collectVisualRows(columns).slice(0, 10);
         const summary = {
@@ -187,8 +187,21 @@
             withCompetition: 0,
             withKd: 0,
             partial: 0,
+            targetFound: false,
+            targetHasKd: false,
+            targetPartial: false,
             text: '',
         };
+        const targetRow = keyword ? findVisualRowForKeyword(keyword, columns) : null;
+        if (targetRow) {
+            const targetMetrics = emptyErankMetrics();
+            for (const key of ERANK_METRIC_KEYS) {
+                targetMetrics[key] = metricValueFromColumn(targetRow, key, columns);
+            }
+            summary.targetFound = true;
+            summary.targetHasKd = numericMetric(targetMetrics.erankKeywordDifficulty) !== null;
+            summary.targetPartial = looksLikePartialCompetitionLoad(targetMetrics);
+        }
         const parts = [];
         for (const row of rows) {
             const metrics = emptyErankMetrics();
@@ -199,7 +212,7 @@
                 summary.withDemand += 1;
             if (metrics.erankCompetition)
                 summary.withCompetition += 1;
-            if (metrics.erankKeywordDifficulty)
+            if (numericMetric(metrics.erankKeywordDifficulty) !== null)
                 summary.withKd += 1;
             if (looksLikePartialCompetitionLoad(metrics))
                 summary.partial += 1;
@@ -214,13 +227,13 @@
         summary.text = parts.join('|');
         return summary;
     }
-    async function waitForKeywordIdeasMetricsReady() {
+    async function waitForKeywordIdeasMetricsReady(keyword) {
         const startedAt = Date.now();
         let lastText = '';
         let stableCount = 0;
-        while (Date.now() - startedAt < 24000) {
+        while (Date.now() - startedAt < 60000) {
             await wait(1000);
-            const snapshot = keywordIdeasMetricSnapshot();
+            const snapshot = keywordIdeasMetricSnapshot(keyword);
             if (snapshot.text && snapshot.text === lastText) {
                 stableCount += 1;
             }
@@ -228,16 +241,24 @@
                 stableCount = 0;
                 lastText = snapshot.text;
             }
-            const waitedEnoughForLazyColumns = Date.now() - startedAt >= 3500;
+            const elapsed = Date.now() - startedAt;
+            const waitedEnoughForLazyColumns = elapsed >= 12000;
+            const requiredKdRows = Math.max(1, Math.min(snapshot.rows, 3));
+            const kdReady = snapshot.targetFound
+                ? snapshot.targetHasKd
+                : snapshot.withKd >= requiredKdRows;
             const hasVisibleMetrics = snapshot.rows > 0
                 && snapshot.withDemand > 0
-                && (snapshot.withCompetition > 0 || snapshot.withKd > 0);
+                && kdReady;
             const looksReady = hasVisibleMetrics
                 && snapshot.partial === 0
-                && stableCount >= 1;
+                && !snapshot.targetPartial
+                && stableCount >= 3;
             if (waitedEnoughForLazyColumns && looksReady)
                 return;
         }
+        const latest = keywordIdeasMetricSnapshot(keyword);
+        throw new Error(`eRankのKD表示を60秒待ちましたが、数字として確認できませんでした。CompetitionはUnknownでもOKですが、KDが未表示または読み込み途中のため、このキーワードで停止しました。rows=${latest.rows} kd=${latest.withKd} partial=${latest.partial}`);
     }
     function describeElement(element) {
         var _a;
@@ -560,10 +581,9 @@
         const competition = numericMetric(metrics.erankCompetition);
         const kd = numericMetric(metrics.erankKeywordDifficulty);
         const demand = Math.max(search, clicks);
+        const competitionLooksTiny = competition !== null && competition > 0 && competition < 100;
         return demand >= 300
-            && competition !== null
-            && competition > 0
-            && competition < 100
+            && competitionLooksTiny
             && kd !== null
             && kd > 0
             && kd < 25;
@@ -1145,7 +1165,7 @@
         await wait(4500);
         await waitForLikelyResults(keyword);
         await revealKeywordIdeasTable();
-        await waitForKeywordIdeasMetricsReady();
+        await waitForKeywordIdeasMetricsReady(keyword);
         return extractMetrics(keyword);
     }
     chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
