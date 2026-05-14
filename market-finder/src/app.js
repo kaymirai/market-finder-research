@@ -103,6 +103,7 @@ const elements = {
   erankSummary: document.querySelector('#erankSummary'),
   erankCount: document.querySelector('#erankCount'),
   downloadErankCsvBtn: document.querySelector('#downloadErankCsvBtn'),
+  downloadStep4CsvBtn: document.querySelector('#downloadStep4CsvBtn'),
   resultsList: document.querySelector('#resultsList'),
   copyKeywordsBtn: document.querySelector('#copyKeywordsBtn'),
   copyReadyBtn: document.querySelector('#copyReadyBtn'),
@@ -1134,11 +1135,15 @@ function renderEverbeeDetail(row) {
   `
 }
 
-function renderResultsTable() {
-  const options = currentOptions()
-  const ranked = rankResearchRows(state.researchRows, options)
+function everbeeResultRows() {
+  return rankResearchRows(state.researchRows, currentOptions())
     .filter((row) => row.score.validation.hasEverbeeData)
+}
+
+function renderResultsTable() {
+  const ranked = everbeeResultRows()
   elements.buildNextRoundBtn.disabled = state.researchRows.length === 0
+  elements.downloadStep4CsvBtn.disabled = ranked.length === 0
 
   if (ranked.length === 0) {
     state.selectedResultKey = ''
@@ -1557,6 +1562,71 @@ function exportErankCsv() {
 
   const date = new Date().toISOString().slice(0, 10)
   downloadTextFile(`market-finder-erank-${date}.csv`, [header.map(csvCell).join(','), ...lines].join('\n'), 'text/csv;charset=utf-8')
+}
+
+function exportStep4Csv() {
+  const rows = everbeeResultRows()
+  if (rows.length === 0) return
+
+  const header = [
+    'Rank',
+    'Keyword',
+    'Opportunity Score',
+    'Grade',
+    'Validation',
+    'Listings Analyzed',
+    'Top Monthly Sales',
+    'Top Revenue',
+    'Average Price',
+    'Listing Age Months',
+    'eRank Search',
+    'eRank Clicks',
+    'eRank CTR',
+    'eRank Competition',
+    'eRank KD',
+    'eRank Trend',
+    'Product Theme',
+    'Target',
+    'Design Direction',
+    'SEO Title',
+    'Tags',
+    'Positive Reasons',
+    'Warnings',
+    'Notes',
+  ]
+
+  const lines = rows.map((row, index) => {
+    const normalized = row.score.normalized
+    return [
+      index + 1,
+      normalized.keyword,
+      row.score.score,
+      row.score.label,
+      row.score.validation.label,
+      normalized.listingsAnalyzed ?? '',
+      normalized.topMonthlySales ?? '',
+      normalized.topRevenue ?? '',
+      normalized.averagePrice ?? '',
+      normalized.listingAgeMonths ?? '',
+      normalized.erankSearchVolume ?? '',
+      normalized.erankClicks ?? '',
+      normalized.erankCtr ?? '',
+      normalized.erankCompetition ?? '',
+      normalized.erankKeywordDifficulty ?? '',
+      normalized.erankTrend ?? '',
+      row.idea.theme,
+      row.idea.target,
+      row.idea.designDirection,
+      row.idea.seoTitle,
+      row.idea.tags.join(', '),
+      scoreReasonLabels(row.score).join(' / '),
+      row.score.exclusionReasons.join(' / '),
+      row.notes ?? '',
+    ].map(csvCell).join(',')
+  })
+
+  const date = new Date().toISOString().slice(0, 10)
+  downloadTextFile(`market-finder-step4-everbee-${date}.csv`, `\ufeff${[header.map(csvCell).join(','), ...lines].join('\n')}`, 'text/csv;charset=utf-8')
 }
 
 function fillResearchJob() {
@@ -2077,6 +2147,7 @@ function bindEvents() {
   elements.copyReadyBtn.addEventListener('click', copyReadyKeywords)
   elements.downloadJobBtn.addEventListener('click', downloadJob)
   elements.downloadErankCsvBtn.addEventListener('click', exportErankCsv)
+  elements.downloadStep4CsvBtn.addEventListener('click', exportStep4Csv)
   elements.buildNextRoundBtn.addEventListener('click', buildNextRound)
   elements.autoBucketBtn.addEventListener('click', () => autoBucketKeywords(true))
   elements.buildSeoPlanBtn.addEventListener('click', buildSeoPlan)

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260514-3">
+    <link rel="stylesheet" href="./styles.css?v=20260515-1">
   </head>
   <body>
     <main class="app-shell">
@@ -376,11 +376,14 @@
             <h2>EverBeeで売上確認した候補</h2>
             <p class="panel-help">3「EverBeeで売上確認」で入った売上数字だけを、競合・売上・収益・新しさ・リスクでスコア化しています。ここから商品化する候補を選びます。</p>
           </div>
-          <div class="legend">
-            <span>A: すぐ商品化候補</span>
-            <span>B: 有望</span>
-            <span>C: 追加確認</span>
-            <span>D: 除外候補</span>
+          <div class="heading-actions">
+            <div class="legend">
+              <span>A: すぐ商品化候補</span>
+              <span>B: 有望</span>
+              <span>C: 追加確認</span>
+              <span>D: 除外候補</span>
+            </div>
+            <button id="downloadStep4CsvBtn" type="button" class="ghost-btn" data-optional="保存">STEP4 CSV保存</button>
           </div>
         </div>
         <div class="metric-glossary">
@@ -513,6 +516,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260514-3"></script>
+    <script type="module" src="./src/app.js?v=20260515-1"></script>
   </body>
 </html>
