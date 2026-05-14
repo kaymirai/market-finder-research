@@ -988,9 +988,10 @@ export function scoreEverbeeResult(row = {}, options = {}) {
     { test: (value) => value !== null && value > 0, points: 3 },
   ])
   const trendScore = scoreBand(listingAgeMonths, [
-    { test: (value) => value !== null && value <= 6 && (topMonthlySales ?? 0) >= 10, points: 15 },
-    { test: (value) => value !== null && value <= 12 && (topMonthlySales ?? 0) >= 10, points: 12 },
+    { test: (value) => value !== null && value >= 2 && value <= 6 && (topMonthlySales ?? 0) >= 10, points: 18 },
+    { test: (value) => value !== null && value >= 2 && value <= 12 && (topMonthlySales ?? 0) >= 10, points: 15 },
     { test: (value) => value !== null && value <= 18 && (topMonthlySales ?? 0) > 0, points: 7 },
+    { test: (value) => value !== null && value < 2 && (topMonthlySales ?? 0) >= 10, points: 6 },
   ])
   const priceScore = scoreBand(averagePrice, [
     { test: (value) => value !== null && value >= 18 && value <= 35, points: 10 },
@@ -1029,13 +1030,19 @@ export function scoreEverbeeResult(row = {}, options = {}) {
     { test: (value) => value !== null && value > 0, points: 3 },
   ])
 
-  const riskPenalty = riskTerms.length * 25
+  const oldReferencePenalty = listingAgeMonths !== null && listingAgeMonths >= 24
+    ? ((topMonthlySales ?? 0) >= 30 ? 6 : 14)
+    : 0
+  const tooFreshPenalty = listingAgeMonths !== null && listingAgeMonths < 2 && (topMonthlySales ?? 0) < 10 ? 8 : 0
+  const riskPenalty = riskTerms.length * 25 + oldReferencePenalty + tooFreshPenalty
   const score = Math.max(0, Math.min(100, competitionScore + demandScore + revenueScore + trendScore + priceScore + erankDemandScore + erankCompetitionScore + erankCtrScore + erankKeywordDifficultyScore + erankTrendScore - riskPenalty))
   const hasEverbeeData = listingsAnalyzed !== null || topMonthlySales !== null || topRevenue !== null
   const hasErankData = erankSearchVolume !== null || erankClicks !== null || erankCtr !== null || erankCompetition !== null || erankKeywordDifficulty !== null || erankTrend !== null
   const everbeePositive = (topMonthlySales ?? 0) > 0 || (topRevenue ?? 0) > 0
   const erankPositive = (erankSearchVolume ?? 0) > 0 || (erankClicks ?? 0) > 0 || (erankCtr ?? 0) > 0
   const exclusionReasons = []
+  if (listingAgeMonths !== null && listingAgeMonths >= 24 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('古い商品中心のため参考のみ')
+  if (listingAgeMonths !== null && listingAgeMonths < 2 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('新しすぎて売上確認が弱い')
   if (riskTerms.length > 0) exclusionReasons.push(`要確認語句: ${riskTerms.join(', ')}`)
   if ((listingsAnalyzed ?? 0) >= 10000 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('競合が多く需要が弱い')
   if (!hasEverbeeData && hasErankData && !erankPositive) exclusionReasons.push('eRank検索需要が未確認')
@@ -1067,6 +1074,8 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       erankCtrScore,
       erankKeywordDifficultyScore,
       erankTrendScore,
+      oldReferencePenalty,
+      tooFreshPenalty,
       riskPenalty,
     },
     validation: {

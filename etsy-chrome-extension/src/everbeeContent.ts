@@ -267,6 +267,72 @@
         price: number
     }
 
+    function parseAgeMonths(value: string) {
+        const numberMatch = value.match(/\d+(?:\.\d+)?/)
+        if (!numberMatch) return null
+        const amount = Number(numberMatch[0])
+        if (!Number.isFinite(amount)) return null
+        const source = value.toLowerCase()
+        if (/\b(?:yr|yrs|year|years)\b/.test(source)) return Math.round(amount * 12)
+        if (/\b(?:day|days)\b/.test(source)) return Math.max(1, Math.round(amount / 30))
+        return Math.round(amount)
+    }
+
+    function rowAgeMonths(row: VisibleAnalyticsRow) {
+        return parseAgeMonths(row.listingAge)
+    }
+
+    function opportunityScore(row: VisibleAnalyticsRow) {
+        const ageMonths = rowAgeMonths(row)
+        const age = ageMonths ?? 999
+        const freshBonus = age >= 2 && age <= 12 ? 45 : age <= 18 ? 22 : age <= 24 ? 8 : -18
+        const salesScore = Math.min(45, row.monthlySales * 2)
+        const revenueScore = Math.min(20, row.revenue / 50)
+        const priceScore = row.price >= 12 && row.price <= 45 ? 8 : row.price > 0 ? 2 : 0
+        const totalSalesPenalty = row.totalSales >= 1000 || age > 24 ? 12 : 0
+        return freshBonus + salesScore + revenueScore + priceScore - totalSalesPenalty
+    }
+
+    function pickBestRows(rows: VisibleAnalyticsRow[]) {
+        const bySales = rows.reduce<VisibleAnalyticsRow | null>((best, row) => {
+            if (!best || row.monthlySales > best.monthlySales) return row
+            return best
+        }, null)
+        const byRevenue = rows.reduce<VisibleAnalyticsRow | null>((best, row) => {
+            if (!best || row.revenue > best.revenue) return row
+            return best
+        }, null)
+
+        const recentCandidates = rows.filter((row) => {
+            const age = rowAgeMonths(row)
+            return age !== null && age >= 2 && age <= 12 && row.monthlySales >= 5
+        })
+        const warmCandidates = rows.filter((row) => {
+            const age = rowAgeMonths(row)
+            return age !== null && age <= 18 && row.monthlySales > 0
+        })
+        const sourceRows = recentCandidates.length > 0 ? recentCandidates : warmCandidates.length > 0 ? warmCandidates : rows
+        const opportunity = sourceRows.reduce<VisibleAnalyticsRow | null>((best, row) => {
+            if (!best || opportunityScore(row) > opportunityScore(best)) return row
+            return best
+        }, null)
+
+        const source = recentCandidates.length > 0
+            ? 'recent-sales'
+            : warmCandidates.length > 0
+                ? 'warm-sales'
+                : bySales
+                    ? 'sales-leader'
+                    : 'none'
+
+        return {
+            opportunity,
+            bySales,
+            byRevenue,
+            source,
+        }
+    }
+
     function extractVisibleProductAnalyticsMetrics(rawBodyText: string) {
         const rows: VisibleAnalyticsRow[] = []
         const lines = rawBodyText
@@ -313,18 +379,23 @@
             index = cursor + 1
         }
 
-        const bestSalesRow = rows.reduce<VisibleAnalyticsRow | null>((best, row) => {
-            if (!best || row.monthlySales > best.monthlySales) return row
-            return best
-        }, null)
+        const picked = pickBestRows(rows)
+        const representativeRow = picked.opportunity ?? picked.bySales ?? picked.byRevenue
         const revenues = rows.map((row) => row.revenue)
         const prices = rows.map((row) => row.price)
+        const bestRevenue = picked.byRevenue?.revenue ?? 0
+        const bestSales = picked.bySales?.monthlySales ?? 0
+        const bestRevenueAge = picked.byRevenue?.listingAge ?? ''
+        const bestSalesAge = picked.bySales?.listingAge ?? ''
 
         return {
-            topMonthlySales: bestSalesRow ? String(bestSalesRow.monthlySales) : '',
-            topRevenue: revenues.length > 0 ? String(Math.max(...revenues)) : '',
+            topMonthlySales: representativeRow ? String(representativeRow.monthlySales) : '',
+            topRevenue: representativeRow ? String(representativeRow.revenue) : '',
             averagePrice: prices.length > 0 ? (prices.reduce((sum, value) => sum + value, 0) / prices.length).toFixed(2) : '',
-            listingAge: bestSalesRow?.listingAge ?? rows[0]?.listingAge ?? '',
+            listingAge: representativeRow?.listingAge ?? rows[0]?.listingAge ?? '',
+            notes: rows.length > 0
+                ? `EverBee visible rows=${rows.length}; picked=${picked.source}; marketMaxRevenue=${bestRevenue}; marketMaxSales=${bestSales}; maxRevenueAge=${bestRevenueAge}; maxSalesAge=${bestSalesAge}`
+                : '',
         }
     }
 
@@ -417,7 +488,7 @@
         const listingAge = visibleTableMetrics.listingAge
 
         const notes = listingsAnalyzed || topMonthlySales || topRevenue
-            ? 'Extracted from EverBee screen'
+            ? `Extracted from EverBee screen${visibleTableMetrics.notes ? ` / ${visibleTableMetrics.notes}` : ''}`
             : `Metrics not found. Check the EverBee screen manually. URL=${location.href}`
 
         return {

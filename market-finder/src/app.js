@@ -633,6 +633,8 @@ function scoreReasonLabels(score) {
   if ((normalized.topRevenue ?? 0) >= 1000) reasons.push('売上が強い')
   else if ((normalized.topRevenue ?? 0) >= 300) reasons.push('売上あり')
   if ((normalized.listingAgeMonths ?? Infinity) <= 12 && (normalized.topMonthlySales ?? 0) >= 10) reasons.push('新しめで売れている')
+  if ((normalized.listingAgeMonths ?? 0) >= 24) reasons.push('古い商品は参考中心')
+  if ((normalized.listingAgeMonths ?? Infinity) < 2 && (normalized.topMonthlySales ?? 0) < 10) reasons.push('新しすぎるので保留')
   const hasErankDemand = (normalized.erankSearchVolume ?? 0) > 0 || (normalized.erankClicks ?? 0) > 0
   if ((normalized.erankSearchVolume ?? 0) >= 300 || (normalized.erankClicks ?? 0) >= 100) reasons.push('eRank需要あり')
   if (hasErankDemand && (normalized.erankCompetition ?? Infinity) < 5000) reasons.push('eRank競合低め')

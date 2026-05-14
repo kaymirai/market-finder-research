@@ -218,8 +218,74 @@
     function isPercentCell(value) {
         return /^[-+]?\d[\d,.]*%$/.test(value);
     }
+    function parseAgeMonths(value) {
+        const numberMatch = value.match(/\d+(?:\.\d+)?/);
+        if (!numberMatch)
+            return null;
+        const amount = Number(numberMatch[0]);
+        if (!Number.isFinite(amount))
+            return null;
+        const source = value.toLowerCase();
+        if (/\b(?:yr|yrs|year|years)\b/.test(source))
+            return Math.round(amount * 12);
+        if (/\b(?:day|days)\b/.test(source))
+            return Math.max(1, Math.round(amount / 30));
+        return Math.round(amount);
+    }
+    function rowAgeMonths(row) {
+        return parseAgeMonths(row.listingAge);
+    }
+    function opportunityScore(row) {
+        const ageMonths = rowAgeMonths(row);
+        const age = ageMonths !== null && ageMonths !== void 0 ? ageMonths : 999;
+        const freshBonus = age >= 2 && age <= 12 ? 45 : age <= 18 ? 22 : age <= 24 ? 8 : -18;
+        const salesScore = Math.min(45, row.monthlySales * 2);
+        const revenueScore = Math.min(20, row.revenue / 50);
+        const priceScore = row.price >= 12 && row.price <= 45 ? 8 : row.price > 0 ? 2 : 0;
+        const totalSalesPenalty = row.totalSales >= 1000 || age > 24 ? 12 : 0;
+        return freshBonus + salesScore + revenueScore + priceScore - totalSalesPenalty;
+    }
+    function pickBestRows(rows) {
+        const bySales = rows.reduce((best, row) => {
+            if (!best || row.monthlySales > best.monthlySales)
+                return row;
+            return best;
+        }, null);
+        const byRevenue = rows.reduce((best, row) => {
+            if (!best || row.revenue > best.revenue)
+                return row;
+            return best;
+        }, null);
+        const recentCandidates = rows.filter((row) => {
+            const age = rowAgeMonths(row);
+            return age !== null && age >= 2 && age <= 12 && row.monthlySales >= 5;
+        });
+        const warmCandidates = rows.filter((row) => {
+            const age = rowAgeMonths(row);
+            return age !== null && age <= 18 && row.monthlySales > 0;
+        });
+        const sourceRows = recentCandidates.length > 0 ? recentCandidates : warmCandidates.length > 0 ? warmCandidates : rows;
+        const opportunity = sourceRows.reduce((best, row) => {
+            if (!best || opportunityScore(row) > opportunityScore(best))
+                return row;
+            return best;
+        }, null);
+        const source = recentCandidates.length > 0
+            ? 'recent-sales'
+            : warmCandidates.length > 0
+                ? 'warm-sales'
+                : bySales
+                    ? 'sales-leader'
+                    : 'none';
+        return {
+            opportunity,
+            bySales,
+            byRevenue,
+            source,
+        };
+    }
     function extractVisibleProductAnalyticsMetrics(rawBodyText) {
-        var _a, _b, _c, _d, _e;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
         const rows = [];
         const lines = rawBodyText
             .split(/\r?\n/)
@@ -262,18 +328,22 @@
             });
             index = cursor + 1;
         }
-        const bestSalesRow = rows.reduce((best, row) => {
-            if (!best || row.monthlySales > best.monthlySales)
-                return row;
-            return best;
-        }, null);
+        const picked = pickBestRows(rows);
+        const representativeRow = (_d = (_c = picked.opportunity) !== null && _c !== void 0 ? _c : picked.bySales) !== null && _d !== void 0 ? _d : picked.byRevenue;
         const revenues = rows.map((row) => row.revenue);
         const prices = rows.map((row) => row.price);
+        const bestRevenue = (_f = (_e = picked.byRevenue) === null || _e === void 0 ? void 0 : _e.revenue) !== null && _f !== void 0 ? _f : 0;
+        const bestSales = (_h = (_g = picked.bySales) === null || _g === void 0 ? void 0 : _g.monthlySales) !== null && _h !== void 0 ? _h : 0;
+        const bestRevenueAge = (_k = (_j = picked.byRevenue) === null || _j === void 0 ? void 0 : _j.listingAge) !== null && _k !== void 0 ? _k : '';
+        const bestSalesAge = (_m = (_l = picked.bySales) === null || _l === void 0 ? void 0 : _l.listingAge) !== null && _m !== void 0 ? _m : '';
         return {
-            topMonthlySales: bestSalesRow ? String(bestSalesRow.monthlySales) : '',
-            topRevenue: revenues.length > 0 ? String(Math.max(...revenues)) : '',
+            topMonthlySales: representativeRow ? String(representativeRow.monthlySales) : '',
+            topRevenue: representativeRow ? String(representativeRow.revenue) : '',
             averagePrice: prices.length > 0 ? (prices.reduce((sum, value) => sum + value, 0) / prices.length).toFixed(2) : '',
-            listingAge: (_e = (_c = bestSalesRow === null || bestSalesRow === void 0 ? void 0 : bestSalesRow.listingAge) !== null && _c !== void 0 ? _c : (_d = rows[0]) === null || _d === void 0 ? void 0 : _d.listingAge) !== null && _e !== void 0 ? _e : '',
+            listingAge: (_q = (_o = representativeRow === null || representativeRow === void 0 ? void 0 : representativeRow.listingAge) !== null && _o !== void 0 ? _o : (_p = rows[0]) === null || _p === void 0 ? void 0 : _p.listingAge) !== null && _q !== void 0 ? _q : '',
+            notes: rows.length > 0
+                ? `EverBee visible rows=${rows.length}; picked=${picked.source}; marketMaxRevenue=${bestRevenue}; marketMaxSales=${bestSales}; maxRevenueAge=${bestRevenueAge}; maxSalesAge=${bestSalesAge}`
+                : '',
         };
     }
     function looksLikeMetricText(value) {
@@ -360,7 +430,7 @@
         const averagePrice = visibleTableMetrics.averagePrice;
         const listingAge = visibleTableMetrics.listingAge;
         const notes = listingsAnalyzed || topMonthlySales || topRevenue
-            ? 'Extracted from EverBee screen'
+            ? `Extracted from EverBee screen${visibleTableMetrics.notes ? ` / ${visibleTableMetrics.notes}` : ''}`
             : `Metrics not found. Check the EverBee screen manually. URL=${location.href}`;
         return {
             keyword,
