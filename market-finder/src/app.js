@@ -19,6 +19,8 @@ import {
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
+const PERSISTENCE_KEY = 'etsy-mirai-market-finder-state-v1'
+const PERSISTENCE_VERSION = 1
 
 const state = {
   candidates: [],
@@ -163,6 +165,123 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
 }
 
+function safeStorage() {
+  try {
+    const testKey = `${PERSISTENCE_KEY}:test`
+    window.localStorage.setItem(testKey, '1')
+    window.localStorage.removeItem(testKey)
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function selectedFlowMode() {
+  if (document.body.classList.contains('flow-csv')) return 'csv'
+  if (document.body.classList.contains('flow-seo')) return 'seo'
+  return 'auto'
+}
+
+function selectValueIfAvailable(select, value) {
+  if (!select || value === undefined || value === null) return
+  const exists = Array.from(select.options).some((option) => option.value === value)
+  if (exists) select.value = value
+}
+
+function setInputValue(input, value) {
+  if (!input || value === undefined || value === null) return
+  input.value = String(value)
+}
+
+function readPersistedState() {
+  const storage = safeStorage()
+  if (!storage) return null
+
+  try {
+    const raw = storage.getItem(PERSISTENCE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed?.version !== PERSISTENCE_VERSION) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function persistMarketFinderState() {
+  const storage = safeStorage()
+  if (!storage) return
+
+  const payload = {
+    version: PERSISTENCE_VERSION,
+    savedAt: new Date().toISOString(),
+    flowMode: selectedFlowMode(),
+    form: {
+      eventId: elements.eventSelect.value,
+      customEventName: elements.customEventInput.value,
+      categoryId: elements.categorySelect.value,
+      year: elements.yearInput.value,
+      limit: elements.limitInput.value,
+      seedKeywords: elements.seedInput.value,
+      customRiskTerms: elements.riskInput.value,
+      targets: selectedTargets(),
+      broadQueries: elements.broadQueryInput.value,
+      researchJob: elements.researchJobInput.value,
+      everbeeUrl: elements.everbeeUrlInput.value,
+      delay: elements.delayInput.value,
+      visibilityBucket: elements.visibilityBucketInput.value,
+      reachBucket: elements.reachBucketInput.value,
+      bestSellerBucket: elements.bestSellerBucketInput.value,
+      simpleSeoKeywords: elements.simpleSeoKeywordsInput.value,
+    },
+    marketState: {
+      researchRows: state.researchRows,
+      broadHints: state.broadHints,
+      broadSnippetKeys: Array.from(state.broadSnippetKeys),
+      selectedResultKey: state.selectedResultKey,
+      seoPlan: state.seoPlan,
+    },
+  }
+
+  try {
+    storage.setItem(PERSISTENCE_KEY, JSON.stringify(payload))
+  } catch {
+    // localStorage may be full if pasted market data is large. The app still works without persistence.
+  }
+}
+
+function restorePersistedState() {
+  const persisted = readPersistedState()
+  if (!persisted) return null
+
+  const form = persisted.form ?? {}
+  const savedState = persisted.marketState ?? {}
+
+  selectValueIfAvailable(elements.eventSelect, form.eventId)
+  setInputValue(elements.customEventInput, form.customEventName)
+  selectValueIfAvailable(elements.categorySelect, form.categoryId)
+  setInputValue(elements.yearInput, form.year)
+  setInputValue(elements.limitInput, form.limit)
+  setInputValue(elements.seedInput, form.seedKeywords)
+  setInputValue(elements.riskInput, form.customRiskTerms)
+  setInputValue(elements.broadQueryInput, form.broadQueries)
+  setInputValue(elements.researchJobInput, form.researchJob)
+  setInputValue(elements.everbeeUrlInput, form.everbeeUrl)
+  setInputValue(elements.delayInput, form.delay)
+  setInputValue(elements.visibilityBucketInput, form.visibilityBucket)
+  setInputValue(elements.reachBucketInput, form.reachBucket)
+  setInputValue(elements.bestSellerBucketInput, form.bestSellerBucket)
+  setInputValue(elements.simpleSeoKeywordsInput, form.simpleSeoKeywords)
+
+  state.researchRows = Array.isArray(savedState.researchRows) ? savedState.researchRows : []
+  state.broadHints = Array.isArray(savedState.broadHints) ? savedState.broadHints : []
+  state.broadSnippetKeys = new Set(Array.isArray(savedState.broadSnippetKeys) ? savedState.broadSnippetKeys : [])
+  state.selectedResultKey = String(savedState.selectedResultKey ?? '')
+  state.seoPlan = savedState.seoPlan ?? null
+
+  return persisted
+}
+
 function customEventName() {
   return String(elements.customEventInput?.value ?? '').trim()
 }
@@ -228,11 +347,12 @@ function fillSelects() {
   )).join('')
 }
 
-function renderTargets() {
+function renderTargets(options = {}) {
   const event = selectedEvent()
+  const savedTargets = Array.isArray(options.selectedTargets) ? new Set(options.selectedTargets) : null
   elements.targetChips.innerHTML = event.targets.map((target, index) => `
     <label class="chip">
-      <input type="checkbox" value="${escapeHtml(target)}" ${index < 7 ? 'checked' : ''}>
+      <input type="checkbox" value="${escapeHtml(target)}" ${savedTargets ? (savedTargets.has(target) ? 'checked' : '') : (index < 7 ? 'checked' : '')}>
       <span>${escapeHtml(target)}</span>
     </label>
   `).join('')
@@ -445,6 +565,7 @@ function broadStopWords() {
 function renderBroadHints() {
   if (state.broadHints.length === 0) {
     elements.broadHintList.innerHTML = '<div class="empty-state small">売れ筋の商品名やタグを貼り付けると、ここに種ワードが出ます。</div>'
+    persistMarketFinderState()
     return
   }
 
@@ -455,6 +576,7 @@ function renderBroadHints() {
       <small>${escapeHtml(hint.count)}</small>
     </label>
   `).join('')
+  persistMarketFinderState()
 }
 
 function isStrongBroadHint(keyword) {
@@ -472,6 +594,7 @@ function buildBroadQueries() {
   })
   elements.broadQueryInput.value = queries.join('\n')
   elements.broadStatus.textContent = `${queries.length}件の広め検索語を作りました。`
+  persistMarketFinderState()
   return queries
 }
 
@@ -1060,6 +1183,7 @@ function handleResultListClick(event) {
   if (!rowButton) return
   state.selectedResultKey = rowButton.dataset.resultKey
   renderResultsTable()
+  persistMarketFinderState()
 }
 
 function fillBucketTextarea(input, values) {
@@ -1140,6 +1264,7 @@ function buildSeoPlan() {
 
   renderSeoPlan()
   elements.seoStatus.textContent = `SEO案を作成しました。タイトル ${state.seoPlan.titleLength}文字 / タグ ${state.seoPlan.tags.length}個`
+  persistMarketFinderState()
 }
 
 function renderAll() {
@@ -1148,6 +1273,7 @@ function renderAll() {
   renderErankResults()
   renderResultsTable()
   renderSeoPlan()
+  persistMarketFinderState()
 }
 
 function generateCandidates() {
@@ -1436,18 +1562,20 @@ function exportErankCsv() {
 function fillResearchJob() {
   elements.researchJobInput.value = readyKeywords().join('\n')
   elements.extensionStatus.textContent = 'Step 2の候補を調査欄へ入れました。この欄の中身だけChrome拡張で調査します。'
+  persistMarketFinderState()
 }
 
 function clearResearchJob() {
   elements.researchJobInput.value = ''
   elements.extensionStatus.textContent = '調査キーワード欄をクリアしました。'
+  persistMarketFinderState()
 }
 
 function setSimpleStatus(message) {
   elements.simpleStatus.textContent = message
 }
 
-function setFlowMode(mode) {
+function setFlowMode(mode, options = {}) {
   document.body.classList.remove('flow-auto', 'flow-csv', 'flow-seo')
   document.body.classList.add(`flow-${mode}`)
   ;[elements.flowAutoBtn, elements.flowCsvBtn, elements.flowSeoBtn].forEach((button) => {
@@ -1464,6 +1592,8 @@ function setFlowMode(mode) {
     elements.simpleSeoStepNumber.textContent = '2'
     setSimpleStatus('良いキーワードを貼って、1「SEO用に入れる」を押してください。')
   }
+
+  if (options.persist !== false) persistMarketFinderState()
 }
 
 async function simpleStartErankResearch() {
@@ -1491,6 +1621,7 @@ function simpleUseSeoKeywords() {
   state.seoPlan = null
   renderSeoPlan()
   setSimpleStatus('キーワードをSEO欄へ入れました。次は2「SEO案を作る」です。')
+  persistMarketFinderState()
 }
 
 function simpleBuildSeo() {
@@ -1917,6 +2048,22 @@ function bindEvents() {
   })
   elements.categorySelect.addEventListener('change', generateCandidates)
   elements.yearInput.addEventListener('input', generateCandidates)
+  elements.limitInput.addEventListener('input', generateCandidates)
+  elements.seedInput.addEventListener('input', generateCandidates)
+  elements.riskInput.addEventListener('input', generateCandidates)
+  elements.targetChips.addEventListener('change', generateCandidates)
+  ;[
+    elements.broadQueryInput,
+    elements.researchJobInput,
+    elements.everbeeUrlInput,
+    elements.delayInput,
+    elements.visibilityBucketInput,
+    elements.reachBucketInput,
+    elements.bestSellerBucketInput,
+    elements.simpleSeoKeywordsInput,
+  ].forEach((input) => {
+    input.addEventListener('input', persistMarketFinderState)
+  })
   elements.broadBuildQueriesBtn.addEventListener('click', buildBroadQueries)
   elements.broadStartBtn.addEventListener('click', startBroadEverbeeResearch)
   elements.broadExtractBtn.addEventListener('click', extractBroadMarketHints)
@@ -1967,10 +2114,14 @@ function initExtensionBridge() {
 
 function init() {
   fillSelects()
-  renderTargets({ syncYear: true })
+  const persisted = restorePersistedState()
+  renderTargets({ selectedTargets: persisted?.form?.targets })
   bindEvents()
-  setFlowMode('auto')
+  setFlowMode(persisted?.flowMode ?? 'auto', { persist: false })
   generateCandidates()
+  if (state.researchRows.length > 0) {
+    setSimpleStatus(`${state.researchRows.length}件の前回結果を復元しました。続きから使えます。`)
+  }
   setRunningControls(false)
   initExtensionBridge()
 }
