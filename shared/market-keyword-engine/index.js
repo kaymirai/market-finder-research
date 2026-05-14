@@ -544,7 +544,7 @@ const FIELD_ALIASES = {
   topRevenue: ['top revenue', 'revenue', 'monthly revenue', '売上', '収益'],
   averagePrice: ['average price', 'avg price', 'price', '平均価格'],
   listingAge: ['listing age', 'age', '公開期間', '掲載期間'],
-  erankSearchVolume: ['erank search volume', 'search volume', 'avg searches', 'average searches', 'searches'],
+  erankSearchVolume: ['erank search volume', 'erank search', 'search volume', 'search', 'avg searches', 'avg. searches', 'average searches', 'searches'],
   erankClicks: ['erank clicks', 'clicks', 'avg clicks', 'average clicks'],
   erankCtr: ['erank ctr', 'ctr', 'click through rate', 'click-through rate'],
   erankCompetition: ['erank competition', 'competition', 'etsy competition'],

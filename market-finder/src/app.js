@@ -40,6 +40,7 @@ const state = {
   extensionConnected: false,
   extensionState: null,
   seoPlan: null,
+  selectedResultKey: '',
 }
 
 const pendingExtensionRequests = new Map()
@@ -707,6 +708,61 @@ function erankSourceKeyword(row) {
   return match?.[1]?.trim() ?? ''
 }
 
+function displayMetricValue(value, fallback = '-') {
+  if (value === null || value === undefined || value === '') return fallback
+  return value
+}
+
+function displayMoneyValue(value) {
+  const displayed = displayMetricValue(value)
+  return displayed === '-' ? '-' : `$${displayed}`
+}
+
+function compactReasonChips(reasons, limit = 3) {
+  return reasons
+    .slice(0, limit)
+    .map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`)
+    .join('')
+}
+
+function renderSmallScore(label, score, className) {
+  return `
+    <span class="mini-score ${className}">
+      <small>${escapeHtml(label)}</small>
+      <strong>${escapeHtml(score)}</strong>
+      <em>/100</em>
+    </span>
+  `
+}
+
+function renderErankTableRow(row) {
+  const normalized = row.score.normalized
+  const opportunity = row.erankOpportunity
+  const sourceLabel = erankSourceLabel(row)
+  const labelClass = erankOpportunityScoreClass(opportunity)
+  const scoreReasons = compactReasonChips(opportunity.reasons, 4)
+
+  return `
+    <article class="research-table-row erank-table-row">
+      <span class="table-cell score-cell" data-label="需要">
+        ${renderSmallScore('需要', opportunity.score, labelClass)}
+      </span>
+      <span class="table-cell keyword-cell" data-label="キーワード">
+        <strong>${escapeHtml(normalized.keyword)}</strong>
+        <span class="table-subline">${escapeHtml(sourceLabel)}</span>
+      </span>
+      <span class="table-cell number-cell" data-label="Search">${escapeHtml(displayMetricValue(normalized.erankSearchVolume))}</span>
+      <span class="table-cell number-cell" data-label="Clicks">${escapeHtml(displayMetricValue(normalized.erankClicks))}</span>
+      <span class="table-cell number-cell" data-label="Competition">${escapeHtml(displayMetricValue(normalized.erankCompetition, 'Unknown'))}</span>
+      <span class="table-cell number-cell" data-label="KD">${escapeHtml(displayMetricValue(normalized.erankKeywordDifficulty, '未取得'))}</span>
+      <span class="table-cell reason-cell" data-label="判定">
+        <span class="pill action-${escapeHtml(opportunity.action)}">${escapeHtml(opportunity.label)}</span>
+        ${scoreReasons ? `<span class="table-reasons">${scoreReasons}</span>` : ''}
+      </span>
+    </article>
+  `
+}
+
 function renderErankCard(row) {
   const normalized = row.score.normalized
   const opportunity = row.erankOpportunity
@@ -747,7 +803,7 @@ function renderErankCard(row) {
 function renderErankGroup(title, help, rows, options = {}) {
   if (rows.length === 0) return ''
   const limit = options.limit ?? 12
-  const cards = rows.slice(0, limit).map(renderErankCard).join('')
+  const tableRows = rows.slice(0, limit).map(renderErankTableRow).join('')
   const moreLabel = rows.length > limit ? `<small>${rows.length - limit}件は省略しています。</small>` : ''
   const body = `
     <div class="erank-group-heading">
@@ -757,7 +813,20 @@ function renderErankGroup(title, help, rows, options = {}) {
       </div>
       <span>${rows.length}件</span>
     </div>
-    <div class="erank-group-list">${cards}</div>
+    <div class="research-table-shell erank-table-shell">
+      <div class="research-table erank-table">
+        <div class="research-table-head erank-table-head">
+          <span>需要</span>
+          <span>キーワード</span>
+          <span>Search</span>
+          <span>Clicks</span>
+          <span>Competition</span>
+          <span>KD</span>
+          <span>判定</span>
+        </div>
+        ${tableRows}
+      </div>
+    </div>
     ${moreLabel}
   `
 
@@ -858,6 +927,141 @@ function renderResults() {
   }).join('')
 }
 
+function resultRowKey(row, index = 0) {
+  const keyword = normalizePhrase(row.score?.normalized?.keyword ?? row.keyword ?? '')
+  return keyword || `result-${index}`
+}
+
+function renderEverbeeTableRow(item, selectedKey) {
+  const { row, key } = item
+  const normalized = row.score.normalized
+  const labelClass = opportunityScoreClass(row.score)
+  const scoreReasons = compactReasonChips(scoreReasonLabels(row.score), 2)
+  const selectedClass = key === selectedKey ? ' is-selected' : ''
+  const age = normalized.listingAgeMonths === null || normalized.listingAgeMonths === undefined
+    ? '-'
+    : `${normalized.listingAgeMonths} mo`
+
+  return `
+    <button type="button" class="research-table-row everbee-table-row${selectedClass}" data-result-key="${escapeHtml(key)}" aria-pressed="${key === selectedKey ? 'true' : 'false'}">
+      <span class="table-cell score-cell" data-label="狙い目">
+        ${renderSmallScore('狙い目', row.score.score, labelClass)}
+      </span>
+      <span class="table-cell keyword-cell" data-label="キーワード">
+        <strong>${escapeHtml(normalized.keyword)}</strong>
+        <span class="table-subline">${escapeHtml(row.idea.theme)}</span>
+        ${scoreReasons ? `<span class="table-reasons">${scoreReasons}</span>` : ''}
+      </span>
+      <span class="table-cell number-cell" data-label="商品数">${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</span>
+      <span class="table-cell number-cell" data-label="月販売">${escapeHtml(displayMetricValue(normalized.topMonthlySales))}</span>
+      <span class="table-cell number-cell" data-label="売上">${escapeHtml(displayMoneyValue(normalized.topRevenue))}</span>
+      <span class="table-cell number-cell" data-label="新しさ">${escapeHtml(age)}</span>
+    </button>
+  `
+}
+
+function renderEverbeeDetail(row) {
+  const normalized = row.score.normalized
+  const labelClass = opportunityScoreClass(row.score)
+  const tags = row.idea.tags.map((tag) => `<span class="pill">${escapeHtml(tag)}</span>`).join('')
+  const scoreReasons = scoreReasonLabels(row.score)
+    .map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`)
+    .join('')
+  const reasons = row.score.exclusionReasons.length
+    ? `<div><span>注意</span><p>${escapeHtml(row.score.exclusionReasons.join(' / '))}</p></div>`
+    : ''
+
+  return `
+    <article class="result-detail-card">
+      <div class="result-top">
+        <div class="opportunity-score ${labelClass}"><span>狙い目</span><strong>${row.score.score}</strong></div>
+        <div>
+          <h3>${escapeHtml(normalized.keyword)}</h3>
+          <div class="meta-line">
+            <span class="pill">${escapeHtml(row.score.label)}</span>
+            <span class="pill">${escapeHtml(row.score.validation.label)}</span>
+            <span class="pill">${escapeHtml(row.idea.theme)}</span>
+          </div>
+          ${scoreReasons ? `<div class="reason-line">${scoreReasons}</div>` : ''}
+        </div>
+      </div>
+
+      <div class="metric-grid selected-metric-grid">
+        <div class="metric"><span>Listings</span><strong>${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</strong></div>
+        <div class="metric"><span>Sales</span><strong>${escapeHtml(displayMetricValue(normalized.topMonthlySales))}</strong></div>
+        <div class="metric"><span>Revenue</span><strong>${escapeHtml(displayMoneyValue(normalized.topRevenue))}</strong></div>
+        <div class="metric"><span>Price</span><strong>${escapeHtml(displayMoneyValue(normalized.averagePrice))}</strong></div>
+        <div class="metric"><span>Age</span><strong>${escapeHtml(displayMetricValue(normalized.listingAgeMonths))} mo</strong></div>
+        <div class="metric"><span>eRank Search</span><strong>${escapeHtml(displayMetricValue(normalized.erankSearchVolume))}</strong></div>
+        <div class="metric"><span>eRank Clicks</span><strong>${escapeHtml(displayMetricValue(normalized.erankClicks))}</strong></div>
+        <div class="metric"><span>eRank CTR</span><strong>${escapeHtml(displayMetricValue(normalized.erankCtr))}</strong></div>
+        <div class="metric"><span>eRank Comp</span><strong>${escapeHtml(displayMetricValue(normalized.erankCompetition, 'Unknown'))}</strong></div>
+        <div class="metric"><span>eRank KD</span><strong>${escapeHtml(displayMetricValue(normalized.erankKeywordDifficulty, '未取得'))}</strong></div>
+        <div class="metric"><span>eRank Trend</span><strong>${escapeHtml(displayMetricValue(normalized.erankTrend))}</strong></div>
+      </div>
+
+      <div class="idea-grid">
+        <div><span>ターゲット</span><p>${escapeHtml(row.idea.target)}</p></div>
+        <div><span>デザイン方向性</span><p>${escapeHtml(row.idea.designDirection)}</p></div>
+        <div><span>SEOタイトル案</span><p>${escapeHtml(row.idea.seoTitle)}</p></div>
+        <div><span>タグ案</span><div class="tag-list">${tags}</div></div>
+        ${reasons}
+      </div>
+    </article>
+  `
+}
+
+function renderResultsTable() {
+  const options = currentOptions()
+  const ranked = rankResearchRows(state.researchRows, options)
+    .filter((row) => row.score.validation.hasEverbeeData)
+  elements.buildNextRoundBtn.disabled = state.researchRows.length === 0
+
+  if (ranked.length === 0) {
+    state.selectedResultKey = ''
+    elements.resultsList.innerHTML = '<div class="empty-state">3「EverBeeで売上確認」が終わると、ここに売上で見た狙い目候補が表示されます。</div>'
+    return
+  }
+
+  const keyedRows = ranked.map((row, index) => ({ row, key: resultRowKey(row, index) }))
+  if (!state.selectedResultKey || !keyedRows.some((item) => item.key === state.selectedResultKey)) {
+    state.selectedResultKey = keyedRows[0].key
+  }
+
+  const selectedItem = keyedRows.find((item) => item.key === state.selectedResultKey) ?? keyedRows[0]
+  const tableRows = keyedRows.map((item) => renderEverbeeTableRow(item, state.selectedResultKey)).join('')
+
+  elements.resultsList.innerHTML = `
+    <div class="results-comparison-layout">
+      <div class="research-table-shell everbee-table-shell">
+        <div class="table-caption">候補を押すと、右に商品案・SEO案・タグ案が出ます。</div>
+        <div class="research-table everbee-table">
+          <div class="research-table-head everbee-table-head">
+            <span>狙い目</span>
+            <span>キーワード</span>
+            <span>商品数</span>
+            <span>月販売</span>
+            <span>売上</span>
+            <span>新しさ</span>
+          </div>
+          ${tableRows}
+        </div>
+      </div>
+      <div class="selected-result-panel">
+        ${renderEverbeeDetail(selectedItem.row)}
+      </div>
+    </div>
+  `
+}
+
+function handleResultListClick(event) {
+  if (!(event.target instanceof Element)) return
+  const rowButton = event.target.closest('[data-result-key]')
+  if (!rowButton) return
+  state.selectedResultKey = rowButton.dataset.resultKey
+  renderResultsTable()
+}
+
 function fillBucketTextarea(input, values) {
   input.value = values.join('\n')
 }
@@ -942,7 +1146,7 @@ function renderAll() {
   renderBroadHints()
   renderCandidates()
   renderErankResults()
-  renderResults()
+  renderResultsTable()
   renderSeoPlan()
 }
 
@@ -1721,6 +1925,7 @@ function bindEvents() {
   elements.addResearchBtn.addEventListener('click', addManualResearch)
   elements.importCsvBtn.addEventListener('click', importCsv)
   elements.sampleCsvBtn.addEventListener('click', fillSampleCsv)
+  elements.resultsList.addEventListener('click', handleResultListClick)
   elements.copyKeywordsBtn.addEventListener('click', copyKeywords)
   elements.copyReadyBtn.addEventListener('click', copyReadyKeywords)
   elements.downloadJobBtn.addEventListener('click', downloadJob)
