@@ -178,6 +178,67 @@
             await wait(700);
         }
     }
+    function keywordIdeasMetricSnapshot() {
+        const columns = collectVisualColumns();
+        const rows = collectVisualRows(columns).slice(0, 10);
+        const summary = {
+            rows: rows.length,
+            withDemand: 0,
+            withCompetition: 0,
+            withKd: 0,
+            partial: 0,
+            text: '',
+        };
+        const parts = [];
+        for (const row of rows) {
+            const metrics = emptyErankMetrics();
+            for (const key of ERANK_METRIC_KEYS) {
+                metrics[key] = metricValueFromColumn(row, key, columns);
+            }
+            if (metrics.erankSearchVolume || metrics.erankClicks || metrics.erankCtr)
+                summary.withDemand += 1;
+            if (metrics.erankCompetition)
+                summary.withCompetition += 1;
+            if (metrics.erankKeywordDifficulty)
+                summary.withKd += 1;
+            if (looksLikePartialCompetitionLoad(metrics))
+                summary.partial += 1;
+            parts.push([
+                metrics.erankSearchVolume,
+                metrics.erankClicks,
+                metrics.erankCtr,
+                metrics.erankCompetition,
+                metrics.erankKeywordDifficulty,
+            ].join(':'));
+        }
+        summary.text = parts.join('|');
+        return summary;
+    }
+    async function waitForKeywordIdeasMetricsReady() {
+        const startedAt = Date.now();
+        let lastText = '';
+        let stableCount = 0;
+        while (Date.now() - startedAt < 24000) {
+            await wait(1000);
+            const snapshot = keywordIdeasMetricSnapshot();
+            if (snapshot.text && snapshot.text === lastText) {
+                stableCount += 1;
+            }
+            else {
+                stableCount = 0;
+                lastText = snapshot.text;
+            }
+            const waitedEnoughForLazyColumns = Date.now() - startedAt >= 3500;
+            const hasVisibleMetrics = snapshot.rows > 0
+                && snapshot.withDemand > 0
+                && (snapshot.withCompetition > 0 || snapshot.withKd > 0);
+            const looksReady = hasVisibleMetrics
+                && snapshot.partial === 0
+                && stableCount >= 1;
+            if (waitedEnoughForLazyColumns && looksReady)
+                return;
+        }
+    }
     function describeElement(element) {
         var _a;
         const html = element;
@@ -484,6 +545,34 @@
         for (const key of leakedKeys) {
             metrics[key] = '';
         }
+        return metrics;
+    }
+    function numericMetric(value) {
+        if (!value)
+            return null;
+        const parsed = Number(String(value).replace(/[$,%\s,]/g, ''));
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    function looksLikePartialCompetitionLoad(metrics) {
+        var _a, _b;
+        const search = (_a = numericMetric(metrics.erankSearchVolume)) !== null && _a !== void 0 ? _a : 0;
+        const clicks = (_b = numericMetric(metrics.erankClicks)) !== null && _b !== void 0 ? _b : 0;
+        const competition = numericMetric(metrics.erankCompetition);
+        const kd = numericMetric(metrics.erankKeywordDifficulty);
+        const demand = Math.max(search, clicks);
+        return demand >= 300
+            && competition !== null
+            && competition > 0
+            && competition < 100
+            && kd !== null
+            && kd > 0
+            && kd < 25;
+    }
+    function clearLikelyPartialCompetitionLoad(metrics) {
+        if (!looksLikePartialCompetitionLoad(metrics))
+            return metrics;
+        metrics.erankCompetition = '';
+        metrics.erankKeywordDifficulty = '';
         return metrics;
     }
     function metricValueFromPoint(row, key, columnCenter) {
@@ -824,7 +913,7 @@
             }
         }
         const rowText = elementText(row);
-        return sanitizeCompetitionLeak(result, rowText);
+        return clearLikelyPartialCompetitionLoad(sanitizeCompetitionLeak(result, rowText));
     }
     function extractVisualRelatedKeywordRows(sourceKeyword) {
         const columns = collectVisualColumns();
@@ -866,7 +955,7 @@
                     result[metricKey] = orderedMetrics[metricKey] || columnMetric || (column ? closestMetricValue(row, metricKey, column.center) : '');
                 }
             }
-            sanitizeCompetitionLeak(result, result.rawText);
+            clearLikelyPartialCompetitionLoad(sanitizeCompetitionLeak(result, result.rawText));
             const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty;
             if (!hasUsefulMetric)
                 continue;
@@ -920,7 +1009,7 @@
                     ? cellMetric
                     : orderedMetrics[metricKey] || cellMetric;
             });
-            sanitizeCompetitionLeak(result, cells.join(' '));
+            clearLikelyPartialCompetitionLoad(sanitizeCompetitionLeak(result, cells.join(' ')));
             if (Object.values(result).some(Boolean))
                 return result;
         }
@@ -998,7 +1087,7 @@
                             : orderedMetrics[metricKey] || cellMetric;
                     }
                 });
-                sanitizeCompetitionLeak(result, result.rawText);
+                clearLikelyPartialCompetitionLoad(sanitizeCompetitionLeak(result, result.rawText));
                 const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty;
                 if (!hasUsefulMetric)
                     continue;
@@ -1056,6 +1145,7 @@
         await wait(4500);
         await waitForLikelyResults(keyword);
         await revealKeywordIdeasTable();
+        await waitForKeywordIdeasMetricsReady();
         return extractMetrics(keyword);
     }
     chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {

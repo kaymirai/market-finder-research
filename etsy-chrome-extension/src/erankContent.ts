@@ -220,6 +220,67 @@
         }
     }
 
+    function keywordIdeasMetricSnapshot() {
+        const columns = collectVisualColumns()
+        const rows = collectVisualRows(columns).slice(0, 10)
+        const summary = {
+            rows: rows.length,
+            withDemand: 0,
+            withCompetition: 0,
+            withKd: 0,
+            partial: 0,
+            text: '',
+        }
+
+        const parts: string[] = []
+        for (const row of rows) {
+            const metrics = emptyErankMetrics()
+            for (const key of ERANK_METRIC_KEYS) {
+                metrics[key] = metricValueFromColumn(row, key, columns)
+            }
+            if (metrics.erankSearchVolume || metrics.erankClicks || metrics.erankCtr) summary.withDemand += 1
+            if (metrics.erankCompetition) summary.withCompetition += 1
+            if (metrics.erankKeywordDifficulty) summary.withKd += 1
+            if (looksLikePartialCompetitionLoad(metrics)) summary.partial += 1
+            parts.push([
+                metrics.erankSearchVolume,
+                metrics.erankClicks,
+                metrics.erankCtr,
+                metrics.erankCompetition,
+                metrics.erankKeywordDifficulty,
+            ].join(':'))
+        }
+        summary.text = parts.join('|')
+        return summary
+    }
+
+    async function waitForKeywordIdeasMetricsReady() {
+        const startedAt = Date.now()
+        let lastText = ''
+        let stableCount = 0
+
+        while (Date.now() - startedAt < 24000) {
+            await wait(1000)
+            const snapshot = keywordIdeasMetricSnapshot()
+            if (snapshot.text && snapshot.text === lastText) {
+                stableCount += 1
+            } else {
+                stableCount = 0
+                lastText = snapshot.text
+            }
+
+            const waitedEnoughForLazyColumns = Date.now() - startedAt >= 3500
+            const hasVisibleMetrics = snapshot.rows > 0
+                && snapshot.withDemand > 0
+                && (snapshot.withCompetition > 0 || snapshot.withKd > 0)
+            const looksReady = hasVisibleMetrics
+                && snapshot.partial === 0
+                && stableCount >= 1
+
+            if (waitedEnoughForLazyColumns && looksReady) return
+        }
+    }
+
     function describeElement(element: Element) {
         const html = element as HTMLElement
         const input = element as HTMLInputElement
@@ -532,6 +593,35 @@
             metrics[key] = ''
         }
 
+        return metrics
+    }
+
+    function numericMetric(value: string) {
+        if (!value) return null
+        const parsed = Number(String(value).replace(/[$,%\s,]/g, ''))
+        return Number.isFinite(parsed) ? parsed : null
+    }
+
+    function looksLikePartialCompetitionLoad(metrics: ErankMetrics) {
+        const search = numericMetric(metrics.erankSearchVolume) ?? 0
+        const clicks = numericMetric(metrics.erankClicks) ?? 0
+        const competition = numericMetric(metrics.erankCompetition)
+        const kd = numericMetric(metrics.erankKeywordDifficulty)
+        const demand = Math.max(search, clicks)
+
+        return demand >= 300
+            && competition !== null
+            && competition > 0
+            && competition < 100
+            && kd !== null
+            && kd > 0
+            && kd < 25
+    }
+
+    function clearLikelyPartialCompetitionLoad<T extends ErankMetrics>(metrics: T): T {
+        if (!looksLikePartialCompetitionLoad(metrics)) return metrics
+        metrics.erankCompetition = ''
+        metrics.erankKeywordDifficulty = ''
         return metrics
     }
 
@@ -868,7 +958,7 @@
         }
         const rowText = elementText(row)
 
-        return sanitizeCompetitionLeak(result, rowText)
+        return clearLikelyPartialCompetitionLoad(sanitizeCompetitionLeak(result, rowText))
     }
 
     function extractVisualRelatedKeywordRows(sourceKeyword: string): ErankResult[] {
@@ -912,7 +1002,7 @@
                     result[metricKey] = orderedMetrics[metricKey] || columnMetric || (column ? closestMetricValue(row, metricKey, column.center) : '')
                 }
             }
-            sanitizeCompetitionLeak(result, result.rawText)
+            clearLikelyPartialCompetitionLoad(sanitizeCompetitionLeak(result, result.rawText))
 
             const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty
             if (!hasUsefulMetric) continue
@@ -970,7 +1060,7 @@
                     ? cellMetric
                     : orderedMetrics[metricKey] || cellMetric
             })
-            sanitizeCompetitionLeak(result, cells.join(' '))
+            clearLikelyPartialCompetitionLoad(sanitizeCompetitionLeak(result, cells.join(' ')))
 
             if (Object.values(result).some(Boolean)) return result
         }
@@ -1050,7 +1140,7 @@
                             : orderedMetrics[metricKey] || cellMetric
                     }
                 })
-                sanitizeCompetitionLeak(result, result.rawText)
+                clearLikelyPartialCompetitionLoad(sanitizeCompetitionLeak(result, result.rawText))
 
                 const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty
                 if (!hasUsefulMetric) continue
@@ -1113,6 +1203,7 @@
         await wait(4500)
         await waitForLikelyResults(keyword)
         await revealKeywordIdeasTable()
+        await waitForKeywordIdeasMetricsReady()
         return extractMetrics(keyword)
     }
 
