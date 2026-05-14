@@ -54,6 +54,9 @@
             return '';
         if (/\bunknown\b|n\/a|no data/i.test(normalized))
             return '';
+        const textValue = metricValueFromText(normalized, key);
+        if (textValue)
+            return textValue;
         const numbers = ((_a = normalized.match(/-?\d[\d,.]*/g)) !== null && _a !== void 0 ? _a : []).map((match) => match.replace(/,/g, ''));
         if (numbers.length === 0)
             return normalizeMetric(normalized);
@@ -322,12 +325,87 @@
                 value: cleaned,
                 number: Number(cleaned),
                 hasPercent: token.includes('%'),
+                raw: token,
             };
         })
             .filter((token) => token.value !== '' && Number.isFinite(token.number));
     }
     function metricNumberTokens(value) {
         return metricTokens(value).map((token) => token.value);
+    }
+    function pushMetricCandidate(candidates, raw) {
+        var _a;
+        const trimmed = normalizeText(raw);
+        if (!trimmed)
+            return;
+        const hasPercent = trimmed.includes('%');
+        const compact = trimmed
+            .replace(/%/g, '')
+            .replace(/,/g, '')
+            .replace(/\s+/g, '')
+            .trim();
+        const suffix = (_a = compact.match(/[kKmM]$/)) === null || _a === void 0 ? void 0 : _a[0].toLowerCase();
+        const numberText = suffix ? compact.slice(0, -1) : compact;
+        const parsed = Number(numberText);
+        if (!Number.isFinite(parsed))
+            return;
+        const scaled = suffix === 'm'
+            ? parsed * 1000000
+            : suffix === 'k'
+                ? parsed * 1000
+                : parsed;
+        const number = Math.round(scaled);
+        const value = String(number);
+        if (candidates.some((candidate) => candidate.value === value && candidate.hasPercent === hasPercent))
+            return;
+        candidates.push({ value, number, hasPercent, raw: trimmed });
+    }
+    function metricCandidatesFromText(value) {
+        const text = normalizeText(value);
+        const candidates = [];
+        const usedRanges = [];
+        const overlapsUsedRange = (start, end) => usedRanges.some(([usedStart, usedEnd]) => start < usedEnd && end > usedStart);
+        const groupedRegex = /-?\d{1,3}(?:[,\s]\d{3})+(?:\.\d+)?\s*[kKmM]?%?/g;
+        let groupedMatch;
+        while ((groupedMatch = groupedRegex.exec(text)) !== null) {
+            const start = groupedMatch.index;
+            const end = start + groupedMatch[0].length;
+            usedRanges.push([start, end]);
+            pushMetricCandidate(candidates, groupedMatch[0]);
+        }
+        const compactRegex = /-?\d+(?:\.\d+)?\s*[kKmM]?%?/g;
+        let compactMatch;
+        while ((compactMatch = compactRegex.exec(text)) !== null) {
+            const start = compactMatch.index;
+            const end = start + compactMatch[0].length;
+            if (overlapsUsedRange(start, end))
+                continue;
+            pushMetricCandidate(candidates, compactMatch[0]);
+        }
+        return candidates;
+    }
+    function metricValueFromText(value, key) {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+        const candidates = metricCandidatesFromText(value);
+        if (key === 'erankKeywordDifficulty') {
+            const kdCandidates = candidates.filter((candidate) => candidate.number >= 0 && candidate.number <= 100);
+            const splitKd = normalizeText(value).match(/\b(\d{1,2})\s+(\d)\b/);
+            if (splitKd)
+                pushMetricCandidate(kdCandidates, `${splitKd[1]}${splitKd[2]}`);
+            return (_b = (_a = kdCandidates.sort((a, b) => b.number - a.number)[0]) === null || _a === void 0 ? void 0 : _a.value) !== null && _b !== void 0 ? _b : '';
+        }
+        if (key === 'erankCtr') {
+            const ctrCandidates = candidates.filter((candidate) => candidate.number >= 0 && candidate.number <= 500);
+            return (_e = (_d = ((_c = ctrCandidates.find((candidate) => candidate.hasPercent)) !== null && _c !== void 0 ? _c : ctrCandidates[0])) === null || _d === void 0 ? void 0 : _d.value) !== null && _e !== void 0 ? _e : '';
+        }
+        if (key === 'erankCompetition') {
+            return (_g = (_f = candidates
+                .filter((candidate) => candidate.number > 0)
+                .sort((a, b) => b.number - a.number)[0]) === null || _f === void 0 ? void 0 : _f.value) !== null && _g !== void 0 ? _g : '';
+        }
+        if (key === 'erankTrend')
+            return (_j = (_h = candidates[candidates.length - 1]) === null || _h === void 0 ? void 0 : _h.value) !== null && _j !== void 0 ? _j : '';
+        return (_l = (_k = candidates[0]) === null || _k === void 0 ? void 0 : _k.value) !== null && _l !== void 0 ? _l : '';
     }
     function orderedMetricsFromText(rowText, keyword) {
         var _a, _b, _c, _d, _e;
@@ -481,6 +559,104 @@
             });
         }
         return columns;
+    }
+    function inferredColumnBounds(columns, key, rowRect) {
+        const column = columns.get(key);
+        if (!column)
+            return null;
+        const sorted = Array.from(columns.entries())
+            .sort((a, b) => a[1].center - b[1].center);
+        const index = sorted.findIndex(([columnKey]) => columnKey === key);
+        const previous = index > 0 ? sorted[index - 1][1] : null;
+        const next = index >= 0 && index < sorted.length - 1 ? sorted[index + 1][1] : null;
+        return {
+            left: previous ? (previous.center + column.center) / 2 : Math.max(rowRect.left, column.left - 80),
+            right: next ? (column.center + next.center) / 2 : Math.min(rowRect.right, column.right + 120),
+            center: column.center,
+        };
+    }
+    function metricTextSources(element) {
+        const sources = [
+            element.innerText,
+            element.textContent,
+            element.getAttribute('aria-label'),
+            element.getAttribute('title'),
+            element.getAttribute('data-value'),
+            element.getAttribute('data-tooltip'),
+            element.getAttribute('data-original-title'),
+        ];
+        const seen = new Set();
+        return sources
+            .map((source) => normalizeText(source !== null && source !== void 0 ? source : ''))
+            .filter((source) => {
+            if (!source || seen.has(source))
+                return false;
+            seen.add(source);
+            return true;
+        });
+    }
+    function metricValueFromColumn(row, key, columns) {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+        const rowRect = row.getBoundingClientRect();
+        const bounds = inferredColumnBounds(columns, key, rowRect);
+        if (!bounds)
+            return '';
+        const candidates = [];
+        const fragments = [];
+        const elements = Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a, button'));
+        for (const element of elements.filter(isVisibleElement)) {
+            const rect = element.getBoundingClientRect();
+            const center = rect.left + rect.width / 2;
+            const overlap = Math.min(rect.right, bounds.right) - Math.max(rect.left, bounds.left);
+            const columnWidth = bounds.right - bounds.left;
+            if (rect.top < rowRect.top - 2 || rect.bottom > rowRect.bottom + 2)
+                continue;
+            if (center < bounds.left || center > bounds.right || overlap <= 0)
+                continue;
+            if (rect.width > Math.max(columnWidth + 24, 220))
+                continue;
+            for (const source of metricTextSources(element)) {
+                if (source.length > 100 || /\bunknown\b|n\/a|no data/i.test(source))
+                    continue;
+                metricCandidatesFromText(source).forEach((candidate) => {
+                    if (!candidates.some((item) => item.value === candidate.value && item.hasPercent === candidate.hasPercent)) {
+                        candidates.push(candidate);
+                    }
+                });
+                if (/^\d{1,3}$/.test(source) && !hasSameTextChild(element, source)) {
+                    const duplicateFragment = fragments.some((fragment) => fragment.text === source && Math.abs(fragment.left - rect.left) <= 2);
+                    if (!duplicateFragment)
+                        fragments.push({ text: source, left: rect.left });
+                }
+            }
+        }
+        const joinedFragments = fragments
+            .sort((a, b) => a.left - b.left)
+            .map((fragment) => fragment.text)
+            .join('');
+        if (key === 'erankCompetition' && joinedFragments.length >= 4) {
+            pushMetricCandidate(candidates, joinedFragments);
+        }
+        if (key === 'erankKeywordDifficulty' && joinedFragments.length >= 2 && joinedFragments.length <= 3) {
+            pushMetricCandidate(candidates, joinedFragments);
+        }
+        const values = candidates.filter((candidate) => metricValueLooksUsable(candidate.value, key));
+        if (key === 'erankCompetition') {
+            return (_b = (_a = values
+                .filter((candidate) => candidate.number > 0)
+                .sort((a, b) => b.number - a.number)[0]) === null || _a === void 0 ? void 0 : _a.value) !== null && _b !== void 0 ? _b : '';
+        }
+        if (key === 'erankKeywordDifficulty') {
+            return (_d = (_c = values
+                .filter((candidate) => candidate.number >= 0 && candidate.number <= 100)
+                .sort((a, b) => b.number - a.number)[0]) === null || _c === void 0 ? void 0 : _c.value) !== null && _d !== void 0 ? _d : '';
+        }
+        if (key === 'erankCtr') {
+            return (_g = (_f = ((_e = values.find((candidate) => candidate.hasPercent)) !== null && _e !== void 0 ? _e : values[0])) === null || _f === void 0 ? void 0 : _f.value) !== null && _g !== void 0 ? _g : '';
+        }
+        if (key === 'erankTrend')
+            return (_j = (_h = values[values.length - 1]) === null || _h === void 0 ? void 0 : _h.value) !== null && _j !== void 0 ? _j : '';
+        return (_l = (_k = values[0]) === null || _k === void 0 ? void 0 : _k.value) !== null && _l !== void 0 ? _l : '';
     }
     function closestMetricValue(row, key, columnCenter) {
         var _a;
@@ -639,7 +815,13 @@
         const orderedMetrics = orderedMetricsFromRowText(row, keyword);
         for (const key of ERANK_METRIC_KEYS) {
             const column = columns.get(key);
-            result[key] = orderedMetrics[key] || (column ? closestMetricValue(row, key, column.center) : '');
+            const columnMetric = metricValueFromColumn(row, key, columns);
+            if (key === 'erankCompetition' || key === 'erankKeywordDifficulty') {
+                result[key] = columnMetric;
+            }
+            else {
+                result[key] = orderedMetrics[key] || columnMetric || (column ? closestMetricValue(row, key, column.center) : '');
+            }
         }
         const rowText = elementText(row);
         return sanitizeCompetitionLeak(result, rowText);
@@ -676,7 +858,13 @@
             const orderedMetrics = orderedMetricsFromRowText(row, keyword);
             for (const metricKey of ERANK_METRIC_KEYS) {
                 const column = columns.get(metricKey);
-                result[metricKey] = orderedMetrics[metricKey] || (column ? closestMetricValue(row, metricKey, column.center) : '');
+                const columnMetric = metricValueFromColumn(row, metricKey, columns);
+                if (metricKey === 'erankCompetition' || metricKey === 'erankKeywordDifficulty') {
+                    result[metricKey] = columnMetric;
+                }
+                else {
+                    result[metricKey] = orderedMetrics[metricKey] || columnMetric || (column ? closestMetricValue(row, metricKey, column.center) : '');
+                }
             }
             sanitizeCompetitionLeak(result, result.rawText);
             const hasUsefulMetric = result.erankSearchVolume || result.erankClicks || result.erankCompetition || result.erankKeywordDifficulty;
@@ -727,7 +915,10 @@
                 if (key === 'keyword')
                     return;
                 const metricKey = key;
-                result[metricKey] = orderedMetrics[metricKey] || normalizeMetricForKey(cells[index], metricKey);
+                const cellMetric = normalizeMetricForKey(cells[index], metricKey);
+                result[metricKey] = metricKey === 'erankCompetition' || metricKey === 'erankKeywordDifficulty'
+                    ? cellMetric
+                    : orderedMetrics[metricKey] || cellMetric;
             });
             sanitizeCompetitionLeak(result, cells.join(' '));
             if (Object.values(result).some(Boolean))
@@ -801,7 +992,10 @@
                         return;
                     if (field in result) {
                         const metricKey = field;
-                        result[field] = orderedMetrics[metricKey] || normalizeMetricForKey(cells[index], metricKey);
+                        const cellMetric = normalizeMetricForKey(cells[index], metricKey);
+                        result[field] = metricKey === 'erankCompetition' || metricKey === 'erankKeywordDifficulty'
+                            ? cellMetric
+                            : orderedMetrics[metricKey] || cellMetric;
                     }
                 });
                 sanitizeCompetitionLeak(result, result.rawText);
@@ -825,7 +1019,7 @@
         const erankSearchVolume = statisticsMetrics.erankSearchVolume || visualMetrics.erankSearchVolume || tableMetrics.erankSearchVolume;
         const erankClicks = statisticsMetrics.erankClicks || visualMetrics.erankClicks || tableMetrics.erankClicks;
         const erankCtr = statisticsMetrics.erankCtr || visualMetrics.erankCtr || tableMetrics.erankCtr;
-        const erankCompetition = statisticsMetrics.erankCompetition || visualMetrics.erankCompetition || tableMetrics.erankCompetition;
+        const erankCompetition = visualMetrics.erankCompetition || tableMetrics.erankCompetition;
         const erankKeywordDifficulty = visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty;
         const erankTrend = visualMetrics.erankTrend || tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText);
         const relatedKeywords = extractRelatedKeywordRows(keyword);
