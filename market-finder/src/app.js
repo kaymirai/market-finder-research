@@ -185,8 +185,9 @@ function selectedFlowMode() {
 
 function selectValueIfAvailable(select, value) {
   if (!select || value === undefined || value === null) return
-  const exists = Array.from(select.options).some((option) => option.value === value)
-  if (exists) select.value = value
+  const normalizedValue = value === 'auto-discovery' ? '' : value
+  const exists = Array.from(select.options).some((option) => option.value === normalizedValue)
+  if (exists) select.value = normalizedValue
 }
 
 function setInputValue(input, value) {
@@ -322,14 +323,16 @@ function currentOptions() {
 }
 
 function fillSelects() {
-  const eventsByMonth = MARKET_EVENTS.reduce((groups, event) => {
+  const eventsByMonth = MARKET_EVENTS.filter((event) => event.id !== 'auto-discovery').reduce((groups, event) => {
     const month = Number(event.month) || 0
     if (!groups.has(month)) groups.set(month, [])
     groups.get(month).push(event)
     return groups
   }, new Map())
 
-  elements.eventSelect.innerHTML = Array.from(eventsByMonth.entries())
+  elements.eventSelect.innerHTML = [
+    '<option value="">イベントなし（自動で探す）</option>',
+    ...Array.from(eventsByMonth.entries())
     .sort(([leftMonth], [rightMonth]) => leftMonth - rightMonth)
     .map(([month, events]) => {
       const groupLabel = month === 0 ? '自動探索・その他' : `北米 ${MONTH_LABELS[month] ?? `${month}月`}`
@@ -337,11 +340,10 @@ function fillSelects() {
         `<option value="${escapeHtml(event.id)}">${escapeHtml(event.jpLabel)} / ${escapeHtml(event.label)}</option>`
       )).join('')
       return `<optgroup label="${escapeHtml(groupLabel)}">${options}</optgroup>`
-    })
+    }),
+  ]
     .join('')
-  elements.eventSelect.value = MARKET_EVENTS.some((event) => event.id === 'auto-discovery')
-    ? 'auto-discovery'
-    : MARKET_EVENTS[0]?.id
+  elements.eventSelect.value = ''
 
   elements.categorySelect.innerHTML = PRODUCT_CATEGORIES.map((category) => (
     `<option value="${category.id}">${escapeHtml(category.label)}</option>`
