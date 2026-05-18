@@ -220,7 +220,9 @@ function persistMarketFinderState() {
     flowMode: selectedFlowMode(),
     form: {
       eventId: elements.eventSelect.value,
+      eventIdWasSet: Boolean(elements.eventSelect.value),
       customEventName: elements.customEventInput.value,
+      customEventWasSet: Boolean(String(elements.customEventInput.value ?? '').trim()),
       categoryId: elements.categorySelect.value,
       year: elements.yearInput.value,
       limit: elements.limitInput.value,
@@ -259,8 +261,12 @@ function restorePersistedState() {
   const form = persisted.form ?? {}
   const savedState = persisted.marketState ?? {}
 
-  selectValueIfAvailable(elements.eventSelect, form.eventId)
-  setInputValue(elements.customEventInput, form.customEventName)
+  if (form.eventIdWasSet === true) {
+    selectValueIfAvailable(elements.eventSelect, form.eventId)
+  } else {
+    elements.eventSelect.value = ''
+  }
+  setInputValue(elements.customEventInput, form.customEventWasSet === true ? form.customEventName : '')
   selectValueIfAvailable(elements.categorySelect, form.categoryId)
   setInputValue(elements.yearInput, form.year)
   setInputValue(elements.limitInput, form.limit)
