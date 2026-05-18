@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260515-1">
+    <link rel="stylesheet" href="./styles.css?v=20260518-1">
   </head>
   <body>
     <main class="app-shell">
@@ -90,25 +90,29 @@
           <small>数字が入ったら、タイトルとタグを作ります。</small>
           <button id="simpleSeoBtn" type="button" class="dark-btn">SEO案を作る</button>
         </div>
-        <div class="simple-status" id="simpleStatus">まずイベントと商品を選んでください。候補は自動で変わります。次は2「eRankで広く見る」です。</div>
+        <div class="simple-status" id="simpleStatus">商品だけでもOKです。アプリが相手・状況・趣味職業を自動で混ぜます。次は2「eRankで広く見る」です。</div>
       </section>
 
       <section class="workspace-grid">
         <aside class="panel controls-panel">
           <div class="panel-heading">
             <p class="section-kicker">Step 1 - 調査条件</p>
-            <h2>何の商品を、誰向けに調べるか</h2>
-            <p class="panel-help">ここでは検索の材料を決めます。ターゲットはイベントごとに用意した初期候補で、ONにした相手だけをStep 2の候補作成に使います。</p>
+            <h2>何の商品から探すか</h2>
+            <p class="panel-help">ここでは検索の材料を決めます。基本は商品だけで始められます。相手・状況・趣味職業・雰囲気は自動で混ぜ、必要な時だけイベントを足します。</p>
             <div class="route-note">
               <strong>ここでやること</strong>
-              <span>イベントと商品を選ぶだけです。下の候補は自動で変わります。</span>
+              <span>商品を選ぶだけで始められます。イベントを狙う時だけ選んでください。</span>
+            </div>
+            <div class="auto-scout-note">
+              <strong>基本は自動でOK</strong>
+              <span>イベント・相手・状況・趣味職業は、アプリが自動で混ぜて広め候補を作ります。イベントを指定したい時だけ下で選んでください。</span>
             </div>
           </div>
 
           <label class="field">
-            <span>北米イベント（月別）</span>
+            <span>イベント（任意・月別）</span>
             <select id="eventSelect"></select>
-            <small>よく使う北米イベントを月ごとに選べます。</small>
+            <small>最初は「自動探索」でOKです。季節イベントを狙う時だけ選びます。</small>
           </label>
 
           <label class="field">
@@ -516,6 +520,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260515-1"></script>
+    <script type="module" src="./src/app.js?v=20260518-1"></script>
   </body>
 </html>

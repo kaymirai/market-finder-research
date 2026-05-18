@@ -12,6 +12,98 @@ const TARGET_GROUPS = {
 
 const DEFAULT_DESIGN_ANGLES = ['clean typography', 'simple icon plus text', 'giftable phrase layout', 'retro badge style']
 
+const AUTO_DISCOVERY_SEGMENTS = {
+  recipients: [
+    'mom',
+    'dad',
+    'grandma',
+    'grandpa',
+    'teacher',
+    'nurse',
+    'coworker',
+    'best friend',
+    'bride',
+    'groom',
+    'maid of honor',
+    'dog mom',
+    'dog dad',
+    'cat mom',
+    'cat dad',
+    'book lover',
+    'coffee lover',
+    'plant lover',
+  ],
+  situations: [
+    'new mom',
+    'new dad',
+    'mom to be',
+    'dad to be',
+    'first time mom',
+    'first time dad',
+    'retirement',
+    'graduation',
+    'first day of school',
+    'family reunion',
+    'girls trip',
+    'bachelorette',
+    'baby shower',
+    'pregnancy announcement',
+    'housewarming',
+    'bridal shower',
+  ],
+  hobbiesAndWork: [
+    'book lover',
+    'pickleball',
+    'camping',
+    'fishing',
+    'gardening',
+    'plant lover',
+    'coffee lover',
+    'teacher',
+    'nurse',
+    'librarian',
+    'firefighter',
+    'realtor',
+    'barber',
+    'accountant',
+    'mechanic',
+    'coach',
+  ],
+  styles: [
+    'funny',
+    'sarcastic',
+    'retro',
+    'vintage',
+    'embroidered',
+    'western',
+    'minimalist',
+    'boho',
+    'cute',
+    'matching',
+    'personalized',
+    'custom',
+  ],
+}
+
+const PRODUCT_DISCOVERY_SEGMENTS = {
+  shirt: ['funny', 'embroidered', 'retro', 'vintage', 'western', 'matching'],
+  sweatshirt: ['embroidered', 'cozy', 'teacher', 'nurse', 'retro'],
+  mug: ['funny', 'personalized', 'teacher', 'nurse', 'coffee lover'],
+  tote: ['book lover', 'teacher', 'library', 'bridesmaid', 'market'],
+  sticker: ['teacher', 'book lover', 'planner', 'water bottle', 'laptop'],
+}
+
+const AUTO_DISCOVERY_INTENTS = [
+  'funny',
+  'personalized',
+  'custom',
+  'matching',
+  'retro',
+  'vintage',
+  'embroidered',
+  'appreciation',
+]
+
 function marketEvent(config) {
   return {
     defaultYear: DEFAULT_EVENT_YEAR,
@@ -24,6 +116,24 @@ function marketEvent(config) {
 }
 
 export const MARKET_EVENTS = [
+  marketEvent({
+    id: 'auto-discovery',
+    month: 0,
+    label: 'Auto Discovery',
+    jpLabel: '自動探索',
+    searchTerm: '',
+    displayTerm: 'Auto Discovery',
+    targets: AUTO_DISCOVERY_SEGMENTS.recipients,
+    intents: [
+      'funny',
+      'personalized',
+      'custom',
+      'matching',
+      'retro',
+      'vintage',
+    ],
+    designAngles: ['clear typography', 'niche phrase layout', 'simple icon plus text', 'giftable product design'],
+  }),
   marketEvent({
     id: 'new-years-day',
     month: 1,
@@ -607,6 +717,23 @@ function splitSeedText(value) {
     .filter((item) => item.length >= 2)
 }
 
+function autoDiscoveryTerms(category, event) {
+  return unique([
+    ...(event.targets ?? []),
+    ...AUTO_DISCOVERY_SEGMENTS.recipients,
+    ...AUTO_DISCOVERY_SEGMENTS.situations,
+    ...AUTO_DISCOVERY_SEGMENTS.hobbiesAndWork,
+    ...AUTO_DISCOVERY_SEGMENTS.styles,
+    ...(PRODUCT_DISCOVERY_SEGMENTS[category.id] ?? []),
+  ])
+    .map((term) => normalizePhrase(term))
+    .filter(Boolean)
+}
+
+function autoDiscoveryIntents() {
+  return unique(AUTO_DISCOVERY_INTENTS)
+}
+
 function buildCustomMarketEvent(value) {
   const searchTerm = normalizePhrase(value)
   const label = String(value ?? '').trim()
@@ -676,9 +803,12 @@ function scoreCandidateKeyword(keyword, customRiskTerms = []) {
   const risks = detectRiskTerms(keyword, customRiskTerms)
   let score = 20
 
+  if (words === 2) score += 8
   if (words >= 4 && words <= 7) score += 25
   if (words >= 8) score += 10
   if (/\b(first|est|gift|matching|from|teacher|mom|dad|grandma|grandpa|nurse)\b/.test(keyword)) score += 20
+  if (/\b(book lover|pickleball|camping|fishing|gardening|bride|groom|dog mom|dog dad|cat mom|cat dad|new mom|new dad|retirement|graduation)\b/.test(keyword)) score += 14
+  if (/\b(funny|retro|vintage|embroidered|western|personalized|custom)\b/.test(keyword)) score += 10
   if (/\b(2026|2027|party|season|life)\b/.test(keyword)) score += 10
   if (risks.length > 0) score -= 40
 
@@ -691,10 +821,13 @@ function buildKeywordTemplates(event, category, targets, intents, seedKeywords, 
   const templates = []
 
   for (const target of targets) {
-    templates.push(`${target} ${eventTerm} ${product}`)
-    if (year) templates.push(`${target} ${eventTerm} ${product} ${year}`)
-    templates.push(`${eventTerm} ${target} gift ${product}`)
     templates.push(`${target} gift ${product}`)
+    templates.push(`${target} ${product}`)
+    if (eventTerm) {
+      templates.push(`${target} ${eventTerm} ${product}`)
+      if (year) templates.push(`${target} ${eventTerm} ${product} ${year}`)
+      templates.push(`${eventTerm} ${target} gift ${product}`)
+    }
   }
 
   for (const intent of intents) {
@@ -708,7 +841,7 @@ function buildKeywordTemplates(event, category, targets, intents, seedKeywords, 
 
   for (const seed of seedKeywords) {
     const normalizedSeed = normalizePhrase(seed)
-    const hasEventTerm = normalizedSeed.includes(eventTerm)
+    const hasEventTerm = eventTerm ? normalizedSeed.includes(eventTerm) : false
     const hasProductTerm = normalizedSeed.includes(product)
 
     if (hasEventTerm && hasProductTerm) {
@@ -716,10 +849,10 @@ function buildKeywordTemplates(event, category, targets, intents, seedKeywords, 
     } else if (hasEventTerm) {
       templates.push(`${normalizedSeed} ${product}`)
     } else if (hasProductTerm) {
-      templates.push(`${eventTerm} ${normalizedSeed}`)
+      templates.push(eventTerm ? `${eventTerm} ${normalizedSeed}` : normalizedSeed)
     } else {
-      templates.push(`${normalizedSeed} ${eventTerm} ${product}`)
-      templates.push(`${eventTerm} ${normalizedSeed} ${product}`)
+      templates.push(eventTerm ? `${normalizedSeed} ${eventTerm} ${product}` : `${normalizedSeed} ${product}`)
+      if (eventTerm) templates.push(`${eventTerm} ${normalizedSeed} ${product}`)
       templates.push(`${normalizedSeed} ${product}`)
     }
 
@@ -741,13 +874,21 @@ export function generateKeywordCandidates(options = {}) {
   const selectedTargets = Array.isArray(options.targets) && options.targets.length > 0
     ? options.targets.map((target) => normalizePhrase(target)).filter(Boolean)
     : event.targets
+  const discoveryTargets = options.autoDiscovery === false
+    ? selectedTargets
+    : unique([...selectedTargets, ...autoDiscoveryTerms(category, event)])
   const customRiskTerms = splitSeedText(options.customRiskTerms)
-  const intents = unique([...event.intents.map((intent) => fillTemplate(intent, year)).filter(Boolean), ...(options.extraIntents ?? [])])
+  const intents = unique([
+    ...event.intents.map((intent) => fillTemplate(intent, year)).filter(Boolean),
+    ...(options.autoDiscovery === false ? [] : autoDiscoveryIntents(category)),
+    ...(options.extraIntents ?? []),
+  ])
 
   const keywords = unique(
-    buildKeywordTemplates(event, category, selectedTargets, intents, seedKeywords, year)
+    buildKeywordTemplates(event, category, discoveryTargets, intents, seedKeywords, year)
       .map((keyword) => normalizePhrase(keyword))
-      .filter((keyword) => countWords(keyword) >= 3)
+      .filter((keyword) => countWords(keyword) >= 2)
+      .filter((keyword) => !hasRepeatedAdjacentPhrase(keyword))
   )
 
   return keywords
@@ -777,32 +918,50 @@ export function generateBroadMarketQueries(options = {}) {
   const selectedTargets = Array.isArray(options.targets) && options.targets.length > 0
     ? options.targets.map((target) => normalizePhrase(target)).filter(Boolean)
     : event.targets
+  const discoveryTargets = options.autoDiscovery === false
+    ? selectedTargets
+    : unique([...selectedTargets, ...autoDiscoveryTerms(category, event)])
   const eventTerm = normalizePhrase(event.searchTerm)
   const product = normalizePhrase(category.searchTerm)
-  const intentPhrases = event.intents
-    .map((intent) => fillTemplate(intent, year))
+  const intentPhrases = unique([
+    ...event.intents.map((intent) => fillTemplate(intent, year)).filter(Boolean),
+    ...(options.autoDiscovery === false ? [] : autoDiscoveryIntents(category)),
+  ])
     .map((intent) => normalizePhrase(intent))
     .filter(Boolean)
   const tagQueries = unique((category.tags ?? [])
     .map((tag) => normalizePhrase(tag))
     .filter((tag) => tag && tag !== product)
     .slice(0, 4)
-    .map((tag) => `${eventTerm} ${tag}`))
-  const targetQueries = selectedTargets.slice(0, 8).flatMap((target) => [
-    `${target} ${product}`,
-    `${eventTerm} ${target}`,
-    `${eventTerm} ${target} ${product}`,
-  ])
+    .flatMap((tag) => eventTerm ? [`${eventTerm} ${tag}`, `${tag}`] : [tag]))
+  const targetQueries = discoveryTargets.slice(0, eventTerm ? 18 : 42).flatMap((target) => (
+    eventTerm
+      ? [
+          `${target} ${product}`,
+          `${target} gift`,
+          `${eventTerm} ${target}`,
+          `${eventTerm} ${target} ${product}`,
+        ]
+      : [`${target} ${product}`]
+  ))
   const intentQueries = intentPhrases.slice(0, 8).flatMap((intent) => [
     intent,
     `${intent} ${product}`,
   ])
-
-  const queries = [
+  const eventQueries = eventTerm ? [
     `${eventTerm} ${product}`,
     `${eventTerm} gift`,
     `${eventTerm} gift ${product}`,
     `${eventTerm} ${category.tags[0] ?? product}`,
+  ] : [
+    `funny ${product}`,
+    `personalized ${product}`,
+    `custom ${product}`,
+    `retro ${product}`,
+  ]
+
+  const queries = [
+    ...eventQueries,
     ...tagQueries,
     ...targetQueries,
     ...intentQueries,
@@ -880,7 +1039,7 @@ export function extractNicheHintsFromListings(listings = [], limit = 20, options
   const counts = new Map()
   const stopWords = options.stopWords ?? []
   const keepWords = options.keepWords ?? []
-  const blockedPhrases = new Set((options.blockedPhrases ?? []).map((phrase) => normalizePhrase(phrase)))
+  const blockedPhrases = new Set((options.blockedPhrases ?? []).map((phrase) => normalizePhrase(phrase)).filter(Boolean))
   const blockedTokens = new Set((options.blockedTokens ?? []).flatMap((phrase) => normalizePhrase(phrase).split(' ').filter(Boolean)))
 
   const pushHint = (phrase, weight) => {

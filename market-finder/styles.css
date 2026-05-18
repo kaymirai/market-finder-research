@@ -391,6 +391,28 @@ body.flow-seo .simple-runner {
   line-height: 1.45;
 }
 
+.auto-scout-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  padding: 10px 11px;
+}
+
+.auto-scout-note strong {
+  color: #1d4ed8;
+  font-size: 13px;
+}
+
+.auto-scout-note span {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .field {
   display: grid;
   gap: 7px;

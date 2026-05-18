@@ -332,15 +332,15 @@ function fillSelects() {
   elements.eventSelect.innerHTML = Array.from(eventsByMonth.entries())
     .sort(([leftMonth], [rightMonth]) => leftMonth - rightMonth)
     .map(([month, events]) => {
-      const groupLabel = month === 0 ? '北米 その他' : `北米 ${MONTH_LABELS[month] ?? `${month}月`}`
+      const groupLabel = month === 0 ? '自動探索・その他' : `北米 ${MONTH_LABELS[month] ?? `${month}月`}`
       const options = events.map((event) => (
         `<option value="${escapeHtml(event.id)}">${escapeHtml(event.jpLabel)} / ${escapeHtml(event.label)}</option>`
       )).join('')
       return `<optgroup label="${escapeHtml(groupLabel)}">${options}</optgroup>`
     })
     .join('')
-  elements.eventSelect.value = MARKET_EVENTS.some((event) => event.id === 'fathers-day')
-    ? 'fathers-day'
+  elements.eventSelect.value = MARKET_EVENTS.some((event) => event.id === 'auto-discovery')
+    ? 'auto-discovery'
     : MARKET_EVENTS[0]?.id
 
   elements.categorySelect.innerHTML = PRODUCT_CATEGORIES.map((category) => (
@@ -483,6 +483,7 @@ function buildEverbeeKeywordsFromErankRows(rows) {
   const event = selectedEvent()
   const category = selectedCategory()
   const product = normalizePhrase(category.searchTerm)
+  const eventTerm = normalizePhrase(event.searchTerm)
   const eventSignals = event.searchTerm
     .split(/\s+/)
     .map((token) => token.replace(/s$/, ''))
@@ -500,10 +501,12 @@ function buildEverbeeKeywordsFromErankRows(rows) {
   const productized = rows.flatMap((row) => {
     const keyword = normalizePhrase(row.keyword)
     if (!keyword) return []
-    const hasEventSignal = keyword.includes(event.searchTerm)
+    const hasEventSignal = eventTerm
+      ? keyword.includes(eventTerm)
       || (eventSignals.length > 0 && eventSignals.every((token) => keyword.includes(token)))
+      : true
     const withProduct = keyword.includes(product) ? keyword : `${keyword} ${product}`
-    const withEvent = hasEventSignal ? withProduct : `${event.searchTerm} ${withProduct}`
+    const withEvent = hasEventSignal || !eventTerm ? withProduct : `${eventTerm} ${withProduct}`
     return [withProduct, withEvent, year ? `${withProduct} ${year}` : '']
   })
 
@@ -519,12 +522,7 @@ function erankResearchKeywords() {
   const manualBroad = cleanKeywordList(elements.broadQueryInput.value.split(/\r?\n|,/))
   if (manualBroad.length > 0) return manualBroad.slice(0, 30)
 
-  return generateBroadMarketQueries({
-    ...currentOptions(),
-    year: '',
-    includeYear: false,
-    limit: 24,
-  })
+  return readyKeywords().slice(0, 40)
 }
 
 function parseResearchJob(value) {
@@ -1281,8 +1279,43 @@ function renderAll() {
   persistMarketFinderState()
 }
 
+function candidateFromKeyword(keyword, generatedMap) {
+  const normalized = normalizePhrase(keyword)
+  const generated = generatedMap.get(normalized)
+  if (generated) return generated
+  const event = selectedEvent()
+  const category = selectedCategory()
+  return {
+    keyword: normalized,
+    eventId: event.id,
+    eventLabel: event.jpLabel,
+    categoryId: category.id,
+    categoryLabel: category.label,
+    score: 45,
+    wordCount: normalized.split(' ').filter(Boolean).length,
+    riskTerms: [],
+    status: 'ready',
+  }
+}
+
 function generateCandidates() {
-  state.candidates = generateKeywordCandidates(currentOptions())
+  const options = currentOptions()
+  const generated = generateKeywordCandidates(options)
+  const generatedMap = new Map(generated.map((candidate) => [normalizePhrase(candidate.keyword), candidate]))
+  const broad = generateBroadMarketQueries({
+    ...options,
+    year: '',
+    includeYear: false,
+    limit: 40,
+  })
+  const keywords = cleanKeywordList([
+    ...broad,
+    ...generated.map((candidate) => candidate.keyword),
+  ])
+
+  state.candidates = keywords
+    .map((keyword) => candidateFromKeyword(keyword, generatedMap))
+    .slice(0, Number(elements.limitInput.value) || 80)
   renderAll()
 }
 
@@ -1654,7 +1687,7 @@ function setFlowMode(mode, options = {}) {
 
   if (mode === 'auto') {
     elements.simpleSeoStepNumber.textContent = '4'
-    setSimpleStatus('条件を変えるとeRank候補は自動で変わります。次は2「eRankで広く見る」です。')
+    setSimpleStatus('商品だけでもOKです。相手・状況・趣味職業を自動で混ぜて候補を作ります。次は2「eRankで広く見る」です。')
   } else if (mode === 'csv') {
     elements.simpleSeoStepNumber.textContent = '2'
     setSimpleStatus('CSVを貼って、1「CSVを読み込む」を押してください。')
