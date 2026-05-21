@@ -24,6 +24,7 @@ const PERSISTENCE_VERSION = 1
 
 const state = {
   candidates: [],
+  candidateMessage: 'まだ空です。左の条件を決めてから「Step 2へ候補を作る」を押してください。',
   researchRows: [],
   broadHints: [],
   broadAutoImport: false,
@@ -582,10 +583,6 @@ function salesCheckKeywords() {
 }
 
 function erankResearchKeywords() {
-  const manualBroad = cleanKeywordList(elements.broadQueryInput.value.split(/\r?\n|,/))
-  const trendKeywords = trendCandidateKeywords()
-  if (manualBroad.length > 0) return cleanKeywordList([...trendKeywords, ...manualBroad]).slice(0, 40)
-
   return readyKeywords().slice(0, 40)
 }
 
@@ -753,7 +750,7 @@ function applyBroadHintsToSeeds() {
 
   elements.seedInput.value = merged.join('\n')
   generateCandidates()
-  elements.broadStatus.textContent = `${selected.length}個を追加ニッチ語句へ入れて、候補を再生成しました。`
+  elements.broadStatus.textContent = `${selected.length}個を追加ニッチ語句へ入れて、Step 2候補を作りました。`
 }
 
 function fillBroadSample() {
@@ -779,7 +776,7 @@ function renderCandidates() {
   )).join('')
 
   if (state.candidates.length === 0) {
-    elements.candidateList.innerHTML = '<div class="empty-state">イベントを選んでキーワードを生成してください。</div>'
+    elements.candidateList.innerHTML = `<div class="empty-state">${escapeHtml(state.candidateMessage || 'まだ候補はありません。')}</div>`
     return
   }
 
@@ -1334,14 +1331,27 @@ function buildSeoPlan() {
   persistMarketFinderState()
 }
 
+function setTrendStatus(message, variant = '') {
+  elements.trendStatus.textContent = message
+  elements.trendStatus.className = `inline-status${variant ? ` ${variant}` : ''}`
+}
+
 function renderTrendScoutStatus() {
   const terms = trendScoutTerms()
   if (terms.length === 0) {
-    elements.trendStatus.textContent = '空でも大丈夫です。貼るとStep 2の上位候補に混ざります。Unknownは加点せず、eRankで確認します。'
+    if (state.candidates.length > 0) {
+      setTrendStatus('トレンド語なしでStep 2候補を作成済みです。条件を変えたら、もう一度「Step 2へ候補を作る」を押します。', 'ready')
+    } else {
+      setTrendStatus('まだStep 2には入りません。上のボタンを押すと候補を作ります。')
+    }
     return
   }
 
-  elements.trendStatus.textContent = `${terms.length}件のトレンド語を候補に混ぜています。次は「eRankで広く見る」で検索数・クリック・競合・KDを確認します。`
+  const variant = state.candidates.length > 0 ? 'ready' : 'warn'
+  const message = state.candidates.length > 0
+    ? `${terms.length}件のトレンド語を使ってStep 2候補を作成済みです。条件を変えたら、もう一度「Step 2へ候補を作る」を押します。`
+    : `${terms.length}件のトレンド語があります。まだStep 2には入っていません。「Step 2へ候補を作る」を押してください。`
+  setTrendStatus(message, variant)
 }
 
 function renderAll() {
@@ -1395,6 +1405,15 @@ function generateCandidates() {
   state.candidates = keywords
     .map((keyword) => candidateFromKeyword(keyword, generatedMap, trendSet))
     .slice(0, Number(elements.limitInput.value) || 80)
+  state.candidateMessage = state.candidates.length > 0
+    ? ''
+    : '候補を作れませんでした。商品やトレンド語を変えてからもう一度押してください。'
+  renderAll()
+}
+
+function resetCandidatesForInputChange(message = '条件を変更しました。Step 2は空です。「Step 2へ候補を作る」を押すと候補が入ります。') {
+  state.candidates = []
+  state.candidateMessage = message
   renderAll()
 }
 
@@ -1821,16 +1840,22 @@ function fillTrendSample() {
     'coastal grandma',
     'teacher era',
   ].join('\n')
-  generateCandidates()
-  elements.trendStatus.textContent = 'サンプルのトレンド語を入れました。次は「eRankで広く見る」で本当に検索需要があるか確認します。'
+  resetCandidatesForInputChange('サンプルを入れました。Step 2はまだ空です。「Step 2へ候補を作る」を押してください。')
+  setTrendStatus('サンプルのトレンド語を入れました。まだStep 2には入っていません。', 'warn')
 }
 
 function applyTrendScoutTerms() {
   const count = trendScoutTerms().length
   generateCandidates()
-  elements.trendStatus.textContent = count > 0
-    ? `${count}件のトレンド語をStep 2の候補に反映しました。次は「eRankで広く見る」です。`
-    : 'トレンド語は空です。空でも自動探索はできます。'
+  const made = state.candidates.length
+  if (made === 0) {
+    setTrendStatus('候補を作れませんでした。商品やトレンド語を変えてからもう一度押してください。', 'warn')
+    return
+  }
+
+  setTrendStatus(count > 0
+    ? `${count}件のトレンド語からStep 2に${made}件の候補を作りました。次は「eRankで広く見る」です。`
+    : `トレンド語なしでStep 2に${made}件の候補を作りました。次は「eRankで広く見る」です。`, 'ready')
 }
 
 function appendTrendScoutCandidates(candidates) {
@@ -1853,14 +1878,15 @@ function appendTrendScoutCandidates(candidates) {
 
 async function collectTrendScoutTerms() {
   if (!state.extensionConnected) {
-    elements.trendStatus.textContent = 'Chrome拡張とまだ接続できていません。拡張機能をReloadしてから、このMarket Finderページも再読み込みしてください。'
+    setTrendStatus('Chrome拡張とまだ接続できていません。拡張機能をReloadしてから、このMarket Finderページも再読み込みしてください。', 'warn')
     return
   }
 
   const originalLabel = elements.trendAutoBtn.textContent
   elements.trendAutoBtn.disabled = true
   elements.trendAutoBtn.textContent = '取得中...'
-  elements.trendStatus.textContent = 'eRank Trend Buzz / Etsy Marketplace Insights / Pinterest Trends / Google Trends を開いて、見えている語句を拾っています。'
+  resetCandidatesForInputChange('4サイトから探しています。完了するとここに候補が入ります。')
+  setTrendStatus('取得中です。4サイトを開いて、見えている語句を拾っています。', 'working')
 
   try {
     const result = await requestExtension('COLLECT_TRENDS', {
@@ -1875,14 +1901,16 @@ async function collectTrendScoutTerms() {
 
     if (added > 0) {
       const note = errors.length > 0 ? ` 取得できなかったページ: ${errors.slice(0, 2).join(' / ')}` : ''
-      elements.trendStatus.textContent = `${added}件のトレンド語を追加しました。次は「eRankで広く見る」で需要を確認します。${note}`
+      setTrendStatus(`完了しました。${added}件のトレンド語を追加し、Step 2に${state.candidates.length}件の候補を作りました。次は「eRankで広く見る」です。${note}`, 'ready')
+    } else if (trends.length > 0 && state.candidates.length > 0) {
+      setTrendStatus(`完了しました。新しく追加する語句はありませんでしたが、既存のトレンド語からStep 2に${state.candidates.length}件の候補を作りました。`, 'ready')
     } else if (errors.length > 0) {
-      elements.trendStatus.textContent = `自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`
+      setTrendStatus(`完了しましたが、自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`, 'warn')
     } else {
-      elements.trendStatus.textContent = '候補語は見つかりませんでした。対象ページを表示してから、もう一度押してください。'
+      setTrendStatus('完了しましたが、候補語は見つかりませんでした。対象ページを表示してから、もう一度押してください。', 'warn')
     }
   } catch (error) {
-    elements.trendStatus.textContent = friendlyExtensionError(error)
+    setTrendStatus(friendlyExtensionError(error), 'warn')
   } finally {
     elements.trendAutoBtn.disabled = false
     elements.trendAutoBtn.textContent = originalLabel
@@ -2275,10 +2303,12 @@ async function startExtensionResearch() {
 }
 
 async function startErankResearch() {
-  if (state.candidates.length === 0) generateCandidates()
   const keywords = erankResearchKeywords()
   if (keywords.length === 0) {
-    setSimpleStatus('候補がありません。イベントと商品を選び直してください。候補は自動で更新されます。')
+    const message = 'Step 2が空です。左の「Step 2へ候補を作る」を押してから、もう一度「eRankで広く見る」を押してください。'
+    setSimpleStatus(message)
+    state.candidateMessage = message
+    renderCandidates()
     return
   }
   if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回の調査結果' })) return
@@ -2364,19 +2394,19 @@ async function stopExtensionResearch() {
 function bindEvents() {
   elements.eventSelect.addEventListener('change', () => {
     renderTargets({ syncYear: true })
-    generateCandidates()
+    resetCandidatesForInputChange()
   })
   elements.customEventInput.addEventListener('input', () => {
     renderTargets({ syncYear: false })
-    generateCandidates()
+    resetCandidatesForInputChange()
   })
-  elements.categorySelect.addEventListener('change', generateCandidates)
-  elements.yearInput.addEventListener('input', generateCandidates)
-  elements.limitInput.addEventListener('input', generateCandidates)
-  elements.seedInput.addEventListener('input', generateCandidates)
-  elements.trendScoutInput.addEventListener('input', generateCandidates)
-  elements.riskInput.addEventListener('input', generateCandidates)
-  elements.targetChips.addEventListener('change', generateCandidates)
+  elements.categorySelect.addEventListener('change', () => resetCandidatesForInputChange())
+  elements.yearInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.limitInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.seedInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.trendScoutInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.riskInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.targetChips.addEventListener('change', () => resetCandidatesForInputChange())
   ;[
     elements.broadQueryInput,
     elements.researchJobInput,
@@ -2447,7 +2477,9 @@ function init() {
   renderTargets({ selectedTargets: persisted?.form?.targets })
   bindEvents()
   setFlowMode(persisted?.flowMode ?? 'auto', { persist: false })
-  generateCandidates()
+  state.candidates = []
+  state.candidateMessage = 'まだ空です。左の条件を決めてから「Step 2へ候補を作る」を押してください。'
+  renderAll()
   if (state.researchRows.length > 0) {
     setSimpleStatus(`${state.researchRows.length}件の前回結果を復元しました。続きから使えます。`)
   }

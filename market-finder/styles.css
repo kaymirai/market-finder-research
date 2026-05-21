@@ -817,6 +817,18 @@ button[data-optional]::before {
   line-height: 1.45;
 }
 
+.inline-status.ready {
+  color: #166534;
+}
+
+.inline-status.working {
+  color: #1d4ed8;
+}
+
+.inline-status.warn {
+  color: var(--amber);
+}
+
 .extension-box {
   border-bottom: 1px solid var(--line);
   padding-bottom: 16px;

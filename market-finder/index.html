@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260521-3">
+    <link rel="stylesheet" href="./styles.css?v=20260521-4">
   </head>
   <body>
     <main class="app-shell">
@@ -126,7 +126,7 @@
               <span>トレンドの種（任意）</span>
               <button id="trendSampleBtn" type="button" class="text-btn" data-optional="任意">サンプル</button>
             </div>
-            <p class="box-help">eRank Trend Buzz、Etsy Marketplace Insights、Pinterest Trends、Google Trendsで見つけた伸びている語句を貼ります。空でもOKです。</p>
+            <p class="box-help">eRank Trend Buzz、Etsy Marketplace Insights、Pinterest Trends、Google Trendsで見つけた伸びている語句を貼ります。入力しただけではStep 2に入りません。</p>
             <div class="source-pill-row" aria-label="使える情報源">
               <span>eRank</span>
               <span>Etsy</span>
@@ -135,8 +135,8 @@
             </div>
             <textarea id="trendScoutInput" rows="4" placeholder="例: summerween&#10;book nook&#10;pickleball mom&#10;western birthday"></textarea>
             <button id="trendAutoBtn" type="button" class="primary-btn full-width">4サイトから自動で探す</button>
-            <button id="trendApplyBtn" type="button" class="ghost-btn full-width" data-optional="任意">トレンド語を候補に反映</button>
-            <div id="trendStatus" class="inline-status">空でも大丈夫です。貼るとStep 2の上位候補に混ざります。</div>
+            <button id="trendApplyBtn" type="button" class="ghost-btn full-width" data-optional="任意">Step 2へ候補を作る</button>
+            <div id="trendStatus" class="inline-status">まだStep 2には入りません。上のボタンを押すと候補を作ります。</div>
           </div>
 
           <div class="two-col">
@@ -202,7 +202,7 @@
             <small>商標・著作権が怪しい言葉を入れると、候補や結果で警告します。</small>
           </label>
 
-          <div class="auto-update-note advanced-only">Step 2の候補は条件を変えると自動で更新されます</div>
+          <div class="auto-update-note advanced-only">Step 2の候補は自動更新しません。条件を変えたら「Step 2へ候補を作る」を押します。</div>
         </aside>
 
         <section class="panel candidates-panel">
@@ -210,7 +210,7 @@
             <div>
               <p class="section-kicker">Step 2 - 次に調べるリスト</p>
               <h2>次にeRankで調べる候補</h2>
-              <p class="panel-help">ここは結果ではありません。1で作った「これから調査する候補リスト」です。次に2「eRankで広く見る」を押して、この方向に検索需要があるか確認します。</p>
+              <p class="panel-help">ここは結果ではありません。ボタンを押した時だけ入る「これから調査する候補リスト」です。空なら、左で条件を決めてから候補を作ります。</p>
             </div>
             <span class="count-badge"><strong id="candidateCount">0</strong><small>候補</small></span>
           </div>
@@ -538,6 +538,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260521-3"></script>
+    <script type="module" src="./src/app.js?v=20260521-4"></script>
   </body>
 </html>
