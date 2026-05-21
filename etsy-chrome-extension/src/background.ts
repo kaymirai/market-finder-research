@@ -414,8 +414,17 @@
             'google trends',
             'pinterest trends',
             'erank',
+            'keyword tool',
+            'bulk keyword tool',
+            'keyword lists',
+            'rank checker',
+            'listing audit',
+            'listing helper',
+            'competitor sales',
+            'profit calculator',
+            'plans and pricing',
         ])
-        const ignoredPattern = /\b(?:cookie|privacy|terms|feedback|subscribe|account|dashboard|analytics|settings|download|export|column|filter|average|search volume|past 24 hours|started|trend breakdown|unknown|ranked by|view all|learn more|create campaign|contact sales|seller handbook|shop manager)\b/i
+        const ignoredPattern = /\b(?:cookie|privacy|terms|feedback|subscribe|account|dashboard|analytics|settings|download|export|column|filter|average|search volume|past 24 hours|started|trend breakdown|unknown|ranked by|view all|learn more|create campaign|contact sales|seller handbook|shop manager|keyword tool|bulk keyword|keyword lists?|rank checker|listing audit|listing helper|competitor|profit calculator|pricing|plans|blog|resources|academy|support|newsletter)\b/i
         const result: TrendCandidate[] = []
         const seen = new Set<string>()
 
@@ -423,6 +432,10 @@
             const rect = element.getBoundingClientRect()
             const style = window.getComputedStyle(element)
             return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+        }
+
+        function isNavigationElement(element: Element) {
+            return Boolean(element.closest('nav, header, footer, aside, [role="navigation"], [aria-label*="navigation" i], [aria-label*="menu" i], [class*="sidebar" i], [class*="navbar" i], [class*="footer" i], [class*="header" i]'))
         }
 
         function cleanCandidate(value: string) {
@@ -463,35 +476,48 @@
                 .forEach((part) => addCandidate(part, note))
         }
 
-        const selectors = [
-            'table tbody tr',
-            '[role="row"]',
-            '[role="gridcell"]',
-            '[role="cell"]',
-            '[data-testid*="trend" i]',
-            '[class*="trend" i]',
-            '[class*="keyword" i]',
-            '[class*="card" i]',
-            'li',
-            'a',
-            'button',
-            'h1',
-            'h2',
-            'h3',
-            'h4',
+        const selectorGroups = [
+            [
+                'main table tbody tr',
+                'main [role="row"]',
+                'main [role="gridcell"]',
+                'main [role="cell"]',
+                'table tbody tr',
+                '[role="row"]',
+            ],
+            [
+                'main [data-testid*="trend" i]',
+                'main [class*="trend" i]',
+                'main [class*="keyword" i]',
+                'main [class*="card" i]',
+                '[data-testid*="trend" i]',
+                '[class*="trend" i]',
+                '[class*="keyword" i]',
+                '[class*="card" i]',
+            ],
+            [
+                'main li',
+                'main h1',
+                'main h2',
+                'main h3',
+                'main h4',
+            ],
         ]
 
-        document.querySelectorAll(selectors.join(',')).forEach((element) => {
+        selectorGroups.forEach((selectors) => {
             if (result.length >= limit) return
-            if (!isVisible(element)) return
+            document.querySelectorAll(selectors.join(',')).forEach((element) => {
+                if (result.length >= limit) return
+                if (!isVisible(element) || isNavigationElement(element)) return
 
-            const text = (element as HTMLElement).innerText || element.textContent || ''
-            addSplitText(text, element.tagName.toLowerCase())
+                const text = (element as HTMLElement).innerText || element.textContent || ''
+                addSplitText(text, element.tagName.toLowerCase())
 
-            const ariaLabel = element.getAttribute('aria-label')
-            if (ariaLabel) addSplitText(ariaLabel, 'aria-label')
-            const title = element.getAttribute('title')
-            if (title) addSplitText(title, 'title')
+                const ariaLabel = element.getAttribute('aria-label')
+                if (ariaLabel) addSplitText(ariaLabel, 'aria-label')
+                const title = element.getAttribute('title')
+                if (title) addSplitText(title, 'title')
+            })
         })
 
         return result.slice(0, limit)
