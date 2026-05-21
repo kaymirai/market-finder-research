@@ -24,7 +24,7 @@ const PERSISTENCE_VERSION = 1
 
 const state = {
   candidates: [],
-  candidateMessage: 'まだ空です。左の条件を決めてから「Step 2へ候補を作る」を押してください。',
+  candidateMessage: 'まだ空です。左で商品を選んで「おすすめ自動探索をはじめる」を押してください。',
   researchRows: [],
   broadHints: [],
   broadAutoImport: false,
@@ -115,6 +115,8 @@ const elements = {
   copyReadyBtn: document.querySelector('#copyReadyBtn'),
   downloadJobBtn: document.querySelector('#downloadJobBtn'),
   buildNextRoundBtn: document.querySelector('#buildNextRoundBtn'),
+  candidateErankBtn: document.querySelector('#candidateErankBtn'),
+  erankToEverbeeBtn: document.querySelector('#erankToEverbeeBtn'),
   everbeeUrlInput: document.querySelector('#everbeeUrlInput'),
   researchJobInput: document.querySelector('#researchJobInput'),
   fillResearchJobBtn: document.querySelector('#fillResearchJobBtn'),
@@ -770,6 +772,7 @@ function renderCandidates() {
   elements.copyKeywordsBtn.disabled = state.candidates.length === 0
   elements.copyReadyBtn.disabled = readyKeywords().length === 0
   elements.downloadJobBtn.disabled = readyKeywords().length === 0
+  elements.candidateErankBtn.disabled = readyKeywords().length === 0
   elements.buildNextRoundBtn.disabled = state.researchRows.length === 0
   elements.keywordSelect.innerHTML = state.candidates.map((candidate) => (
     `<option value="${escapeHtml(candidate.keyword)}">${escapeHtml(candidate.keyword)}</option>`
@@ -860,7 +863,7 @@ function renderErankSummary(rows) {
   const holdRows = rows.filter((row) => row.erankOpportunity.action === 'hold' || row.erankOpportunity.action === 'reject')
   const nextKeywords = salesCheckKeywords()
   const conclusion = proceedRows.length > 0
-    ? `有望そうな語句を${proceedRows.length}件見つけました。関連語も使って、EverBeeで売上確認する候補を${nextKeywords.length}件に絞りました。`
+    ? `有望そうな語句を${proceedRows.length}件見つけました。関連語も使って、売上確認する候補を${nextKeywords.length}件に絞りました。`
     : expandRows.length > 0
       ? `強い語句はまだ少なめですが、追加探索に使える語句を${expandRows.length}件見つけました。関連語からEverBee候補を${nextKeywords.length}件作っています。`
       : `今回の広い検索は弱めでした。無理に進めず、イベント・商品・手入力イベントを変えてもう一度広く見てください。`
@@ -1029,10 +1032,11 @@ function renderErankResults() {
   const ranked = erankResultRows()
   elements.erankCount.textContent = String(ranked.length)
   elements.downloadErankCsvBtn.disabled = ranked.length === 0
+  elements.erankToEverbeeBtn.disabled = ranked.length === 0
   renderErankSummary(ranked)
 
   if (ranked.length === 0) {
-    elements.erankResultsList.innerHTML = '<div class="empty-state">2「eRankで広く見る」が終わると、ここに検索数・クリック・競合・KDが表示されます。</div>'
+    elements.erankResultsList.innerHTML = '<div class="empty-state">「検索されているか見る」が終わると、ここに結果が表示されます。</div>'
     return
   }
 
@@ -1041,7 +1045,7 @@ function renderErankResults() {
   const holdRows = ranked.filter((row) => row.erankOpportunity.action === 'hold' || row.erankOpportunity.action === 'reject')
 
   elements.erankResultsList.innerHTML = [
-    renderErankGroup('次にEverBeeで売上確認する候補', '検索・クリック・KDの反応がよい語句です。ここから細かい商品候補へ変換します。', proceedRows, { limit: 16 }),
+    renderErankGroup('次に売れているか見る候補', '検索・クリック・KDの反応がよい語句です。ここから細かい商品候補へ変換します。', proceedRows, { limit: 16 }),
     renderErankGroup('関連語から追加探索する候補', '弱くはないけれど、もう少し関連語を広げたい語句です。EverBee候補づくりの材料にも使います。', expandRows, { limit: 10 }),
     renderErankGroup('今回は保留した候補', '需要が弱い、または除外リスクがある語句です。必要な時だけ確認します。', holdRows, { limit: 12, collapsible: true }),
   ].join('') || '<div class="empty-state">eRank結果は入りましたが、次に進める候補がありませんでした。</div>'
@@ -1054,7 +1058,7 @@ function renderResults() {
   elements.buildNextRoundBtn.disabled = state.researchRows.length === 0
 
   if (ranked.length === 0) {
-    elements.resultsList.innerHTML = '<div class="empty-state">3「EverBeeで売上確認」が終わると、ここに売上で見た狙い目候補が表示されます。</div>'
+    elements.resultsList.innerHTML = '<div class="empty-state">「売れているか見る」が終わると、ここに狙い目候補が表示されます。</div>'
     return
   }
 
@@ -1206,7 +1210,7 @@ function renderResultsTable() {
 
   if (ranked.length === 0) {
     state.selectedResultKey = ''
-    elements.resultsList.innerHTML = '<div class="empty-state">3「EverBeeで売上確認」が終わると、ここに売上で見た狙い目候補が表示されます。</div>'
+    elements.resultsList.innerHTML = '<div class="empty-state">「売れているか見る」が終わると、ここに狙い目候補が表示されます。</div>'
     return
   }
 
@@ -1299,7 +1303,7 @@ function autoBucketKeywords(showStatus = true) {
 
 function renderSeoPlan() {
   if (!state.seoPlan) {
-    elements.seoTitleOutput.textContent = 'SEO案を作るとここにタイトルが出ます。'
+    elements.seoTitleOutput.textContent = 'タイトルとタグを作るとここにタイトルが出ます。'
     elements.seoTitleCount.textContent = '0 / 140'
     elements.seoTagList.innerHTML = '<div class="empty-state small">タグ候補はここに13個まで表示されます。</div>'
     elements.seoWarnings.innerHTML = ''
@@ -1340,17 +1344,17 @@ function renderTrendScoutStatus() {
   const terms = trendScoutTerms()
   if (terms.length === 0) {
     if (state.candidates.length > 0) {
-      setTrendStatus('トレンド語なしでStep 2候補を作成済みです。条件を変えたら、もう一度「Step 2へ候補を作る」を押します。', 'ready')
+      setTrendStatus('Step 2の候補を作成済みです。条件を変えたら、もう一度「おすすめ自動探索をはじめる」を押します。', 'ready')
     } else {
-      setTrendStatus('まだStep 2には入りません。上のボタンを押すと候補を作ります。')
+      setTrendStatus('商品を選んだら、このボタンを押します。見つかった語句からStep 2の候補を作ります。')
     }
     return
   }
 
   const variant = state.candidates.length > 0 ? 'ready' : 'warn'
   const message = state.candidates.length > 0
-    ? `${terms.length}件のトレンド語を使ってStep 2候補を作成済みです。条件を変えたら、もう一度「Step 2へ候補を作る」を押します。`
-    : `${terms.length}件のトレンド語があります。まだStep 2には入っていません。「Step 2へ候補を作る」を押してください。`
+    ? `Step 2候補を作成済みです。条件を変えたら、もう一度「おすすめ自動探索をはじめる」を押します。`
+    : `商品を選んで「おすすめ自動探索をはじめる」を押してください。`
   setTrendStatus(message, variant)
 }
 
@@ -1407,11 +1411,11 @@ function generateCandidates() {
     .slice(0, Number(elements.limitInput.value) || 80)
   state.candidateMessage = state.candidates.length > 0
     ? ''
-    : '候補を作れませんでした。商品やトレンド語を変えてからもう一度押してください。'
+    : '候補を作れませんでした。商品や流行語を変えてからもう一度押してください。'
   renderAll()
 }
 
-function resetCandidatesForInputChange(message = '条件を変更しました。Step 2は空です。「Step 2へ候補を作る」を押すと候補が入ります。') {
+function resetCandidatesForInputChange(message = '条件を変更しました。もう一度「おすすめ自動探索をはじめる」を押してください。') {
   state.candidates = []
   state.candidateMessage = message
   renderAll()
@@ -1511,7 +1515,7 @@ function importCsv() {
   rows.forEach(addResearchRow)
   if (rows.some((row) => rowHasErankInput(row) && !rowHasEverbeeInput(row))) {
     const count = fillEverbeeJobFromErank()
-    setSimpleStatus(`eRank結果を読み込みました。関連語も使って、EverBeeで売上確認する候補を${count}件作りました。`)
+    setSimpleStatus(`検索結果を読み込みました。関連語も使って、売上確認する候補を${count}件作りました。`)
   }
   renderAll()
 }
@@ -1840,8 +1844,8 @@ function fillTrendSample() {
     'coastal grandma',
     'teacher era',
   ].join('\n')
-  resetCandidatesForInputChange('サンプルを入れました。Step 2はまだ空です。「Step 2へ候補を作る」を押してください。')
-  setTrendStatus('サンプルのトレンド語を入れました。まだStep 2には入っていません。', 'warn')
+  resetCandidatesForInputChange('サンプルを入れました。Step 2はまだ空です。「おすすめ自動探索をはじめる」を押してください。')
+  setTrendStatus('サンプルの流行語を入れました。まだStep 2には入っていません。', 'warn')
 }
 
 function applyTrendScoutTerms() {
@@ -1849,13 +1853,13 @@ function applyTrendScoutTerms() {
   generateCandidates()
   const made = state.candidates.length
   if (made === 0) {
-    setTrendStatus('候補を作れませんでした。商品やトレンド語を変えてからもう一度押してください。', 'warn')
+    setTrendStatus('候補を作れませんでした。商品や流行語を変えてからもう一度押してください。', 'warn')
     return
   }
 
   setTrendStatus(count > 0
-    ? `${count}件のトレンド語からStep 2に${made}件の候補を作りました。次は「eRankで広く見る」です。`
-    : `トレンド語なしでStep 2に${made}件の候補を作りました。次は「eRankで広く見る」です。`, 'ready')
+    ? `${count}件の流行語からStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
+    : `流行語なしでStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`, 'ready')
 }
 
 function appendTrendScoutCandidates(candidates) {
@@ -1878,7 +1882,11 @@ function appendTrendScoutCandidates(candidates) {
 
 async function collectTrendScoutTerms() {
   if (!state.extensionConnected) {
-    setTrendStatus('Chrome拡張とまだ接続できていません。拡張機能をReloadしてから、このMarket Finderページも再読み込みしてください。', 'warn')
+    generateCandidates()
+    const made = state.candidates.length
+    setTrendStatus(made > 0
+      ? `Chrome連携はまだ使えませんが、商品条件だけでStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
+      : 'Chrome連携はまだ使えません。Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。', made > 0 ? 'ready' : 'warn')
     return
   }
 
@@ -1901,9 +1909,9 @@ async function collectTrendScoutTerms() {
 
     if (added > 0) {
       const note = errors.length > 0 ? ` 取得できなかったページ: ${errors.slice(0, 2).join(' / ')}` : ''
-      setTrendStatus(`完了しました。${added}件のトレンド語を追加し、Step 2に${state.candidates.length}件の候補を作りました。次は「eRankで広く見る」です。${note}`, 'ready')
+      setTrendStatus(`完了しました。${added}件の流行語を追加し、Step 2に${state.candidates.length}件の候補を作りました。次は「検索されているか見る」です。${note}`, 'ready')
     } else if (trends.length > 0 && state.candidates.length > 0) {
-      setTrendStatus(`完了しました。新しく追加する語句はありませんでしたが、既存のトレンド語からStep 2に${state.candidates.length}件の候補を作りました。`, 'ready')
+      setTrendStatus(`完了しました。新しく追加する語句はありませんでしたが、既存の流行語からStep 2に${state.candidates.length}件の候補を作りました。`, 'ready')
     } else if (errors.length > 0) {
       setTrendStatus(`完了しましたが、自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`, 'warn')
     } else {
@@ -1930,7 +1938,7 @@ function setFlowMode(mode, options = {}) {
 
   if (mode === 'auto') {
     elements.simpleSeoStepNumber.textContent = '4'
-    setSimpleStatus('商品だけでもOKです。相手・状況・趣味職業を自動で混ぜて候補を作ります。次は2「eRankで広く見る」です。')
+    setSimpleStatus('まず商品を選んで「おすすめ自動探索をはじめる」を押してください。')
   } else if (mode === 'csv') {
     elements.simpleSeoStepNumber.textContent = '2'
     setSimpleStatus('CSVを貼って、1「CSVを読み込む」を押してください。')
@@ -1949,14 +1957,14 @@ async function simpleStartErankResearch() {
 async function simpleStartResearch() {
   const keywords = salesCheckKeywords()
   elements.researchJobInput.value = keywords.join('\n')
-  setSimpleStatus(`${keywords.length}件をEverBeeで売上確認します。終わるまでそのまま待ってください。`)
+  setSimpleStatus(`${keywords.length}件を売上確認します。終わるまでそのまま待ってください。`)
   await startExtensionResearch()
 }
 
 function simpleImportCsv() {
   elements.csvInput.value = elements.simpleCsvInput.value
   importCsv()
-  setSimpleStatus(`${state.researchRows.length}件の結果を読み込みました。次は2「SEO案を作る」です。`)
+  setSimpleStatus(`${state.researchRows.length}件の結果を読み込みました。次は「タイトルとタグを作る」です。`)
 }
 
 function simpleUseSeoKeywords() {
@@ -1966,7 +1974,7 @@ function simpleUseSeoKeywords() {
   elements.bestSellerBucketInput.value = ''
   state.seoPlan = null
   renderSeoPlan()
-  setSimpleStatus('キーワードをSEO欄へ入れました。次は2「SEO案を作る」です。')
+  setSimpleStatus('キーワードをSEO欄へ入れました。次は「タイトルとタグを作る」です。')
   persistMarketFinderState()
 }
 
@@ -2042,6 +2050,8 @@ function setRunningControls(active) {
   elements.broadStartBtn.disabled = active
   elements.simpleImportErankBtn.disabled = active
   elements.simpleStartBtn.disabled = active
+  elements.candidateErankBtn.disabled = active || readyKeywords().length === 0
+  elements.erankToEverbeeBtn.disabled = active || erankResultRows().length === 0
   elements.stopExtensionBtn.disabled = !active
   elements.progressStopBtn.disabled = !active
 }
@@ -2148,7 +2158,7 @@ function renderProgressModal(extensionState = state.extensionState) {
           : `eRank確認が完了しました。今回は弱めなので、イベント・商品・手入力イベントを変えてもう一度広く見るのがおすすめです。`
       setSimpleStatus(message)
     } else if (state.progress.mode === 'keyword') {
-      setSimpleStatus(`${done}件のEverBee売上確認が完了しました。次は4「SEO案を作る」です。`)
+      setSimpleStatus(`${done}件の売上確認が完了しました。次は「タイトルとタグを作る」です。`)
     }
     elements.progressDetail.textContent = state.progress.mode === 'broad'
       ? `広め調査が完了しました。商品名を取り込めた場合は、種ワード欄も更新済みです。`
@@ -2305,7 +2315,7 @@ async function startExtensionResearch() {
 async function startErankResearch() {
   const keywords = erankResearchKeywords()
   if (keywords.length === 0) {
-    const message = 'Step 2が空です。左の「Step 2へ候補を作る」を押してから、もう一度「eRankで広く見る」を押してください。'
+    const message = 'Step 2が空です。先に「おすすめ自動探索をはじめる」を押してください。'
     setSimpleStatus(message)
     state.candidateMessage = message
     renderCandidates()
@@ -2328,7 +2338,7 @@ async function startErankResearch() {
       delayMs: Math.max(3000, Math.min(Number(elements.delayInput.value) * 1000 || 5000, 20000)),
     })
     ensureExtensionStarted(startResponse, 'eRank調査を開始できませんでした。')
-    setSimpleStatus(`${keywords.length}件の広め語句をeRankで確認します。終わったら3「EverBeeで売上確認」です。`)
+    setSimpleStatus(`${keywords.length}件の候補を確認します。終わったら「売れているか見る」です。`)
     pollExtensionState()
   } catch (error) {
     const message = friendlyExtensionError(error)
@@ -2437,6 +2447,8 @@ function bindEvents() {
   elements.downloadErankCsvBtn.addEventListener('click', exportErankCsv)
   elements.downloadStep4CsvBtn.addEventListener('click', exportStep4Csv)
   elements.buildNextRoundBtn.addEventListener('click', buildNextRound)
+  elements.candidateErankBtn.addEventListener('click', simpleStartErankResearch)
+  elements.erankToEverbeeBtn.addEventListener('click', simpleStartResearch)
   elements.autoBucketBtn.addEventListener('click', () => autoBucketKeywords(true))
   elements.buildSeoPlanBtn.addEventListener('click', buildSeoPlan)
   elements.copySeoTitleBtn.addEventListener('click', copySeoTitle)
@@ -2478,7 +2490,7 @@ function init() {
   bindEvents()
   setFlowMode(persisted?.flowMode ?? 'auto', { persist: false })
   state.candidates = []
-  state.candidateMessage = 'まだ空です。左の条件を決めてから「Step 2へ候補を作る」を押してください。'
+  state.candidateMessage = 'まだ空です。左で商品を選んで「おすすめ自動探索をはじめる」を押してください。'
   renderAll()
   if (state.researchRows.length > 0) {
     setSimpleStatus(`${state.researchRows.length}件の前回結果を復元しました。続きから使えます。`)

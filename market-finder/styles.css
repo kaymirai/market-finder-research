@@ -155,6 +155,10 @@ body.flow-auto .research-panel {
   display: none;
 }
 
+body.flow-auto .simple-runner {
+  display: none;
+}
+
 .quick-start,
 .simple-runner {
   border: 1px solid var(--line);
@@ -413,6 +417,16 @@ body.flow-seo .simple-runner {
   line-height: 1.45;
 }
 
+.start-action-box {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 14px;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  background: #f0fdfa;
+  padding: 12px;
+}
+
 .trend-scout-box {
   border-color: #bfdbfe;
   background: #f8fbff;
@@ -577,6 +591,11 @@ textarea:focus {
 
 .primary-btn:hover {
   background: var(--teal-dark);
+}
+
+.heading-actions .primary-btn {
+  width: auto;
+  min-width: 170px;
 }
 
 .dark-btn {
