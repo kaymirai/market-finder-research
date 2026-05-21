@@ -245,27 +245,54 @@
         return { ok: errors.length === 0 || trends.length > 0, trends, errors };
     }
     async function collectTrendSource(config, limit) {
-        const tabId = await openTrendSourceTab(config.url);
-        await waitForTabComplete(tabId);
+        const tab = await openTrendSourceTab(config);
+        await waitForTabComplete(tab.tabId);
         await delay(4500);
-        const trends = await extractTrendsFromTab(tabId, config, limit);
+        const trends = await extractTrendsFromTab(tab.tabId, config, limit);
         if (trends.length > 0) {
-            closeTabQuietly(tabId);
+            if (tab.created)
+                closeTabQuietly(tab.tabId);
             return trends;
         }
         throw new Error('候補語が見つかりませんでした。ログイン後、ページを表示してから再実行してください。');
     }
-    function openTrendSourceTab(url) {
+    function openTrendSourceTab(config) {
         return new Promise((resolve, reject) => {
-            chrome.tabs.create({ url, active: false }, (tab) => {
-                var _a;
-                if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
-                    reject(new Error(((_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message) || 'ページを開けませんでした。'));
+            chrome.tabs.query({}, (tabs) => {
+                const existing = tabs.find((tab) => tab.id && isTrendSourceUrl(tab.url, config.id));
+                if (existing === null || existing === void 0 ? void 0 : existing.id) {
+                    resolve({ tabId: existing.id, created: false });
                     return;
                 }
-                resolve(tab.id);
+                chrome.tabs.create({ url: config.url, active: false }, (tab) => {
+                    var _a;
+                    if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                        reject(new Error(((_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message) || 'ページを開けませんでした。'));
+                        return;
+                    }
+                    resolve({ tabId: tab.id, created: true });
+                });
             });
         });
+    }
+    function isTrendSourceUrl(value, sourceId) {
+        if (!value)
+            return false;
+        try {
+            const url = new URL(value);
+            if (sourceId === 'erank')
+                return /(^|\.)erank\.com$/i.test(url.hostname) && /trend|monthly|buzz/i.test(url.pathname);
+            if (sourceId === 'etsy')
+                return /(^|\.)etsy\.com$/i.test(url.hostname) && /stats|insights|shops\/me/i.test(url.pathname);
+            if (sourceId === 'pinterest')
+                return /(^|\.)pinterest\.com$/i.test(url.hostname) && /trend/i.test(url.hostname + url.pathname);
+            if (sourceId === 'google')
+                return /^trends\.google\./i.test(url.hostname);
+            return false;
+        }
+        catch (_a) {
+            return false;
+        }
     }
     async function extractTrendsFromTab(tabId, config, limit) {
         var _a;

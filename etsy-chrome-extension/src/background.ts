@@ -48,6 +48,11 @@
         url: string
     }
 
+    type TrendSourceTab = {
+        tabId: number
+        created: boolean
+    }
+
     let isProcessingImages = false
     let imageQueue: ImageListing[] = []
     let currentProjectId = ''
@@ -309,29 +314,51 @@
     }
 
     async function collectTrendSource(config: TrendSourceConfig, limit: number): Promise<TrendCandidate[]> {
-        const tabId = await openTrendSourceTab(config.url)
-        await waitForTabComplete(tabId)
+        const tab = await openTrendSourceTab(config)
+        await waitForTabComplete(tab.tabId)
         await delay(4500)
 
-        const trends = await extractTrendsFromTab(tabId, config, limit)
+        const trends = await extractTrendsFromTab(tab.tabId, config, limit)
         if (trends.length > 0) {
-            closeTabQuietly(tabId)
+            if (tab.created) closeTabQuietly(tab.tabId)
             return trends
         }
 
         throw new Error('候補語が見つかりませんでした。ログイン後、ページを表示してから再実行してください。')
     }
 
-    function openTrendSourceTab(url: string): Promise<number> {
+    function openTrendSourceTab(config: TrendSourceConfig): Promise<TrendSourceTab> {
         return new Promise((resolve, reject) => {
-            chrome.tabs.create({ url, active: false }, (tab) => {
-                if (chrome.runtime.lastError || !tab?.id) {
-                    reject(new Error(chrome.runtime.lastError?.message || 'ページを開けませんでした。'))
+            chrome.tabs.query({}, (tabs) => {
+                const existing = tabs.find((tab) => tab.id && isTrendSourceUrl(tab.url, config.id))
+                if (existing?.id) {
+                    resolve({ tabId: existing.id, created: false })
                     return
                 }
-                resolve(tab.id)
+
+                chrome.tabs.create({ url: config.url, active: false }, (tab) => {
+                    if (chrome.runtime.lastError || !tab?.id) {
+                        reject(new Error(chrome.runtime.lastError?.message || 'ページを開けませんでした。'))
+                        return
+                    }
+                    resolve({ tabId: tab.id, created: true })
+                })
             })
         })
+    }
+
+    function isTrendSourceUrl(value: string | undefined, sourceId: TrendSourceId) {
+        if (!value) return false
+        try {
+            const url = new URL(value)
+            if (sourceId === 'erank') return /(^|\.)erank\.com$/i.test(url.hostname) && /trend|monthly|buzz/i.test(url.pathname)
+            if (sourceId === 'etsy') return /(^|\.)etsy\.com$/i.test(url.hostname) && /stats|insights|shops\/me/i.test(url.pathname)
+            if (sourceId === 'pinterest') return /(^|\.)pinterest\.com$/i.test(url.hostname) && /trend/i.test(url.hostname + url.pathname)
+            if (sourceId === 'google') return /^trends\.google\./i.test(url.hostname)
+            return false
+        } catch {
+            return false
+        }
     }
 
     async function extractTrendsFromTab(tabId: number, config: TrendSourceConfig, limit: number): Promise<TrendCandidate[]> {
