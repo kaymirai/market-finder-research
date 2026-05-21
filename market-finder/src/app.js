@@ -70,6 +70,10 @@ const elements = {
   limitInput: document.querySelector('#limitInput'),
   targetChips: document.querySelector('#targetChips'),
   seedInput: document.querySelector('#seedInput'),
+  trendScoutInput: document.querySelector('#trendScoutInput'),
+  trendSampleBtn: document.querySelector('#trendSampleBtn'),
+  trendApplyBtn: document.querySelector('#trendApplyBtn'),
+  trendStatus: document.querySelector('#trendStatus'),
   broadQueryInput: document.querySelector('#broadQueryInput'),
   broadBuildQueriesBtn: document.querySelector('#broadBuildQueriesBtn'),
   broadStartBtn: document.querySelector('#broadStartBtn'),
@@ -227,6 +231,7 @@ function persistMarketFinderState() {
       year: elements.yearInput.value,
       limit: elements.limitInput.value,
       seedKeywords: elements.seedInput.value,
+      trendScoutKeywords: elements.trendScoutInput.value,
       customRiskTerms: elements.riskInput.value,
       targets: selectedTargets(),
       broadQueries: elements.broadQueryInput.value,
@@ -271,6 +276,7 @@ function restorePersistedState() {
   setInputValue(elements.yearInput, form.year)
   setInputValue(elements.limitInput, form.limit)
   setInputValue(elements.seedInput, form.seedKeywords)
+  setInputValue(elements.trendScoutInput, form.trendScoutKeywords)
   setInputValue(elements.riskInput, form.customRiskTerms)
   setInputValue(elements.broadQueryInput, form.broadQueries)
   setInputValue(elements.researchJobInput, form.researchJob)
@@ -315,6 +321,54 @@ function selectedYearOption() {
   return Number(value) || selectedEvent().defaultYear
 }
 
+function parseTrendScoutTerms(value) {
+  const ignored = new Set(['keyword', 'keywords', 'trend', 'source', 'search', 'clicks', 'competition', 'kd', 'change', 'rank'])
+  return cleanKeywordList(String(value ?? '')
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const source = String(line ?? '').trim()
+      if (!source) return []
+      const cells = source.split(/\t|,|\|/).map((cell) => cell.trim()).filter(Boolean)
+      const candidate = (cells.length > 1 ? cells : [source])
+        .map((cell) => cell.replace(/^\s*#?\d+[\).\-\s]+/, '').trim())
+        .find((cell) => /[a-zA-Z]/.test(cell) && !ignored.has(normalizePhrase(cell)))
+      return candidate ? [candidate] : []
+    }))
+}
+
+function trendScoutTerms() {
+  return parseTrendScoutTerms(elements.trendScoutInput?.value)
+}
+
+function combinedSeedKeywords() {
+  return cleanKeywordList([
+    ...String(elements.seedInput.value ?? '').split(/\r?\n|,/),
+    ...trendScoutTerms(),
+  ]).join('\n')
+}
+
+function trendCandidateKeywords() {
+  const category = selectedCategory()
+  const product = normalizePhrase(category.searchTerm)
+  const eventTerm = normalizePhrase(selectedEvent().searchTerm)
+  const year = selectedYearOption()
+
+  return cleanKeywordList(trendScoutTerms().flatMap((term) => {
+    const keyword = normalizePhrase(term)
+    if (!keyword) return []
+    const hasProduct = keyword.includes(product)
+    const base = hasProduct ? keyword : `${keyword} ${product}`
+    return [
+      base,
+      `${keyword} gift`,
+      eventTerm && !keyword.includes(eventTerm) ? `${eventTerm} ${base}` : '',
+      year ? `${base} ${year}` : '',
+    ]
+  }))
+    .filter((keyword) => keyword.split(' ').filter(Boolean).length >= 2)
+    .slice(0, 50)
+}
+
 function currentOptions() {
   return {
     eventId: elements.eventSelect.value,
@@ -323,7 +377,7 @@ function currentOptions() {
     year: selectedYearOption(),
     limit: Number(elements.limitInput.value) || 80,
     targets: selectedTargets(),
-    seedKeywords: elements.seedInput.value,
+    seedKeywords: combinedSeedKeywords(),
     customRiskTerms: elements.riskInput.value,
   }
 }
@@ -528,7 +582,8 @@ function salesCheckKeywords() {
 
 function erankResearchKeywords() {
   const manualBroad = cleanKeywordList(elements.broadQueryInput.value.split(/\r?\n|,/))
-  if (manualBroad.length > 0) return manualBroad.slice(0, 30)
+  const trendKeywords = trendCandidateKeywords()
+  if (manualBroad.length > 0) return cleanKeywordList([...trendKeywords, ...manualBroad]).slice(0, 40)
 
   return readyKeywords().slice(0, 40)
 }
@@ -1278,7 +1333,18 @@ function buildSeoPlan() {
   persistMarketFinderState()
 }
 
+function renderTrendScoutStatus() {
+  const terms = trendScoutTerms()
+  if (terms.length === 0) {
+    elements.trendStatus.textContent = '空でも大丈夫です。貼るとStep 2の上位候補に混ざります。Unknownは加点せず、eRankで確認します。'
+    return
+  }
+
+  elements.trendStatus.textContent = `${terms.length}件のトレンド語を候補に混ぜています。次は「eRankで広く見る」で検索数・クリック・競合・KDを確認します。`
+}
+
 function renderAll() {
+  renderTrendScoutStatus()
   renderBroadHints()
   renderCandidates()
   renderErankResults()
@@ -1287,19 +1353,20 @@ function renderAll() {
   persistMarketFinderState()
 }
 
-function candidateFromKeyword(keyword, generatedMap) {
+function candidateFromKeyword(keyword, generatedMap, trendSet = new Set()) {
   const normalized = normalizePhrase(keyword)
   const generated = generatedMap.get(normalized)
   if (generated) return generated
   const event = selectedEvent()
   const category = selectedCategory()
+  const fromTrendScout = trendSet.has(normalized)
   return {
     keyword: normalized,
     eventId: event.id,
     eventLabel: event.jpLabel,
     categoryId: category.id,
-    categoryLabel: category.label,
-    score: 45,
+    categoryLabel: fromTrendScout ? 'Trend Scout' : category.label,
+    score: fromTrendScout ? 70 : 45,
     wordCount: normalized.split(' ').filter(Boolean).length,
     riskTerms: [],
     status: 'ready',
@@ -1310,6 +1377,8 @@ function generateCandidates() {
   const options = currentOptions()
   const generated = generateKeywordCandidates(options)
   const generatedMap = new Map(generated.map((candidate) => [normalizePhrase(candidate.keyword), candidate]))
+  const trendKeywords = trendCandidateKeywords()
+  const trendSet = new Set(trendKeywords.map((keyword) => normalizePhrase(keyword)))
   const broad = generateBroadMarketQueries({
     ...options,
     year: '',
@@ -1317,12 +1386,13 @@ function generateCandidates() {
     limit: 40,
   })
   const keywords = cleanKeywordList([
+    ...trendKeywords,
     ...broad,
     ...generated.map((candidate) => candidate.keyword),
   ])
 
   state.candidates = keywords
-    .map((keyword) => candidateFromKeyword(keyword, generatedMap))
+    .map((keyword) => candidateFromKeyword(keyword, generatedMap, trendSet))
     .slice(0, Number(elements.limitInput.value) || 80)
   renderAll()
 }
@@ -1739,6 +1809,27 @@ function clearResearchJob() {
   elements.researchJobInput.value = ''
   elements.extensionStatus.textContent = '調査キーワード欄をクリアしました。'
   persistMarketFinderState()
+}
+
+function fillTrendSample() {
+  elements.trendScoutInput.value = [
+    'summerween',
+    'pickleball mom',
+    'western birthday',
+    'book nook',
+    'coastal grandma',
+    'teacher era',
+  ].join('\n')
+  generateCandidates()
+  elements.trendStatus.textContent = 'サンプルのトレンド語を入れました。次は「eRankで広く見る」で本当に検索需要があるか確認します。'
+}
+
+function applyTrendScoutTerms() {
+  const count = trendScoutTerms().length
+  generateCandidates()
+  elements.trendStatus.textContent = count > 0
+    ? `${count}件のトレンド語をStep 2の候補に反映しました。次は「eRankで広く見る」です。`
+    : 'トレンド語は空です。空でも自動探索はできます。'
 }
 
 function setSimpleStatus(message) {
@@ -2226,6 +2317,7 @@ function bindEvents() {
   elements.yearInput.addEventListener('input', generateCandidates)
   elements.limitInput.addEventListener('input', generateCandidates)
   elements.seedInput.addEventListener('input', generateCandidates)
+  elements.trendScoutInput.addEventListener('input', generateCandidates)
   elements.riskInput.addEventListener('input', generateCandidates)
   elements.targetChips.addEventListener('change', generateCandidates)
   ;[
@@ -2245,6 +2337,8 @@ function bindEvents() {
   elements.broadExtractBtn.addEventListener('click', extractBroadMarketHints)
   elements.broadApplyBtn.addEventListener('click', applyBroadHintsToSeeds)
   elements.broadSampleBtn.addEventListener('click', fillBroadSample)
+  elements.trendSampleBtn.addEventListener('click', fillTrendSample)
+  elements.trendApplyBtn.addEventListener('click', applyTrendScoutTerms)
   elements.addResearchBtn.addEventListener('click', addManualResearch)
   elements.importCsvBtn.addEventListener('click', importCsv)
   elements.sampleCsvBtn.addEventListener('click', fillSampleCsv)

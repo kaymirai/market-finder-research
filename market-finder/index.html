@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260521-1">
+    <link rel="stylesheet" href="./styles.css?v=20260521-2">
   </head>
   <body>
     <main class="app-shell">
@@ -120,6 +120,23 @@
             <input id="customEventInput" type="text" placeholder="例: national coffee day / pumpkin patch season">
             <small>ここに入れると、上の選択より手入力イベントを優先します。空欄なら上の選択を使います。</small>
           </label>
+
+          <div class="paste-box compact-box trend-scout-box">
+            <div class="mini-heading">
+              <span>トレンドの種（任意）</span>
+              <button id="trendSampleBtn" type="button" class="text-btn" data-optional="任意">サンプル</button>
+            </div>
+            <p class="box-help">eRank Trend Buzz、Etsy Marketplace Insights、Pinterest Trends、Google Trendsで見つけた伸びている語句を貼ります。空でもOKです。</p>
+            <div class="source-pill-row" aria-label="使える情報源">
+              <span>eRank</span>
+              <span>Etsy</span>
+              <span>Pinterest</span>
+              <span>Google</span>
+            </div>
+            <textarea id="trendScoutInput" rows="4" placeholder="例: summerween&#10;book nook&#10;pickleball mom&#10;western birthday"></textarea>
+            <button id="trendApplyBtn" type="button" class="ghost-btn full-width" data-optional="任意">トレンド語を候補に反映</button>
+            <div id="trendStatus" class="inline-status">空でも大丈夫です。貼るとStep 2の上位候補に混ざります。</div>
+          </div>
 
           <div class="two-col">
             <label class="field">
@@ -520,6 +537,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260521-1"></script>
+    <script type="module" src="./src/app.js?v=20260521-2"></script>
   </body>
 </html>
