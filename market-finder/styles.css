@@ -169,20 +169,35 @@ body.flow-auto .simple-runner {
 
 .quick-start {
   display: grid;
-  grid-template-columns: minmax(220px, 0.7fr) 1.3fr auto;
-  gap: 14px;
-  align-items: center;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(420px, 1.1fr) auto;
+  gap: 16px;
+  align-items: stretch;
   margin-bottom: 14px;
   padding: 16px;
 }
 
+.quick-start-copy {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.quick-start-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
 .flow-choice-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(130px, .8fr));
   gap: 10px;
 }
 
 .flow-choice {
+  position: relative;
   min-height: 88px;
   border: 2px solid var(--line);
   border-radius: 8px;
@@ -212,6 +227,31 @@ body.flow-auto .simple-runner {
 .flow-choice.is-active {
   border-color: var(--teal);
   background: #f0fdfa;
+}
+
+.flow-choice.is-active::before {
+  content: "迷ったらこれ";
+  display: inline-block;
+  margin-bottom: 8px;
+  border-radius: 999px;
+  background: #ccfbf1;
+  color: var(--teal-dark);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.flow-choice:not(.is-active) {
+  min-height: 76px;
+  background: #fff;
+}
+
+.flow-choice:not(.is-active) strong {
+  font-size: 14px;
+}
+
+.flow-choice:not(.is-active) span {
+  font-size: 11px;
 }
 
 .advanced-link {
@@ -336,6 +376,18 @@ body.flow-seo .simple-runner {
   align-items: start;
 }
 
+body.flow-auto .workspace-grid {
+  grid-template-columns: 1fr;
+}
+
+body.flow-auto .controls-panel > :not(.advanced-only) {
+  max-width: 620px;
+}
+
+body.flow-auto .controls-panel .panel-heading {
+  max-width: 760px;
+}
+
 .panel,
 .erank-section,
 .results-section,
@@ -415,6 +467,30 @@ body.flow-seo .simple-runner {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.45;
+}
+
+.service-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  border-left: 4px solid var(--teal);
+  border-radius: 8px;
+  background: #f0fdfa;
+  color: var(--slate);
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.service-note strong {
+  color: var(--teal-dark);
+  white-space: nowrap;
+}
+
+.service-note span {
+  overflow-wrap: anywhere;
 }
 
 .start-action-box {
