@@ -1885,12 +1885,12 @@ async function collectTrendScoutTerms() {
   const originalLabel = elements.trendAutoBtn.textContent
   elements.trendAutoBtn.disabled = true
   elements.trendAutoBtn.textContent = '取得中...'
-  resetCandidatesForInputChange('4サイトから探しています。完了するとここに候補が入ります。')
-  setTrendStatus('取得中です。4サイトを開いて、見えている語句を拾っています。', 'working')
+  resetCandidatesForInputChange('おすすめ元から探しています。完了するとここに候補が入ります。')
+  setTrendStatus('取得中です。eRank / Pinterest / Google を開いて、見えている語句を拾っています。Marketplace Insightsは無料枠を使うため、ここでは無理に使いません。', 'working')
 
   try {
     const result = await requestExtension('COLLECT_TRENDS', {
-      sources: ['erank', 'etsy', 'pinterest', 'google'],
+      sources: ['erank', 'pinterest', 'google'],
       limit: 18,
     }, 90000)
     const response = result.response ?? {}

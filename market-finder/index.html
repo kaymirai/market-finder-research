@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260521-4">
+    <link rel="stylesheet" href="./styles.css?v=20260521-5">
   </head>
   <body>
     <main class="app-shell">
@@ -126,15 +126,15 @@
               <span>トレンドの種（任意）</span>
               <button id="trendSampleBtn" type="button" class="text-btn" data-optional="任意">サンプル</button>
             </div>
-            <p class="box-help">eRank Trend Buzz、Etsy Marketplace Insights、Pinterest Trends、Google Trendsで見つけた伸びている語句を貼ります。入力しただけではStep 2に入りません。</p>
+            <p class="box-help">おすすめは eRank Trend Buzz、Pinterest Trends、Google Trends から種を拾う流れです。Pinterestは開いたTrends画面に見えているカードやリストから拾います。Marketplace Insightsは無料枠を使うので、絞った後に必要な候補だけ確認します。</p>
             <div class="source-pill-row" aria-label="使える情報源">
               <span>eRank</span>
-              <span>Etsy</span>
               <span>Pinterest</span>
               <span>Google</span>
+              <span class="soft">Etsy公式は必要時だけ</span>
             </div>
             <textarea id="trendScoutInput" rows="4" placeholder="例: summerween&#10;book nook&#10;pickleball mom&#10;western birthday"></textarea>
-            <button id="trendAutoBtn" type="button" class="primary-btn full-width">4サイトから自動で探す</button>
+            <button id="trendAutoBtn" type="button" class="primary-btn full-width">おすすめ自動探索</button>
             <button id="trendApplyBtn" type="button" class="ghost-btn full-width" data-optional="任意">Step 2へ候補を作る</button>
             <div id="trendStatus" class="inline-status">まだStep 2には入りません。上のボタンを押すと候補を作ります。</div>
           </div>
@@ -538,6 +538,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260521-4"></script>
+    <script type="module" src="./src/app.js?v=20260521-5"></script>
   </body>
 </html>

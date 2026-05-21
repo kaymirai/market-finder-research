@@ -434,6 +434,11 @@ body.flow-seo .simple-runner {
   font-weight: 800;
 }
 
+.source-pill-row span.soft {
+  background: #eef2f7;
+  color: #475569;
+}
+
 .trend-scout-box textarea + button,
 .trend-scout-box button + button {
   margin-top: 8px;

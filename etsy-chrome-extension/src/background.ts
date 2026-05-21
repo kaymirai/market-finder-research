@@ -274,7 +274,7 @@
     function normalizeTrendSources(value: unknown): TrendSourceConfig[] {
         const requested = Array.isArray(value) && value.length > 0
             ? value.map((item) => String(item).toLowerCase())
-            : ['erank', 'etsy', 'pinterest', 'google']
+            : ['erank', 'pinterest', 'google']
 
         const seen = new Set<string>()
         return requested
