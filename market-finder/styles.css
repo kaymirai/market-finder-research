@@ -514,6 +514,15 @@ textarea:focus {
   gap: 10px;
 }
 
+.starter-fields {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.starter-fields .field {
+  margin-bottom: 12px;
+}
+
 .button-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
