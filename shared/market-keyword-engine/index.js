@@ -211,7 +211,7 @@ const VISUAL_SIGNAL_LIBRARY = [
     avoid: ['western brand logos'],
   },
   {
-    phrases: ['pumpkin', 'halloween', 'spooky', 'fall', 'autumn'],
+    phrases: ['pumpkin', 'halloween', 'spooky', 'fall', 'autumn', 'summerween'],
     main: ['pumpkin', 'ghost icon', 'bat silhouette'],
     supporting: ['stars', 'moon', 'leaf accents'],
     mood: ['cute spooky', 'seasonal', 'playful'],
@@ -1893,65 +1893,185 @@ function collectVisualSignals(keyword, event, category, target) {
   }
 }
 
-function buildDesignConcepts(keyword, event, category, target, visualMaterials) {
-  const keywordTitle = titleizeKeyword(keyword)
-  const main = visualMaterials.main.slice(0, 3).join(', ')
-  const supporting = visualMaterials.supporting.slice(0, 4).join(', ')
-  const mood = visualMaterials.mood.slice(0, 3).join(', ')
-  const productNote = visualMaterials.productNote
+const NON_NOUN_MATERIAL_WORDS = new Set([
+  'graphic',
+  'typography',
+  'background',
+  'layout',
+  'composition',
+  'print',
+  'printable',
+  'style',
+  'texture',
+  'mockup',
+  'color',
+  'colors',
+  'palette',
+  'accent',
+  'accents',
+])
 
-  return [
-    {
-      name: '文字メイン',
-      layout: `Large readable "${keywordTitle}" typography with one clear hero icon.`,
-      materials: main,
-      notes: `${productNote}. Keep the art simple enough for POD printing.`,
-    },
-    {
-      name: 'バッジ型',
-      layout: `Retro badge or emblem composition for ${target}, using a compact icon cluster.`,
-      materials: unique([...visualMaterials.main.slice(0, 2), ...visualMaterials.supporting.slice(0, 3)]).join(', '),
-      notes: `Good when the keyword feels giftable or event-based. Mood: ${mood || 'clean commercial'}.`,
-    },
-    {
-      name: '小さな情景',
-      layout: `Small illustrated scene with the main motif in the center and supporting accents around it.`,
-      materials: supporting || main,
-      notes: 'Use this only when the keyword contains a clear object, hobby, job, or pet. Avoid busy backgrounds.',
-    },
-  ]
+const NOUN_STOP_WORDS = new Set([
+  ...GENERIC_WORDS,
+  'gift',
+  'gifts',
+  'shirt',
+  'shirts',
+  'sweatshirt',
+  'sweatshirts',
+  'mug',
+  'mugs',
+  'tote',
+  'bag',
+  'bags',
+  'sticker',
+  'stickers',
+  'custom',
+  'personalized',
+  'matching',
+  'funny',
+  'retro',
+  'vintage',
+  'embroidered',
+  'minimalist',
+  'cute',
+  'day',
+  'year',
+  'est',
+  'father',
+  'fathers',
+  'mother',
+  'mothers',
+  'dad',
+  'mom',
+  'papa',
+  'mama',
+  'grandpa',
+  'grandma',
+  'men',
+  'mens',
+  'women',
+  'womens',
+  'girl',
+  'boy',
+  'kid',
+  'kids',
+  'lover',
+  'buyer',
+  'owner',
+  'fan',
+  'people',
+  'person',
+  'niche',
+  'text',
+  'words',
+  'lettering',
+  'valentine',
+  'valentines',
+  'summerween',
+  'halloween',
+  'christmas',
+  'thanksgiving',
+  'easter',
+  'independence',
+  'july',
+  'heart',
+  'hearts',
+  'star',
+  'stars',
+  'sparkle',
+  'sparkles',
+])
+
+function normalizeNounCandidate(value) {
+  const normalized = normalizePhrase(value)
+  if (!normalized) return ''
+  const tokens = phraseTokens(normalized)
+  if (tokens.some((token) => NON_NOUN_MATERIAL_WORDS.has(token))) return ''
+
+  const cleanedTokens = tokens
+    .filter((token) => !['icon', 'icons', 'silhouette', 'shape', 'line', 'lines', 'curve', 'curves', 'frame', 'border', 'small', 'bold', 'simple'].includes(token))
+    .filter((token) => !NOUN_STOP_WORDS.has(token))
+
+  if (cleanedTokens.length === 0) return ''
+
+  const cleaned = cleanedTokens.join(' ')
+    .replace(/\bdog face\b/g, 'dog')
+    .replace(/\bcat face\b/g, 'cat')
+    .replace(/\bfloral\b/g, 'flowers')
+    .replace(/\bflag inspired stripes\b/g, 'flag stripes')
+    .trim()
+
+  return cleaned.length >= 2 ? cleaned : ''
 }
 
-function buildEtsyMiraiPrompt(keyword, event, category, target, visualMaterials, concepts) {
-  const keywordTitle = titleizeKeyword(keyword)
-  const conceptText = concepts
-    .map((concept) => `${concept.name}: ${concept.layout} Materials: ${concept.materials}`)
-    .join(' | ')
+function keywordNounCandidates(keyword, event, category, target) {
+  const eventTokens = new Set(phraseTokens(event.searchTerm))
+  const categoryTokens = new Set([
+    ...phraseTokens(category.searchTerm),
+    ...(category.tags ?? []).flatMap(phraseTokens),
+  ])
+  const targetTokens = new Set(phraseTokens(target))
+  const blocked = (token) => (
+    eventTokens.has(token)
+    || categoryTokens.has(token)
+    || targetTokens.has(token)
+    || NOUN_STOP_WORDS.has(token)
+    || /^\d+$/.test(token)
+  )
+  const chunks = []
+  let current = []
 
-  return [
-    `Create a print-on-demand ${category.label} design for Etsy.`,
-    `Keyword: "${keywordTitle}".`,
-    `Audience: ${target}.`,
-    event.searchTerm ? `Occasion/market: ${event.searchTerm}.` : 'Occasion/market: evergreen niche product.',
-    `Main visual materials: ${visualMaterials.main.join(', ')}.`,
-    `Supporting materials: ${visualMaterials.supporting.join(', ')}.`,
-    `Mood/style: ${visualMaterials.mood.join(', ')}.`,
-    `Design concepts to choose from: ${conceptText}.`,
-    `Production: ${visualMaterials.productNote}, transparent background, no product mockup, clean commercial layout.`,
-  ].join(' ')
+  for (const token of phraseTokens(keyword)) {
+    if (blocked(token)) {
+      if (current.length > 0) chunks.push(current.join(' '))
+      current = []
+    } else {
+      current.push(token)
+    }
+  }
+  if (current.length > 0) chunks.push(current.join(' '))
+
+  return unique(chunks.map(normalizeNounCandidate).filter(Boolean))
 }
 
-function buildDesignBrief(keyword, event, category, target) {
-  const visualMaterials = collectVisualSignals(keyword, event, category, target)
-  const concepts = buildDesignConcepts(keyword, event, category, target, visualMaterials)
-  const negativePrompt = `Avoid: ${visualMaterials.avoid.join(', ')}. Avoid tiny unreadable text, photo backgrounds, watermarks, and copied artwork.`
+function buildNounBrief(keyword, event, category, target) {
+  const signals = collectVisualSignals(keyword, event, category, target)
+  const keywordNouns = keywordNounCandidates(keyword, event, category, target)
+  const heroNouns = unique([
+    ...keywordNouns,
+    ...signals.main.map(normalizeNounCandidate),
+  ])
+    .filter(Boolean)
+    .filter((noun) => !['heart', 'star', 'sparkle'].includes(noun))
+    .slice(0, 8)
+  const relatedNouns = unique([
+    ...signals.supporting.map(normalizeNounCandidate),
+    ...signals.main.map(normalizeNounCandidate).slice(2),
+  ])
+    .filter(Boolean)
+    .filter((noun) => !heroNouns.includes(noun))
+    .slice(0, 12)
+  const unsafeNouns = unique(signals.avoid
+    .flatMap((value) => {
+      const source = normalizePhrase(value)
+      if (source.includes('logo')) return ['logo']
+      if (source.includes('character')) return ['licensed character']
+      if (source.includes('mascot')) return ['mascot']
+      if (source.includes('seal')) return ['official seal']
+      if (source.includes('celebrity')) return ['celebrity']
+      return []
+    }))
 
   return {
-    sourceNote: 'キーワード内の名詞・相手・イベント・商品カテゴリから推定した素材案です。最終確認は上位商品の画像傾向も見てください。',
-    visualMaterials,
-    concepts,
-    etsyMiraiPrompt: buildEtsyMiraiPrompt(keyword, event, category, target, visualMaterials, concepts),
-    negativePrompt,
+    sourceNote: '流行キーワードから、デザインの主役になり得る名詞だけを抜き出しています。構図・色・雰囲気はEtsyMiraiProducer側の売れ筋デザイン分析に任せます。',
+    heroNouns,
+    relatedNouns,
+    unsafeNouns,
+    sourceSignals: unique(signals.matchedSignals).filter(Boolean),
+    usableForTypography: heroNouns.length === 0
+      ? 'タイポグラフィ型なら名詞なしでも進められます。画像素材型にする場合は、上位商品の商品名やタグから名詞を追加してください。'
+      : 'EtsyMiraiProducerで画像素材型を選ぶ時だけ使います。タイポグラフィ型なら無理に使いません。',
   }
 }
 
@@ -1961,8 +2081,7 @@ export function buildProductIdea(keyword, options = {}) {
   const year = Number(options.year) || event.defaultYear
   const normalizedKeyword = normalizePhrase(keyword)
   const target = inferTarget(normalizedKeyword, event)
-  const designDirection = event.designAngles.join(' / ')
-  const designBrief = buildDesignBrief(normalizedKeyword, event, category, target)
+  const nounBrief = buildNounBrief(normalizedKeyword, event, category, target)
   const seoPlan = buildSeoPlanFromBuckets({
     visibility: [normalizedKeyword],
   }, {
@@ -1977,8 +2096,7 @@ export function buildProductIdea(keyword, options = {}) {
   return {
     theme: `${event.jpLabel}向け ${target} ${category.label}`,
     target,
-    designDirection,
-    designBrief,
+    nounBrief,
     seoTitle,
     tags,
     notes: detectRiskTerms(normalizedKeyword).length > 0

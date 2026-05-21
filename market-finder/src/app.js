@@ -15,7 +15,7 @@ import {
   scoreErankOpportunity,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260521-10'
+} from '../../shared/market-keyword-engine/index.js?v=20260521-11'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -926,44 +926,23 @@ function renderChips(values = []) {
     : '<span class="empty-inline">候補なし</span>'
 }
 
-function renderDesignBrief(brief = {}) {
-  const materials = brief.visualMaterials ?? {}
-  const concepts = Array.isArray(brief.concepts) ? brief.concepts : []
-  const conceptCards = concepts.map((concept) => `
-    <div class="design-concept">
-      <strong>${escapeHtml(concept.name)}</strong>
-      <p>${escapeHtml(concept.layout)}</p>
-      <small>素材: ${escapeHtml(concept.materials || '-')}</small>
-    </div>
-  `).join('')
-
+function renderNounBrief(brief = {}) {
   return `
-    <section class="design-brief">
+    <section class="noun-brief">
       <div class="mini-heading">
-        <span>作る絵・素材案</span>
-        <button type="button" class="text-btn" data-copy-design-prompt>プロンプトコピー</button>
+        <span>主役名詞だけを確認</span>
+        <button type="button" class="text-btn" data-copy-noun-brief>名詞コピー</button>
       </div>
-      <p class="box-help">${escapeHtml(brief.sourceNote ?? 'キーワードから推定した素材案です。')}</p>
+      <p class="box-help">${escapeHtml(brief.sourceNote ?? '流行キーワードから名詞だけを抜き出します。')}</p>
 
-      <div class="idea-grid design-material-grid">
-        <div><span>主役素材</span><div class="tag-list">${renderChips(materials.main ?? [])}</div></div>
-        <div><span>足す素材</span><div class="tag-list">${renderChips(materials.supporting ?? [])}</div></div>
-        <div><span>雰囲気</span><div class="tag-list">${renderChips(materials.mood ?? [])}</div></div>
-        <div><span>避けるもの</span><div class="tag-list">${renderChips(materials.avoid ?? [])}</div></div>
-      </div>
-
-      <div class="design-concept-grid">
-        ${conceptCards}
+      <div class="idea-grid noun-grid">
+        <div><span>主役名詞</span><div class="tag-list">${renderChips(brief.heroNouns ?? [])}</div></div>
+        <div><span>関連名詞</span><div class="tag-list">${renderChips(brief.relatedNouns ?? [])}</div></div>
+        <div><span>要注意名詞</span><div class="tag-list">${renderChips(brief.unsafeNouns ?? [])}</div></div>
+        <div><span>根拠ワード</span><div class="tag-list">${renderChips(brief.sourceSignals ?? [])}</div></div>
       </div>
 
-      <div class="prompt-box">
-        <span>EtsyMiraiProducer用指示</span>
-        <p>${escapeHtml(brief.etsyMiraiPrompt ?? '')}</p>
-      </div>
-      <div class="prompt-box muted">
-        <span>除外指示</span>
-        <p>${escapeHtml(brief.negativePrompt ?? '')}</p>
-      </div>
+      <p class="noun-note">${escapeHtml(brief.usableForTypography ?? '')}</p>
     </section>
   `
 }
@@ -1151,12 +1130,11 @@ function renderResults() {
 
         <div class="idea-grid">
           <div><span>ターゲット</span><p>${escapeHtml(row.idea.target)}</p></div>
-          <div><span>デザイン方向性</span><p>${escapeHtml(row.idea.designDirection)}</p></div>
           <div><span>SEOタイトル案</span><p>${escapeHtml(row.idea.seoTitle)}</p></div>
           <div><span>タグ案</span><div class="tag-list">${tags}</div></div>
           ${reasons}
         </div>
-        ${renderDesignBrief(row.idea.designBrief)}
+        ${renderNounBrief(row.idea.nounBrief)}
       </article>
     `
   }).join('')
@@ -1237,12 +1215,11 @@ function renderEverbeeDetail(row) {
 
       <div class="idea-grid">
         <div><span>ターゲット</span><p>${escapeHtml(row.idea.target)}</p></div>
-        <div><span>デザイン方向性</span><p>${escapeHtml(row.idea.designDirection)}</p></div>
         <div><span>SEOタイトル案</span><p>${escapeHtml(row.idea.seoTitle)}</p></div>
         <div><span>タグ案</span><div class="tag-list">${tags}</div></div>
         ${reasons}
       </div>
-      ${renderDesignBrief(row.idea.designBrief)}
+      ${renderNounBrief(row.idea.nounBrief)}
     </article>
   `
 }
@@ -1294,11 +1271,16 @@ function renderResultsTable() {
   `
 }
 
-async function copySelectedDesignPrompt(button) {
+async function copySelectedNounBrief(button) {
   const rows = everbeeResultRows()
   const selected = rows.find((row, index) => resultRowKey(row, index) === state.selectedResultKey) ?? rows[0]
-  const brief = selected?.idea?.designBrief
-  const text = [brief?.etsyMiraiPrompt, brief?.negativePrompt].filter(Boolean).join('\n\n')
+  const brief = selected?.idea?.nounBrief
+  const text = [
+    `キーワード: ${selected?.score?.normalized?.keyword ?? selected?.keyword ?? ''}`,
+    `主役名詞: ${(brief?.heroNouns ?? []).join(', ')}`,
+    `関連名詞: ${(brief?.relatedNouns ?? []).join(', ')}`,
+    `要注意名詞: ${(brief?.unsafeNouns ?? []).join(', ')}`,
+  ].filter(Boolean).join('\n')
   if (!text) return
 
   await navigator.clipboard.writeText(text)
@@ -1311,9 +1293,9 @@ async function copySelectedDesignPrompt(button) {
 
 function handleResultListClick(event) {
   if (!(event.target instanceof Element)) return
-  const copyButton = event.target.closest('[data-copy-design-prompt]')
+  const copyButton = event.target.closest('[data-copy-noun-brief]')
   if (copyButton) {
-    copySelectedDesignPrompt(copyButton).catch(() => {
+    copySelectedNounBrief(copyButton).catch(() => {
       copyButton.textContent = 'コピー失敗'
     })
     return
@@ -1799,14 +1781,11 @@ function exportStep4Csv() {
     'eRank Trend',
     'Product Theme',
     'Target',
-    'Design Direction',
-    'Main Visual Materials',
-    'Supporting Materials',
-    'Mood',
-    'Avoid Visuals',
-    'Design Concepts',
-    'EtsyMiraiProducer Prompt',
-    'Negative Prompt',
+    'Hero Nouns',
+    'Related Nouns',
+    'Unsafe Nouns',
+    'Noun Source Signals',
+    'Noun Note',
     'SEO Title',
     'Tags',
     'Positive Reasons',
@@ -1816,11 +1795,7 @@ function exportStep4Csv() {
 
   const lines = rows.map((row, index) => {
     const normalized = row.score.normalized
-    const brief = row.idea.designBrief ?? {}
-    const materials = brief.visualMaterials ?? {}
-    const concepts = Array.isArray(brief.concepts)
-      ? brief.concepts.map((concept) => `${concept.name}: ${concept.layout}`).join(' / ')
-      : ''
+    const brief = row.idea.nounBrief ?? {}
     return [
       index + 1,
       normalized.keyword,
@@ -1840,14 +1815,11 @@ function exportStep4Csv() {
       normalized.erankTrend ?? '',
       row.idea.theme,
       row.idea.target,
-      row.idea.designDirection,
-      (materials.main ?? []).join(', '),
-      (materials.supporting ?? []).join(', '),
-      (materials.mood ?? []).join(', '),
-      (materials.avoid ?? []).join(', '),
-      concepts,
-      brief.etsyMiraiPrompt ?? '',
-      brief.negativePrompt ?? '',
+      (brief.heroNouns ?? []).join(', '),
+      (brief.relatedNouns ?? []).join(', '),
+      (brief.unsafeNouns ?? []).join(', '),
+      (brief.sourceSignals ?? []).join(', '),
+      brief.usableForTypography ?? '',
       row.idea.seoTitle,
       row.idea.tags.join(', '),
       scoreReasonLabels(row.score).join(' / '),
@@ -2052,7 +2024,7 @@ async function simpleStartResearch() {
 function simpleImportCsv() {
   elements.csvInput.value = elements.simpleCsvInput.value
   importCsv()
-  setSimpleStatus(`${state.researchRows.length}件の結果を読み込みました。Step 4で候補・素材案・CSV保存を確認してください。`)
+  setSimpleStatus(`${state.researchRows.length}件の結果を読み込みました。Step 4で候補・名詞・CSV保存を確認してください。`)
 }
 
 function simpleUseSeoKeywords() {
@@ -2246,7 +2218,7 @@ function renderProgressModal(extensionState = state.extensionState) {
           : `eRank確認が完了しました。今回は弱めなので、イベント・商品・手入力イベントを変えてもう一度広く見るのがおすすめです。`
       setSimpleStatus(message)
     } else if (state.progress.mode === 'keyword') {
-      setSimpleStatus(`${done}件の売上確認が完了しました。Step 4で候補と素材案を確認してください。必要ならCSV保存できます。`)
+      setSimpleStatus(`${done}件の売上確認が完了しました。Step 4で候補と名詞候補を確認してください。必要ならCSV保存できます。`)
     }
     elements.progressDetail.textContent = state.progress.mode === 'broad'
       ? `広め調査が完了しました。商品名を取り込めた場合は、種ワード欄も更新済みです。`
