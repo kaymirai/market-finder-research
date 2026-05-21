@@ -1575,6 +1575,83 @@ button.research-table-row {
   gap: 6px;
 }
 
+.empty-inline {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.design-brief {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.design-material-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.design-concept-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.design-concept {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfefd;
+  padding: 10px;
+}
+
+.design-concept strong {
+  display: block;
+  color: var(--teal-dark);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.design-concept p,
+.design-concept small,
+.prompt-box p {
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.design-concept p,
+.prompt-box p {
+  margin: 0;
+}
+
+.design-concept small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.prompt-box {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f0f9ff;
+  padding: 10px;
+}
+
+.prompt-box.muted {
+  border-color: var(--line);
+  background: #f8fafc;
+}
+
+.prompt-box > span {
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .empty-state {
   border: 1px dashed var(--line);
   border-radius: 8px;
@@ -1879,6 +1956,7 @@ button.research-table-row {
     .erank-group-list,
     .bucket-grid,
     .seo-output-grid,
+    .design-material-grid,
     .two-col,
     .metric-grid,
     .progress-stats {

@@ -104,6 +104,184 @@ const AUTO_DISCOVERY_INTENTS = [
   'appreciation',
 ]
 
+const VISUAL_SIGNAL_LIBRARY = [
+  {
+    phrases: ['dog', 'dog dad', 'dog mom', 'pet owner', 'pet lover', 'rescue'],
+    main: ['dog face', 'paw print', 'dog silhouette'],
+    supporting: ['bone icon', 'leash curve', 'small heart'],
+    mood: ['playful', 'loyal', 'warm'],
+    avoid: ['copyrighted dog characters', 'real brand mascots'],
+  },
+  {
+    phrases: ['cat', 'cat dad', 'cat mom'],
+    main: ['cat face', 'cat silhouette', 'whiskers'],
+    supporting: ['paw print', 'yarn ball', 'small moon'],
+    mood: ['cute', 'cozy', 'slightly funny'],
+    avoid: ['copyrighted cat characters'],
+  },
+  {
+    phrases: ['book', 'book lover', 'library', 'librarian', 'reading'],
+    main: ['stack of books', 'open book', 'library card'],
+    supporting: ['coffee cup', 'bookmark', 'reading glasses', 'small flowers'],
+    mood: ['cozy', 'quiet', 'clever'],
+    avoid: ['specific book covers', 'publisher logos'],
+  },
+  {
+    phrases: ['coffee', 'latte', 'espresso', 'caffeine'],
+    main: ['coffee mug', 'coffee cup', 'steam lines'],
+    supporting: ['coffee beans', 'small heart', 'morning sun'],
+    mood: ['cozy', 'daily ritual', 'warm'],
+    avoid: ['coffee chain logos'],
+  },
+  {
+    phrases: ['flower', 'floral', 'garden', 'gardening', 'plant', 'plant lover'],
+    main: ['wildflower bouquet', 'potted plant', 'leaf sprig'],
+    supporting: ['sun rays', 'watering can', 'butterfly accent'],
+    mood: ['soft', 'fresh', 'botanical'],
+    avoid: ['overly detailed photo flowers'],
+  },
+  {
+    phrases: ['teacher', 'school', 'student', 'kindergarten', 'preschool'],
+    main: ['pencil', 'apple icon', 'book stack'],
+    supporting: ['stars', 'ruler line', 'notebook doodles'],
+    mood: ['friendly', 'classroom', 'appreciation'],
+    avoid: ['school district logos'],
+  },
+  {
+    phrases: ['nurse', 'doctor', 'medical', 'nicu', 'er nurse'],
+    main: ['stethoscope', 'medical cross', 'heartbeat line'],
+    supporting: ['small heart', 'badge shape', 'sparkle accent'],
+    mood: ['caring', 'clean', 'appreciation'],
+    avoid: ['hospital logos', 'official medical emblems'],
+  },
+  {
+    phrases: ['dad', 'father', 'fathers day', 'papa', 'grandpa', 'bonus dad'],
+    main: ['bold dad typography', 'mustache icon', 'simple badge'],
+    supporting: ['tools', 'grill icon', 'cap silhouette', 'small heart'],
+    mood: ['giftable', 'proud', 'funny'],
+    avoid: ['sports team logos', 'beer brand logos'],
+  },
+  {
+    phrases: ['mom', 'mother', 'mothers day', 'mama', 'grandma', 'bonus mom'],
+    main: ['bold mama typography', 'heart icon', 'floral frame'],
+    supporting: ['sparkles', 'small bow', 'leaf accent'],
+    mood: ['warm', 'giftable', 'sweet'],
+    avoid: ['luxury brand marks'],
+  },
+  {
+    phrases: ['bride', 'groom', 'wedding', 'bridesmaid', 'maid of honor'],
+    main: ['ring icon', 'champagne glass', 'bow ribbon'],
+    supporting: ['sparkles', 'heart line', 'small flower'],
+    mood: ['celebratory', 'clean', 'party'],
+    avoid: ['venue logos', 'designer brand marks'],
+  },
+  {
+    phrases: ['graduation', 'graduate', 'senior class', 'college'],
+    main: ['graduation cap', 'diploma scroll', 'star badge'],
+    supporting: ['confetti', 'year text if requested', 'laurel'],
+    mood: ['proud', 'milestone', 'bold'],
+    avoid: ['school logos', 'official seals'],
+  },
+  {
+    phrases: ['camping', 'camper', 'mountain', 'hiking', 'nature'],
+    main: ['mountain silhouette', 'campfire', 'tent icon'],
+    supporting: ['pine trees', 'stars', 'sunset lines'],
+    mood: ['outdoor', 'retro', 'adventure'],
+    avoid: ['national park official logos'],
+  },
+  {
+    phrases: ['fishing', 'fish', 'lake'],
+    main: ['fish silhouette', 'fishing rod', 'hook line'],
+    supporting: ['water ripple', 'sunset', 'small badge'],
+    mood: ['outdoor', 'relaxed', 'dad humor'],
+    avoid: ['brand tackle logos'],
+  },
+  {
+    phrases: ['pickleball', 'tennis'],
+    main: ['pickleball paddle', 'ball icon', 'court line'],
+    supporting: ['motion lines', 'small star', 'retro sun'],
+    mood: ['sporty', 'fun', 'active'],
+    avoid: ['league logos'],
+  },
+  {
+    phrases: ['western', 'cowgirl', 'cowboy', 'rodeo'],
+    main: ['cowboy boot', 'cowboy hat', 'desert sun'],
+    supporting: ['cactus', 'horseshoe', 'rope border'],
+    mood: ['western', 'vintage', 'bold'],
+    avoid: ['western brand logos'],
+  },
+  {
+    phrases: ['pumpkin', 'halloween', 'spooky', 'fall', 'autumn'],
+    main: ['pumpkin', 'ghost icon', 'bat silhouette'],
+    supporting: ['stars', 'moon', 'leaf accents'],
+    mood: ['cute spooky', 'seasonal', 'playful'],
+    avoid: ['movie monsters', 'licensed horror characters'],
+  },
+  {
+    phrases: ['christmas', 'holiday', 'santa', 'xmas'],
+    main: ['christmas tree', 'gift box', 'ornament'],
+    supporting: ['snowflakes', 'bow ribbon', 'sparkles'],
+    mood: ['festive', 'cozy', 'family'],
+    avoid: ['licensed holiday characters'],
+  },
+  {
+    phrases: ['summer', 'beach', 'vacation', 'summerween'],
+    main: ['sun icon', 'wave line', 'beach umbrella'],
+    supporting: ['palm leaf', 'sunglasses', 'small shell'],
+    mood: ['bright', 'playful', 'seasonal'],
+    avoid: ['travel brand logos'],
+  },
+  {
+    phrases: ['patriotic', 'america', 'fourth of july', 'independence day', 'veteran'],
+    main: ['star badge', 'flag-inspired stripes', 'eagle silhouette'],
+    supporting: ['fireworks', 'laurel', 'simple ribbon'],
+    mood: ['bold', 'classic', 'proud'],
+    avoid: ['official military seals', 'government insignia'],
+  },
+  {
+    phrases: ['firefighter', 'fireman'],
+    main: ['fire helmet', 'flame icon', 'axe silhouette'],
+    supporting: ['badge shape', 'hose curve', 'small stars'],
+    mood: ['heroic', 'bold', 'appreciation'],
+    avoid: ['official department logos'],
+  },
+  {
+    phrases: ['realtor', 'real estate'],
+    main: ['house outline', 'key icon', 'sold sign shape'],
+    supporting: ['roof line', 'small heart', 'sparkle accent'],
+    mood: ['clean', 'professional', 'giftable'],
+    avoid: ['brokerage logos'],
+  },
+]
+
+const CATEGORY_VISUAL_GUIDANCE = {
+  shirt: {
+    main: ['center chest graphic'],
+    supporting: ['transparent background'],
+    productNote: 'shirt-ready print, readable from a distance, 2-4 strong colors',
+  },
+  sweatshirt: {
+    main: ['cozy center chest graphic'],
+    supporting: ['soft vintage texture'],
+    productNote: 'sweatshirt-ready print, slightly bolder shapes, cozy color palette',
+  },
+  mug: {
+    main: ['compact mug graphic'],
+    supporting: ['small side accents'],
+    productNote: 'mug-ready design, compact composition, readable at small size',
+  },
+  tote: {
+    main: ['vertical tote layout'],
+    supporting: ['simple line art accents'],
+    productNote: 'tote-ready design, clear vertical composition, simple printable lines',
+  },
+  sticker: {
+    main: ['die-cut sticker icon'],
+    supporting: ['thick outline'],
+    productNote: 'sticker-ready design, bold silhouette, simple cut-friendly outline',
+  },
+}
+
 function marketEvent(config) {
   return {
     defaultYear: DEFAULT_EVENT_YEAR,
@@ -1385,8 +1563,10 @@ export function scoreErankOpportunity(row = {}, options = {}) {
 
 function inferTarget(keyword, event) {
   const source = normalizePhrase(keyword)
-  const match = event.targets.find((target) => source.includes(normalizePhrase(target)))
-  return match ?? event.targets[0]
+  const matches = event.targets
+    .filter((target) => source.includes(normalizePhrase(target)))
+    .sort((left, right) => normalizePhrase(right).length - normalizePhrase(left).length)
+  return matches[0] ?? event.targets[0]
 }
 
 function cleanTag(value) {
@@ -1651,6 +1831,128 @@ export function buildSeoPlanFromBuckets(buckets = {}, options = {}) {
   }
 }
 
+function sourceHasPhrase(source, tokens, phrase) {
+  const normalized = normalizePhrase(phrase)
+  if (!normalized) return false
+  const phraseTokensValue = phraseTokens(normalized)
+  if (phraseTokensValue.length === 1) return tokens.has(phraseTokensValue[0])
+  return source.includes(normalized)
+}
+
+function collectVisualSignals(keyword, event, category, target) {
+  const categoryGuidance = CATEGORY_VISUAL_GUIDANCE[category.id] ?? CATEGORY_VISUAL_GUIDANCE.shirt
+  const source = normalizePhrase([
+    keyword,
+    event.searchTerm,
+    event.displayTerm,
+    target,
+    category.searchTerm,
+    ...(category.tags ?? []),
+  ].join(' '))
+  const tokens = new Set(phraseTokens(source))
+  const matches = VISUAL_SIGNAL_LIBRARY.filter((entry) => (
+    entry.phrases.some((phrase) => sourceHasPhrase(source, tokens, phrase))
+  ))
+
+  const fallbackMain = [
+    `${target} typography`,
+    event.searchTerm ? `${event.searchTerm} icon` : 'simple niche icon',
+  ]
+  const main = unique([
+    ...(categoryGuidance.main ?? []),
+    ...matches.flatMap((entry) => entry.main ?? []),
+    ...(matches.length === 0 ? fallbackMain : []),
+  ]).slice(0, 8)
+  const supporting = unique([
+    ...(categoryGuidance.supporting ?? []),
+    ...matches.flatMap((entry) => entry.supporting ?? []),
+    'small sparkle accent',
+  ]).slice(0, 10)
+  const mood = unique([
+    ...matches.flatMap((entry) => entry.mood ?? []),
+    ...event.designAngles.slice(0, 3),
+  ]).slice(0, 8)
+  const avoid = unique([
+    ...matches.flatMap((entry) => entry.avoid ?? []),
+    'brand logos',
+    'copyrighted characters',
+    'celebrity faces',
+    'official seals',
+    'mockup backgrounds',
+  ]).slice(0, 10)
+
+  return {
+    main,
+    supporting,
+    mood,
+    avoid,
+    productNote: categoryGuidance.productNote,
+    matchedSignals: matches.flatMap((entry) => entry.phrases.slice(0, 1)),
+  }
+}
+
+function buildDesignConcepts(keyword, event, category, target, visualMaterials) {
+  const keywordTitle = titleizeKeyword(keyword)
+  const main = visualMaterials.main.slice(0, 3).join(', ')
+  const supporting = visualMaterials.supporting.slice(0, 4).join(', ')
+  const mood = visualMaterials.mood.slice(0, 3).join(', ')
+  const productNote = visualMaterials.productNote
+
+  return [
+    {
+      name: '文字メイン',
+      layout: `Large readable "${keywordTitle}" typography with one clear hero icon.`,
+      materials: main,
+      notes: `${productNote}. Keep the art simple enough for POD printing.`,
+    },
+    {
+      name: 'バッジ型',
+      layout: `Retro badge or emblem composition for ${target}, using a compact icon cluster.`,
+      materials: unique([...visualMaterials.main.slice(0, 2), ...visualMaterials.supporting.slice(0, 3)]).join(', '),
+      notes: `Good when the keyword feels giftable or event-based. Mood: ${mood || 'clean commercial'}.`,
+    },
+    {
+      name: '小さな情景',
+      layout: `Small illustrated scene with the main motif in the center and supporting accents around it.`,
+      materials: supporting || main,
+      notes: 'Use this only when the keyword contains a clear object, hobby, job, or pet. Avoid busy backgrounds.',
+    },
+  ]
+}
+
+function buildEtsyMiraiPrompt(keyword, event, category, target, visualMaterials, concepts) {
+  const keywordTitle = titleizeKeyword(keyword)
+  const conceptText = concepts
+    .map((concept) => `${concept.name}: ${concept.layout} Materials: ${concept.materials}`)
+    .join(' | ')
+
+  return [
+    `Create a print-on-demand ${category.label} design for Etsy.`,
+    `Keyword: "${keywordTitle}".`,
+    `Audience: ${target}.`,
+    event.searchTerm ? `Occasion/market: ${event.searchTerm}.` : 'Occasion/market: evergreen niche product.',
+    `Main visual materials: ${visualMaterials.main.join(', ')}.`,
+    `Supporting materials: ${visualMaterials.supporting.join(', ')}.`,
+    `Mood/style: ${visualMaterials.mood.join(', ')}.`,
+    `Design concepts to choose from: ${conceptText}.`,
+    `Production: ${visualMaterials.productNote}, transparent background, no product mockup, clean commercial layout.`,
+  ].join(' ')
+}
+
+function buildDesignBrief(keyword, event, category, target) {
+  const visualMaterials = collectVisualSignals(keyword, event, category, target)
+  const concepts = buildDesignConcepts(keyword, event, category, target, visualMaterials)
+  const negativePrompt = `Avoid: ${visualMaterials.avoid.join(', ')}. Avoid tiny unreadable text, photo backgrounds, watermarks, and copied artwork.`
+
+  return {
+    sourceNote: 'キーワード内の名詞・相手・イベント・商品カテゴリから推定した素材案です。最終確認は上位商品の画像傾向も見てください。',
+    visualMaterials,
+    concepts,
+    etsyMiraiPrompt: buildEtsyMiraiPrompt(keyword, event, category, target, visualMaterials, concepts),
+    negativePrompt,
+  }
+}
+
 export function buildProductIdea(keyword, options = {}) {
   const event = getEvent(options)
   const category = getCategory(options.categoryId)
@@ -1658,6 +1960,7 @@ export function buildProductIdea(keyword, options = {}) {
   const normalizedKeyword = normalizePhrase(keyword)
   const target = inferTarget(normalizedKeyword, event)
   const designDirection = event.designAngles.join(' / ')
+  const designBrief = buildDesignBrief(normalizedKeyword, event, category, target)
   const seoPlan = buildSeoPlanFromBuckets({
     visibility: [normalizedKeyword],
   }, {
@@ -1673,6 +1976,7 @@ export function buildProductIdea(keyword, options = {}) {
     theme: `${event.jpLabel}向け ${target} ${category.label}`,
     target,
     designDirection,
+    designBrief,
     seoTitle,
     tags,
     notes: detectRiskTerms(normalizedKeyword).length > 0

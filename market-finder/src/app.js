@@ -921,6 +921,54 @@ function renderSmallScore(label, score, className) {
   `
 }
 
+function renderChips(values = []) {
+  return values.length
+    ? values.map((value) => `<span class="pill">${escapeHtml(value)}</span>`).join('')
+    : '<span class="empty-inline">候補なし</span>'
+}
+
+function renderDesignBrief(brief = {}) {
+  const materials = brief.visualMaterials ?? {}
+  const concepts = Array.isArray(brief.concepts) ? brief.concepts : []
+  const conceptCards = concepts.map((concept) => `
+    <div class="design-concept">
+      <strong>${escapeHtml(concept.name)}</strong>
+      <p>${escapeHtml(concept.layout)}</p>
+      <small>素材: ${escapeHtml(concept.materials || '-')}</small>
+    </div>
+  `).join('')
+
+  return `
+    <section class="design-brief">
+      <div class="mini-heading">
+        <span>作る絵・素材案</span>
+        <button type="button" class="text-btn" data-copy-design-prompt>プロンプトコピー</button>
+      </div>
+      <p class="box-help">${escapeHtml(brief.sourceNote ?? 'キーワードから推定した素材案です。')}</p>
+
+      <div class="idea-grid design-material-grid">
+        <div><span>主役素材</span><div class="tag-list">${renderChips(materials.main ?? [])}</div></div>
+        <div><span>足す素材</span><div class="tag-list">${renderChips(materials.supporting ?? [])}</div></div>
+        <div><span>雰囲気</span><div class="tag-list">${renderChips(materials.mood ?? [])}</div></div>
+        <div><span>避けるもの</span><div class="tag-list">${renderChips(materials.avoid ?? [])}</div></div>
+      </div>
+
+      <div class="design-concept-grid">
+        ${conceptCards}
+      </div>
+
+      <div class="prompt-box">
+        <span>EtsyMiraiProducer用指示</span>
+        <p>${escapeHtml(brief.etsyMiraiPrompt ?? '')}</p>
+      </div>
+      <div class="prompt-box muted">
+        <span>除外指示</span>
+        <p>${escapeHtml(brief.negativePrompt ?? '')}</p>
+      </div>
+    </section>
+  `
+}
+
 function renderErankTableRow(row) {
   const normalized = row.score.normalized
   const opportunity = row.erankOpportunity
@@ -1109,6 +1157,7 @@ function renderResults() {
           <div><span>タグ案</span><div class="tag-list">${tags}</div></div>
           ${reasons}
         </div>
+        ${renderDesignBrief(row.idea.designBrief)}
       </article>
     `
   }).join('')
@@ -1194,6 +1243,7 @@ function renderEverbeeDetail(row) {
         <div><span>タグ案</span><div class="tag-list">${tags}</div></div>
         ${reasons}
       </div>
+      ${renderDesignBrief(row.idea.designBrief)}
     </article>
   `
 }
@@ -1245,8 +1295,30 @@ function renderResultsTable() {
   `
 }
 
+async function copySelectedDesignPrompt(button) {
+  const rows = everbeeResultRows()
+  const selected = rows.find((row, index) => resultRowKey(row, index) === state.selectedResultKey) ?? rows[0]
+  const brief = selected?.idea?.designBrief
+  const text = [brief?.etsyMiraiPrompt, brief?.negativePrompt].filter(Boolean).join('\n\n')
+  if (!text) return
+
+  await navigator.clipboard.writeText(text)
+  const original = button.textContent
+  button.textContent = 'コピーしました'
+  window.setTimeout(() => {
+    button.textContent = original
+  }, 1400)
+}
+
 function handleResultListClick(event) {
   if (!(event.target instanceof Element)) return
+  const copyButton = event.target.closest('[data-copy-design-prompt]')
+  if (copyButton) {
+    copySelectedDesignPrompt(copyButton).catch(() => {
+      copyButton.textContent = 'コピー失敗'
+    })
+    return
+  }
   const rowButton = event.target.closest('[data-result-key]')
   if (!rowButton) return
   state.selectedResultKey = rowButton.dataset.resultKey
@@ -1729,6 +1801,13 @@ function exportStep4Csv() {
     'Product Theme',
     'Target',
     'Design Direction',
+    'Main Visual Materials',
+    'Supporting Materials',
+    'Mood',
+    'Avoid Visuals',
+    'Design Concepts',
+    'EtsyMiraiProducer Prompt',
+    'Negative Prompt',
     'SEO Title',
     'Tags',
     'Positive Reasons',
@@ -1738,6 +1817,11 @@ function exportStep4Csv() {
 
   const lines = rows.map((row, index) => {
     const normalized = row.score.normalized
+    const brief = row.idea.designBrief ?? {}
+    const materials = brief.visualMaterials ?? {}
+    const concepts = Array.isArray(brief.concepts)
+      ? brief.concepts.map((concept) => `${concept.name}: ${concept.layout}`).join(' / ')
+      : ''
     return [
       index + 1,
       normalized.keyword,
@@ -1758,6 +1842,13 @@ function exportStep4Csv() {
       row.idea.theme,
       row.idea.target,
       row.idea.designDirection,
+      (materials.main ?? []).join(', '),
+      (materials.supporting ?? []).join(', '),
+      (materials.mood ?? []).join(', '),
+      (materials.avoid ?? []).join(', '),
+      concepts,
+      brief.etsyMiraiPrompt ?? '',
+      brief.negativePrompt ?? '',
       row.idea.seoTitle,
       row.idea.tags.join(', '),
       scoreReasonLabels(row.score).join(' / '),
