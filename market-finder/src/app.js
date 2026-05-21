@@ -1354,23 +1354,29 @@ function addResearchRow(row) {
   const keyword = normalizePhrase(row.keyword)
   if (!keyword) return
 
-  const nextRow = {
-    keyword,
-    listingsAnalyzed: row.listingsAnalyzed,
-    topMonthlySales: row.topMonthlySales,
-    topRevenue: row.topRevenue,
-    averagePrice: row.averagePrice,
-    listingAge: row.listingAge,
-    erankSearchVolume: row.erankSearchVolume,
-    erankClicks: row.erankClicks,
-    erankCtr: row.erankCtr,
-    erankCompetition: row.erankCompetition,
-    erankKeywordDifficulty: row.erankKeywordDifficulty,
-    erankTrend: row.erankTrend,
-    notes: row.notes ?? '',
+  const existingIndex = state.researchRows.findIndex((item) => normalizePhrase(item.keyword) === keyword)
+  const existingRow = existingIndex >= 0 ? state.researchRows[existingIndex] : null
+  const keepExistingWhenBlank = (field) => {
+    const incoming = row[field]
+    return String(incoming ?? '').trim() !== '' ? incoming : existingRow?.[field]
   }
 
-  const existingIndex = state.researchRows.findIndex((item) => normalizePhrase(item.keyword) === keyword)
+  const nextRow = {
+    keyword,
+    listingsAnalyzed: keepExistingWhenBlank('listingsAnalyzed'),
+    topMonthlySales: keepExistingWhenBlank('topMonthlySales'),
+    topRevenue: keepExistingWhenBlank('topRevenue'),
+    averagePrice: keepExistingWhenBlank('averagePrice'),
+    listingAge: keepExistingWhenBlank('listingAge'),
+    erankSearchVolume: keepExistingWhenBlank('erankSearchVolume'),
+    erankClicks: keepExistingWhenBlank('erankClicks'),
+    erankCtr: keepExistingWhenBlank('erankCtr'),
+    erankCompetition: keepExistingWhenBlank('erankCompetition'),
+    erankKeywordDifficulty: keepExistingWhenBlank('erankKeywordDifficulty'),
+    erankTrend: keepExistingWhenBlank('erankTrend'),
+    notes: String(row.notes ?? '').trim() ? row.notes : existingRow?.notes ?? '',
+  }
+
   if (existingIndex >= 0) {
     state.researchRows.splice(existingIndex, 1, nextRow)
   } else {
@@ -1668,6 +1674,59 @@ function exportStep4Csv() {
 
   const date = new Date().toISOString().slice(0, 10)
   downloadTextFile(`market-finder-step4-everbee-${date}.csv`, `\ufeff${[header.map(csvCell).join(','), ...lines].join('\n')}`, 'text/csv;charset=utf-8')
+}
+
+function exportAvailableResearchCsv({ includeErank = true, includeEverbee = true } = {}) {
+  const exported = []
+  if (includeEverbee && everbeeResultRows().length > 0) {
+    exportStep4Csv()
+    exported.push('EverBee売上結果')
+  }
+  if (includeErank && erankResultRows().length > 0) {
+    exportErankCsv()
+    exported.push('eRank需要結果')
+  }
+  return exported
+}
+
+function confirmExportBeforeClearingResults({ scope = 'all', label = '前回結果' } = {}) {
+  const hasEverbee = everbeeResultRows().length > 0
+  const hasErank = erankResultRows().length > 0
+  const hasRows = state.researchRows.length > 0
+  const willClearEverbee = scope === 'all' || scope === 'everbee'
+  const willClearErank = scope === 'all'
+
+  if (!hasRows || (!willClearEverbee && !willClearErank)) return true
+  if (!hasEverbee && !hasErank) return window.confirm(`${label}があります。新しい調査を始める前に前回結果を消して続けますか？`)
+  if (scope === 'everbee' && !hasEverbee) return true
+
+  const exportMessage = [
+    `${label}があります。`,
+    '新しい調査を始めると、前回結果を画面から消します。',
+    '',
+    '消す前にCSVへ出力しますか？',
+    '',
+    'OK: CSVを保存してから続ける',
+    'キャンセル: CSV保存なしで続けるか確認する',
+  ].join('\n')
+
+  if (window.confirm(exportMessage)) {
+    exportAvailableResearchCsv({ includeErank: willClearErank, includeEverbee: willClearEverbee })
+    return true
+  }
+
+  return window.confirm('CSV保存なしで前回結果を消して、新しい調査を始めますか？\n\nOK: 保存せず続ける\nキャンセル: 調査を始めない')
+}
+
+function clearResearchResults(scope = 'all') {
+  if (scope === 'everbee') {
+    state.researchRows = state.researchRows.filter((row) => !scoreEverbeeResult(row, currentOptions()).validation.hasEverbeeData)
+  } else {
+    state.researchRows = []
+  }
+  state.selectedResultKey = ''
+  state.seoPlan = null
+  renderAll()
 }
 
 function fillResearchJob() {
@@ -2041,6 +2100,8 @@ async function startExtensionResearch() {
     elements.extensionStatus.textContent = '調査キーワード / JSON欄に、調査したいキーワードを入れてください。'
     return
   }
+  if (!confirmExportBeforeClearingResults({ scope: 'everbee', label: '前回のEverBee売上結果' })) return
+  clearResearchResults('everbee')
 
   try {
     openProgressModal({
@@ -2072,6 +2133,8 @@ async function startErankResearch() {
     setSimpleStatus('候補がありません。イベントと商品を選び直してください。候補は自動で更新されます。')
     return
   }
+  if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回の調査結果' })) return
+  clearResearchResults('all')
 
   try {
     openProgressModal({
@@ -2102,6 +2165,8 @@ async function startBroadEverbeeResearch() {
     elements.broadStatus.textContent = '広め検索語を作ってください。'
     return
   }
+  if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回の調査結果' })) return
+  clearResearchResults('all')
 
   try {
     openProgressModal({
