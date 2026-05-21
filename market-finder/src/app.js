@@ -72,6 +72,7 @@ const elements = {
   seedInput: document.querySelector('#seedInput'),
   trendScoutInput: document.querySelector('#trendScoutInput'),
   trendSampleBtn: document.querySelector('#trendSampleBtn'),
+  trendAutoBtn: document.querySelector('#trendAutoBtn'),
   trendApplyBtn: document.querySelector('#trendApplyBtn'),
   trendStatus: document.querySelector('#trendStatus'),
   broadQueryInput: document.querySelector('#broadQueryInput'),
@@ -1832,6 +1833,62 @@ function applyTrendScoutTerms() {
     : 'トレンド語は空です。空でも自動探索はできます。'
 }
 
+function appendTrendScoutCandidates(candidates) {
+  const existing = new Set(trendScoutTerms().map((term) => normalizePhrase(term)))
+  const nextLines = []
+
+  candidates.forEach((candidate) => {
+    const keyword = normalizePhrase(candidate?.keyword ?? candidate)
+    if (!keyword || existing.has(keyword)) return
+    existing.add(keyword)
+    const source = String(candidate?.source ?? '').trim()
+    nextLines.push(source ? `${keyword} | ${source}` : keyword)
+  })
+
+  if (nextLines.length === 0) return 0
+  const current = String(elements.trendScoutInput.value ?? '').trim()
+  elements.trendScoutInput.value = [current, ...nextLines].filter(Boolean).join('\n')
+  return nextLines.length
+}
+
+async function collectTrendScoutTerms() {
+  if (!state.extensionConnected) {
+    elements.trendStatus.textContent = 'Chrome拡張とまだ接続できていません。拡張機能をReloadしてから、このMarket Finderページも再読み込みしてください。'
+    return
+  }
+
+  const originalLabel = elements.trendAutoBtn.textContent
+  elements.trendAutoBtn.disabled = true
+  elements.trendAutoBtn.textContent = '取得中...'
+  elements.trendStatus.textContent = 'eRank Trend Buzz / Etsy Marketplace Insights / Pinterest Trends / Google Trends を開いて、見えている語句を拾っています。'
+
+  try {
+    const result = await requestExtension('COLLECT_TRENDS', {
+      sources: ['erank', 'etsy', 'pinterest', 'google'],
+      limit: 18,
+    }, 90000)
+    const response = result.response ?? {}
+    const trends = Array.isArray(response.trends) ? response.trends : []
+    const errors = Array.isArray(response.errors) ? response.errors : []
+    const added = appendTrendScoutCandidates(trends)
+    generateCandidates()
+
+    if (added > 0) {
+      const note = errors.length > 0 ? ` 取得できなかったページ: ${errors.slice(0, 2).join(' / ')}` : ''
+      elements.trendStatus.textContent = `${added}件のトレンド語を追加しました。次は「eRankで広く見る」で需要を確認します。${note}`
+    } else if (errors.length > 0) {
+      elements.trendStatus.textContent = `自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`
+    } else {
+      elements.trendStatus.textContent = '候補語は見つかりませんでした。対象ページを表示してから、もう一度押してください。'
+    }
+  } catch (error) {
+    elements.trendStatus.textContent = friendlyExtensionError(error)
+  } finally {
+    elements.trendAutoBtn.disabled = false
+    elements.trendAutoBtn.textContent = originalLabel
+  }
+}
+
 function setSimpleStatus(message) {
   elements.simpleStatus.textContent = message
 }
@@ -2338,6 +2395,7 @@ function bindEvents() {
   elements.broadApplyBtn.addEventListener('click', applyBroadHintsToSeeds)
   elements.broadSampleBtn.addEventListener('click', fillBroadSample)
   elements.trendSampleBtn.addEventListener('click', fillTrendSample)
+  elements.trendAutoBtn.addEventListener('click', collectTrendScoutTerms)
   elements.trendApplyBtn.addEventListener('click', applyTrendScoutTerms)
   elements.addResearchBtn.addEventListener('click', addManualResearch)
   elements.importCsvBtn.addEventListener('click', importCsv)

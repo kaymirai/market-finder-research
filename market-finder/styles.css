@@ -434,6 +434,11 @@ body.flow-seo .simple-runner {
   font-weight: 800;
 }
 
+.trend-scout-box textarea + button,
+.trend-scout-box button + button {
+  margin-top: 8px;
+}
+
 .field {
   display: grid;
   gap: 7px;

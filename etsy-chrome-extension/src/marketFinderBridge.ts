@@ -4,8 +4,10 @@
         action?: string
         requestId?: string
         keywords?: string[]
+        sources?: string[]
         everbeeUrl?: string
         erankUrl?: string
+        limit?: number
         delayMs?: number
     }
 
@@ -75,6 +77,15 @@
                 })
                 const state = await sendRuntimeMessage('GET_MARKET_STATE')
                 postToPage({ action: 'MARKET_STATE', requestId: request.requestId, ok: true, response, state })
+                return
+            }
+
+            if (request.action === 'COLLECT_TRENDS') {
+                const response = await sendRuntimeMessage('COLLECT_TRENDS', {
+                    sources: request.sources ?? [],
+                    limit: request.limit,
+                })
+                postToPage({ action: 'TREND_RESULTS', requestId: request.requestId, ok: true, response })
             }
         } catch (error) {
             postToPage({

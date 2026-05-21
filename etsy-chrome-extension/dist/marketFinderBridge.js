@@ -17,7 +17,7 @@
         });
     }
     async function handlePageRequest(request) {
-        var _a, _b;
+        var _a, _b, _c;
         if (request.action === 'PING') {
             postToPage({ action: 'BRIDGE_READY' });
             return;
@@ -59,6 +59,14 @@
                 });
                 const state = await sendRuntimeMessage('GET_MARKET_STATE');
                 postToPage({ action: 'MARKET_STATE', requestId: request.requestId, ok: true, response, state });
+                return;
+            }
+            if (request.action === 'COLLECT_TRENDS') {
+                const response = await sendRuntimeMessage('COLLECT_TRENDS', {
+                    sources: (_c = request.sources) !== null && _c !== void 0 ? _c : [],
+                    limit: request.limit,
+                });
+                postToPage({ action: 'TREND_RESULTS', requestId: request.requestId, ok: true, response });
             }
         }
         catch (error) {

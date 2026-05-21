@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "EtsyMirai Research Helper",
-  "version": "1.15",
+  "version": "1.16",
   "description": "Market Finderのキーワード調査とEtsy商品画像取得を補助します。",
   "permissions": [
     "storage",
@@ -13,6 +13,10 @@
     "https://*.everbee.io/*",
     "https://erank.com/*",
     "https://*.erank.com/*",
+    "https://trends.google.com/*",
+    "https://trends.google.us/*",
+    "https://trends.pinterest.com/*",
+    "https://*.pinterest.com/*",
     "http://localhost:3000/*",
     "http://127.0.0.1:3000/*",
     "http://localhost:3021/*",

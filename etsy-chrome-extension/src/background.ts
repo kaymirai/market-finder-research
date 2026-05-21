@@ -33,6 +33,21 @@
         error: string
     }
 
+    type TrendSourceId = 'erank' | 'etsy' | 'pinterest' | 'google'
+
+    type TrendCandidate = {
+        keyword: string
+        source: string
+        sourceUrl: string
+        note?: string
+    }
+
+    type TrendSourceConfig = {
+        id: TrendSourceId
+        label: string
+        url: string
+    }
+
     let isProcessingImages = false
     let imageQueue: ImageListing[] = []
     let currentProjectId = ''
@@ -52,6 +67,29 @@
     let marketCurrentKeyword = ''
     let marketError = ''
     let marketDelayMs = 4500
+
+    const trendSourceConfigs: Record<TrendSourceId, TrendSourceConfig> = {
+        erank: {
+            id: 'erank',
+            label: 'eRank Trend Buzz',
+            url: 'https://members.erank.com/trend-buzz',
+        },
+        etsy: {
+            id: 'etsy',
+            label: 'Etsy Marketplace Insights',
+            url: 'https://www.etsy.com/your/shops/me/stats',
+        },
+        pinterest: {
+            id: 'pinterest',
+            label: 'Pinterest Trends',
+            url: 'https://trends.pinterest.com/',
+        },
+        google: {
+            id: 'google',
+            label: 'Google Trends',
+            url: 'https://trends.google.com/trending?geo=US',
+        },
+    }
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.action === 'START_PROCESS') {
@@ -122,6 +160,18 @@
             saveMarketState()
             processNextMarketKeyword()
             sendResponse({ started: true })
+            return true
+        }
+
+        if (request.action === 'COLLECT_TRENDS') {
+            rememberMarketFinderTab(sender)
+            collectTrendSources(request.sources, request.limit)
+                .then((response) => sendResponse(response))
+                .catch((error: Error) => sendResponse({
+                    ok: false,
+                    trends: [],
+                    errors: [error.message],
+                }))
             return true
         }
 
@@ -214,6 +264,210 @@
         } catch {
             return 'https://erank.com/tools/keyword-tool'
         }
+    }
+
+    function normalizeTrendSources(value: unknown): TrendSourceConfig[] {
+        const requested = Array.isArray(value) && value.length > 0
+            ? value.map((item) => String(item).toLowerCase())
+            : ['erank', 'etsy', 'pinterest', 'google']
+
+        const seen = new Set<string>()
+        return requested
+            .map((id) => trendSourceConfigs[id as TrendSourceId])
+            .filter((config): config is TrendSourceConfig => Boolean(config))
+            .filter((config) => {
+                if (seen.has(config.id)) return false
+                seen.add(config.id)
+                return true
+            })
+    }
+
+    async function collectTrendSources(sources: unknown, limit: unknown) {
+        const configs = normalizeTrendSources(sources)
+        const perSourceLimit = Math.max(6, Math.min(Number(limit) || 18, 40))
+        const trends: TrendCandidate[] = []
+        const errors: string[] = []
+        const seen = new Set<string>()
+
+        for (const config of configs) {
+            try {
+                const sourceTrends = await collectTrendSource(config, perSourceLimit)
+                sourceTrends.forEach((trend) => {
+                    const key = trend.keyword.toLowerCase()
+                    if (!key || seen.has(key)) return
+                    seen.add(key)
+                    trends.push(trend)
+                })
+            } catch (error) {
+                const message = error instanceof Error ? error.message : '取得に失敗しました。'
+                errors.push(`${config.label}: ${message}`)
+            }
+        }
+
+        focusMarketFinderTab()
+        return { ok: errors.length === 0 || trends.length > 0, trends, errors }
+    }
+
+    async function collectTrendSource(config: TrendSourceConfig, limit: number): Promise<TrendCandidate[]> {
+        const tabId = await openTrendSourceTab(config.url)
+        await waitForTabComplete(tabId)
+        await delay(4500)
+
+        const trends = await extractTrendsFromTab(tabId, config, limit)
+        if (trends.length > 0) {
+            closeTabQuietly(tabId)
+            return trends
+        }
+
+        throw new Error('候補語が見つかりませんでした。ログイン後、ページを表示してから再実行してください。')
+    }
+
+    function openTrendSourceTab(url: string): Promise<number> {
+        return new Promise((resolve, reject) => {
+            chrome.tabs.create({ url, active: false }, (tab) => {
+                if (chrome.runtime.lastError || !tab?.id) {
+                    reject(new Error(chrome.runtime.lastError?.message || 'ページを開けませんでした。'))
+                    return
+                }
+                resolve(tab.id)
+            })
+        })
+    }
+
+    async function extractTrendsFromTab(tabId: number, config: TrendSourceConfig, limit: number): Promise<TrendCandidate[]> {
+        const injection = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: extractTrendCandidatesInPage,
+            args: [config.label, config.url, limit],
+        })
+
+        const result = injection[0]?.result
+        return Array.isArray(result) ? result : []
+    }
+
+    function closeTabQuietly(tabId: number) {
+        chrome.tabs.remove(tabId, () => {
+            // The tab may have been closed by the user. Nothing else to do.
+        })
+    }
+
+    function delay(ms: number) {
+        return new Promise((resolve) => setTimeout(resolve, ms))
+    }
+
+    function extractTrendCandidatesInPage(source: string, sourceUrl: string, limit: number): TrendCandidate[] {
+        const ignoredExact = new Set([
+            'home',
+            'login',
+            'log in',
+            'sign in',
+            'sign up',
+            'settings',
+            'privacy',
+            'terms',
+            'help',
+            'feedback',
+            'search',
+            'filter',
+            'filters',
+            'columns',
+            'export',
+            'keyword',
+            'keywords',
+            'trend',
+            'trends',
+            'trending',
+            'competition',
+            'clicks',
+            'ctr',
+            'avg searches',
+            'avg clicks',
+            'etsy competition',
+            'marketplace insights',
+            'google trends',
+            'pinterest trends',
+            'erank',
+        ])
+        const ignoredPattern = /\b(?:cookie|privacy|terms|feedback|subscribe|account|dashboard|analytics|settings|download|export|column|filter|average|search volume|past 24 hours|started|trend breakdown|unknown|ranked by|view all|learn more|create campaign|contact sales|seller handbook|shop manager)\b/i
+        const result: TrendCandidate[] = []
+        const seen = new Set<string>()
+
+        function isVisible(element: Element) {
+            const rect = element.getBoundingClientRect()
+            const style = window.getComputedStyle(element)
+            return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+        }
+
+        function cleanCandidate(value: string) {
+            return String(value ?? '')
+                .replace(/\u00a0/g, ' ')
+                .replace(/^[#\s]*\d+[\).\-\s]+/, '')
+                .replace(/\b(?:breakout|rising|top|popular|searches|clicks|views|pins)\b$/i, '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .replace(/^[^\w]+|[^\w\s'&-]+$/g, '')
+                .trim()
+        }
+
+        function addCandidate(raw: string, note?: string) {
+            const keyword = cleanCandidate(raw)
+            const normalized = keyword.toLowerCase()
+            if (!keyword || seen.has(normalized)) return
+            if (keyword.length < 3 || keyword.length > 60) return
+            if (!/[a-z]/i.test(keyword)) return
+            if (/https?:|www\.|@/.test(keyword)) return
+            if (/^[\d\s,.$%+-]+$/.test(keyword)) return
+            if (ignoredExact.has(normalized) || ignoredPattern.test(keyword)) return
+
+            const words = keyword.split(/\s+/).filter(Boolean)
+            if (words.length > 7) return
+            if (words.length === 1 && keyword.length < 4) return
+            if (words.some((word) => word.length > 24)) return
+
+            seen.add(normalized)
+            result.push({ keyword, source, sourceUrl, note })
+        }
+
+        function addSplitText(text: string, note: string) {
+            String(text ?? '')
+                .split(/\n|\t|\||•|·|, {2,}/)
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .forEach((part) => addCandidate(part, note))
+        }
+
+        const selectors = [
+            'table tbody tr',
+            '[role="row"]',
+            '[role="gridcell"]',
+            '[role="cell"]',
+            '[data-testid*="trend" i]',
+            '[class*="trend" i]',
+            '[class*="keyword" i]',
+            '[class*="card" i]',
+            'li',
+            'a',
+            'button',
+            'h1',
+            'h2',
+            'h3',
+            'h4',
+        ]
+
+        document.querySelectorAll(selectors.join(',')).forEach((element) => {
+            if (result.length >= limit) return
+            if (!isVisible(element)) return
+
+            const text = (element as HTMLElement).innerText || element.textContent || ''
+            addSplitText(text, element.tagName.toLowerCase())
+
+            const ariaLabel = element.getAttribute('aria-label')
+            if (ariaLabel) addSplitText(ariaLabel, 'aria-label')
+            const title = element.getAttribute('title')
+            if (title) addSplitText(title, 'title')
+        })
+
+        return result.slice(0, limit)
     }
 
     function isUsableResearchUrl(value?: string, allowEtsy = false) {
@@ -577,7 +831,7 @@
         return new Promise<void>((resolve, reject) => {
             const timeoutId = setTimeout(() => {
                 chrome.tabs.onUpdated.removeListener(listener)
-                reject(new Error('EverBeeタブの読み込みがタイムアウトしました。'))
+                reject(new Error('ページの読み込みがタイムアウトしました。'))
             }, 30000)
 
             const listener = (updatedTabId: number, changeInfo: { status?: string }) => {
