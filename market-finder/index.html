@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260521-9">
+    <link rel="stylesheet" href="./styles.css?v=20260521-10">
   </head>
   <body>
     <main class="app-shell">
@@ -25,15 +25,14 @@
         <div><span>1</span><strong>商品を選ぶ</strong><small>年やイベントは任意</small></div>
         <div><span>2</span><strong>eRankで需要</strong><small>検索数・クリックを見る</small></div>
         <div><span>3</span><strong>EverBeeで売上</strong><small>売れているか見る</small></div>
-        <div><span>4</span><strong>候補を選ぶ</strong><small>狙い目順に確認</small></div>
-        <div><span>5</span><strong>SEOを作る</strong><small>タイトルとタグに変換</small></div>
+        <div><span>4</span><strong>候補を使う</strong><small>素材案とCSVを確認</small></div>
       </section>
 
       <section class="quick-start">
         <div class="quick-start-copy">
           <p class="section-kicker">はじめて使う人へ</p>
           <h2>迷ったら、下の1から順に押してください</h2>
-          <p class="quick-start-text">商品を選ぶと候補を作り、eRankで需要を見て、EverBeeで売上を確認します。CSVやSEOだけ作る機能は、慣れてからで大丈夫です。</p>
+          <p class="quick-start-text">商品を選ぶと候補を作り、eRankで需要を見て、EverBeeで売上を確認します。最後に素材案とEtsyMiraiProducer用プロンプトを出します。</p>
         </div>
         <div class="flow-choice-grid" aria-label="使い方を選ぶ">
           <button id="flowAutoBtn" class="flow-choice is-active" type="button" data-flow-choice="auto">
@@ -44,7 +43,7 @@
             <strong>CSVから判定</strong>
             <span>調査結果の表を持っている時だけ。</span>
           </button>
-          <button id="flowSeoBtn" class="flow-choice" type="button" data-flow-choice="seo">
+          <button id="flowSeoBtn" class="flow-choice advanced-only" type="button" data-flow-choice="seo">
             <strong>SEOだけ作成</strong>
             <span>良いキーワードが決まっている時だけ。</span>
           </button>
@@ -62,18 +61,18 @@
           <textarea id="simpleCsvInput" rows="5" placeholder="Keyword, Listings Analyzed, Top Monthly Sales..."></textarea>
           <button id="simpleImportCsvBtn" type="button" class="primary-btn">CSVを読み込む</button>
         </div>
-        <div class="simple-step flow-seo-only">
+        <div class="simple-step flow-seo-only advanced-only">
           <span>1</span>
           <strong>キーワードを入れる</strong>
           <small>調査済みの良いキーワードを1行ずつ入れます。</small>
           <textarea id="simpleSeoKeywordsInput" rows="5" placeholder="例: bonus dad fathers day shirt&#10;dog dad fathers day shirt"></textarea>
           <button id="simpleUseSeoKeywordsBtn" type="button" class="primary-btn">SEO用に入れる</button>
         </div>
-        <div class="simple-step">
+        <div class="simple-step advanced-only">
           <span id="simpleSeoStepNumber">4</span>
           <strong>タイトルとタグを作る</strong>
           <small>数字が入ったら、タイトルとタグを作ります。</small>
-          <button id="simpleSeoBtn" type="button" class="dark-btn">5 Etsy用タイトル・タグを作る</button>
+          <button id="simpleSeoBtn" type="button" class="dark-btn">Etsy用タイトル・タグを作る</button>
         </div>
         <div class="simple-status" id="simpleStatus">まず商品を選んで「おすすめ自動探索をはじめる」を押してください。</div>
       </section>
@@ -390,7 +389,7 @@
           <div>
             <p class="section-kicker">Step 4 - EverBeeの結果</p>
             <h2>EverBeeで売上確認した結果</h2>
-            <p class="panel-help">売上数字が入った候補だけを、競合・売上・新しさで並べています。ここから商品化する候補を選びます。</p>
+            <p class="panel-help">ここがMarket Finderの最終結果です。良い候補を選ぶと、素材案とEtsyMiraiProducer用プロンプトも確認できます。</p>
           </div>
           <div class="heading-actions">
             <div class="legend">
@@ -399,7 +398,7 @@
               <span>C: 追加確認</span>
               <span>D: 除外候補</span>
             </div>
-            <button id="downloadStep4CsvBtn" type="button" class="ghost-btn" data-optional="保存">STEP4 CSV保存</button>
+            <button id="downloadStep4CsvBtn" type="button" class="ghost-btn" data-optional="保存">素材案CSV保存</button>
           </div>
         </div>
         <div class="metric-glossary">
@@ -414,10 +413,10 @@
         <div id="resultsList" class="results-list"></div>
       </section>
 
-      <section class="seo-section">
+      <section class="seo-section advanced-only">
         <div class="results-heading">
           <div>
-            <p class="section-kicker">Step 5 - Etsy出品準備</p>
+            <p class="section-kicker">予備機能 - Etsy出品準備</p>
             <h2>Etsy用タイトル・タグ設計</h2>
             <p class="panel-help">Step 4の良い候補を、3つの役割に整理して、Etsyのタイトルとタグに変換します。</p>
           </div>
@@ -532,6 +531,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260521-9"></script>
+    <script type="module" src="./src/app.js?v=20260521-10"></script>
   </body>
 </html>

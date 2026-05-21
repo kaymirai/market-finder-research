@@ -1566,7 +1566,9 @@ function inferTarget(keyword, event) {
   const matches = event.targets
     .filter((target) => source.includes(normalizePhrase(target)))
     .sort((left, right) => normalizePhrase(right).length - normalizePhrase(left).length)
-  return matches[0] ?? event.targets[0]
+  if (matches[0]) return matches[0]
+  if (event.id === 'auto-discovery' || !normalizePhrase(event.searchTerm)) return 'niche buyer'
+  return event.targets[0]
 }
 
 function cleanTag(value) {

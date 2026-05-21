@@ -128,7 +128,7 @@ h2 {
 
 .workflow-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 16px;
 }
@@ -192,7 +192,7 @@ body.flow-auto .simple-runner {
 
 .flow-choice-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(130px, .8fr));
+  grid-template-columns: minmax(220px, 1.3fr) minmax(160px, .7fr);
   gap: 10px;
 }
 
@@ -268,7 +268,7 @@ body.flow-auto .simple-runner {
 
 body.flow-csv .simple-runner,
 body.flow-seo .simple-runner {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .simple-step {

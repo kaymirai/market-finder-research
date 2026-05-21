@@ -15,7 +15,7 @@ import {
   scoreErankOpportunity,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js'
+} from '../../shared/market-keyword-engine/index.js?v=20260521-10'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -187,7 +187,6 @@ function safeStorage() {
 
 function selectedFlowMode() {
   if (document.body.classList.contains('flow-csv')) return 'csv'
-  if (document.body.classList.contains('flow-seo')) return 'seo'
   return 'auto'
 }
 
@@ -2021,21 +2020,19 @@ function setSimpleStatus(message) {
 }
 
 function setFlowMode(mode, options = {}) {
+  const activeMode = mode === 'csv' ? 'csv' : 'auto'
   document.body.classList.remove('flow-auto', 'flow-csv', 'flow-seo')
-  document.body.classList.add(`flow-${mode}`)
+  document.body.classList.add(`flow-${activeMode}`)
   ;[elements.flowAutoBtn, elements.flowCsvBtn, elements.flowSeoBtn].forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.flowChoice === mode)
+    button.classList.toggle('is-active', button.dataset.flowChoice === activeMode)
   })
 
-  if (mode === 'auto') {
+  if (activeMode === 'auto') {
     elements.simpleSeoStepNumber.textContent = '4'
     setSimpleStatus('まず商品を選んで「おすすめ自動探索をはじめる」を押してください。')
-  } else if (mode === 'csv') {
-    elements.simpleSeoStepNumber.textContent = '2'
-    setSimpleStatus('CSVを貼って、1「CSVを読み込む」を押してください。')
   } else {
     elements.simpleSeoStepNumber.textContent = '2'
-    setSimpleStatus('良いキーワードを貼って、1「SEO用に入れる」を押してください。')
+    setSimpleStatus('CSVを貼って、1「CSVを読み込む」を押してください。')
   }
 
   if (options.persist !== false) persistMarketFinderState()
@@ -2055,7 +2052,7 @@ async function simpleStartResearch() {
 function simpleImportCsv() {
   elements.csvInput.value = elements.simpleCsvInput.value
   importCsv()
-  setSimpleStatus(`${state.researchRows.length}件の結果を読み込みました。次は「タイトルとタグを作る」です。`)
+  setSimpleStatus(`${state.researchRows.length}件の結果を読み込みました。Step 4で候補・素材案・CSV保存を確認してください。`)
 }
 
 function simpleUseSeoKeywords() {
@@ -2249,7 +2246,7 @@ function renderProgressModal(extensionState = state.extensionState) {
           : `eRank確認が完了しました。今回は弱めなので、イベント・商品・手入力イベントを変えてもう一度広く見るのがおすすめです。`
       setSimpleStatus(message)
     } else if (state.progress.mode === 'keyword') {
-      setSimpleStatus(`${done}件の売上確認が完了しました。次は「タイトルとタグを作る」です。`)
+      setSimpleStatus(`${done}件の売上確認が完了しました。Step 4で候補と素材案を確認してください。必要ならCSV保存できます。`)
     }
     elements.progressDetail.textContent = state.progress.mode === 'broad'
       ? `広め調査が完了しました。商品名を取り込めた場合は、種ワード欄も更新済みです。`
