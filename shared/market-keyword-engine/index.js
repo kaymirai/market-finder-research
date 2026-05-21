@@ -958,6 +958,12 @@ function countWords(value) {
   return normalizePhrase(value).split(' ').filter(Boolean).length
 }
 
+export function isGenericCandidateKeyword(keyword) {
+  const tokens = phraseTokens(keyword)
+  if (tokens.length === 0) return true
+  return tokens.every((token) => GENERIC_WORDS.has(token))
+}
+
 function hasRepeatedAdjacentPhrase(value) {
   const tokens = normalizePhrase(value).split(' ').filter(Boolean)
   for (let index = 0; index < tokens.length - 1; index += 1) {
@@ -1066,6 +1072,7 @@ export function generateKeywordCandidates(options = {}) {
     buildKeywordTemplates(event, category, discoveryTargets, intents, seedKeywords, year)
       .map((keyword) => normalizePhrase(keyword))
       .filter((keyword) => countWords(keyword) >= 2)
+      .filter((keyword) => !isGenericCandidateKeyword(keyword))
       .filter((keyword) => !hasRepeatedAdjacentPhrase(keyword))
   )
 

@@ -15,7 +15,8 @@ import {
   scoreErankOpportunity,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260521-11'
+  isGenericCandidateKeyword,
+} from '../../shared/market-keyword-engine/index.js?v=20260522-1'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -803,7 +804,7 @@ function renderCandidates() {
             ${candidate.riskTerms.length ? `<span class="pill danger">${escapeHtml(candidate.riskTerms.join(', '))}</span>` : ''}
           </div>
         </div>
-        <div class="score-chip"><span>候補生成<br>優先度</span><strong>${candidate.score}</strong></div>
+        <div class="score-chip"><span>調査順<br>目安</span><strong>${candidate.score}</strong></div>
       </article>
     `
   }).join('')
@@ -1423,6 +1424,7 @@ function renderAll() {
 
 function candidateFromKeyword(keyword, generatedMap, trendSet = new Set()) {
   const normalized = normalizePhrase(keyword)
+  if (isGenericCandidateKeyword(normalized)) return null
   const generated = generatedMap.get(normalized)
   if (generated) return generated
   const event = selectedEvent()
@@ -1461,6 +1463,7 @@ function generateCandidates() {
 
   state.candidates = keywords
     .map((keyword) => candidateFromKeyword(keyword, generatedMap, trendSet))
+    .filter(Boolean)
     .slice(0, Number(elements.limitInput.value) || 80)
   state.candidateMessage = state.candidates.length > 0
     ? ''
