@@ -16,7 +16,7 @@ import {
   normalizePhrase,
   resolveMarketEvent,
   isGenericCandidateKeyword,
-} from '../../shared/market-keyword-engine/index.js?v=20260522-1'
+} from '../../shared/market-keyword-engine/index.js?v=20260522-2'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -40,6 +40,9 @@ const state = {
     stopped: false,
     failed: false,
     message: '',
+    current: '',
+    done: 0,
+    completed: false,
   },
   extensionConnected: false,
   extensionState: null,
@@ -1946,22 +1949,56 @@ function appendTrendScoutCandidates(candidates) {
 }
 
 async function collectTrendScoutTerms() {
-  if (!state.extensionConnected) {
-    generateCandidates()
-    const made = state.candidates.length
-    setTrendStatus(made > 0
-      ? `Chrome連携はまだ使えませんが、商品条件だけでStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
-      : 'Chrome連携はまだ使えません。Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。', made > 0 ? 'ready' : 'warn')
-    return
-  }
-
   const originalLabel = elements.trendAutoBtn.textContent
   elements.trendAutoBtn.disabled = true
   elements.trendAutoBtn.textContent = '取得中...'
+  openProgressModal({
+    mode: 'trend',
+    title: 'おすすめ自動探索',
+    total: state.extensionConnected ? 4 : 2,
+    message: '開始しました。Step 2に入れる候補を作っています。',
+  })
   resetCandidatesForInputChange('おすすめ元から探しています。完了するとここに候補が入ります。')
-  setTrendStatus('取得中です。eRank / Pinterest / Google を開いて、見えている語句を拾っています。Marketplace Insightsは無料枠を使うため、ここでは無理に使いません。', 'working')
+  updateProgressModal({
+    current: state.extensionConnected ? '4サイトの候補語を確認中' : '商品条件から候補を作成中',
+    done: 0,
+    message: state.extensionConnected
+      ? '取得中です。eRank / Pinterest / Google を開いて、見えている語句を拾っています。Marketplace Insightsは無料枠を使うため、ここでは無理に使いません。'
+      : 'Chrome連携はまだ使えません。まず商品条件と入力済みの流行語だけで候補を作ります。',
+  })
+  setTrendStatus(state.progress.message, 'working')
+
+  if (!state.extensionConnected) {
+    try {
+      generateCandidates()
+      const made = state.candidates.length
+      const message = made > 0
+        ? `Chrome連携はまだ使えませんが、商品条件だけでStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
+        : 'Chrome連携はまだ使えません。Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。'
+      updateProgressModal({
+        current: made > 0 ? 'Step 2へ候補を反映' : '候補なし',
+        done: 2,
+        message,
+      })
+      setTrendStatus(message, made > 0 ? 'ready' : 'warn')
+      completeProgressModal(message)
+    } catch (error) {
+      const message = error?.message || 'おすすめ自動探索でエラーが起きました。'
+      setTrendStatus(message, 'warn')
+      failProgress(message)
+    } finally {
+      elements.trendAutoBtn.disabled = false
+      elements.trendAutoBtn.textContent = originalLabel
+    }
+    return
+  }
 
   try {
+    updateProgressModal({
+      current: 'eRank / Pinterest / Googleを確認中',
+      done: 1,
+      message: 'Chrome連携で外部ページを確認しています。終わると候補を整理します。',
+    })
     const result = await requestExtension('COLLECT_TRENDS', {
       sources: ['erank', 'pinterest', 'google'],
       limit: 18,
@@ -1969,21 +2006,39 @@ async function collectTrendScoutTerms() {
     const response = result.response ?? {}
     const trends = Array.isArray(response.trends) ? response.trends : []
     const errors = Array.isArray(response.errors) ? response.errors : []
+    updateProgressModal({
+      current: '見つかった語句を整理中',
+      done: 3,
+      message: `${trends.length}件の語句を確認しました。Step 2に入れる候補へ変換しています。`,
+    })
     const added = appendTrendScoutCandidates(trends)
     generateCandidates()
 
+    let message = ''
+    let variant = 'ready'
     if (added > 0) {
       const note = errors.length > 0 ? ` 取得できなかったページ: ${errors.slice(0, 2).join(' / ')}` : ''
-      setTrendStatus(`完了しました。${added}件の流行語を追加し、Step 2に${state.candidates.length}件の候補を作りました。次は「検索されているか見る」です。${note}`, 'ready')
+      message = `完了しました。${added}件の流行語を追加し、Step 2に${state.candidates.length}件の候補を作りました。次は「検索されているか見る」です。${note}`
     } else if (trends.length > 0 && state.candidates.length > 0) {
-      setTrendStatus(`完了しました。新しく追加する語句はありませんでしたが、既存の流行語からStep 2に${state.candidates.length}件の候補を作りました。`, 'ready')
+      message = `完了しました。新しく追加する語句はありませんでしたが、既存の流行語からStep 2に${state.candidates.length}件の候補を作りました。`
     } else if (errors.length > 0) {
-      setTrendStatus(`完了しましたが、自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`, 'warn')
+      message = `完了しましたが、自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`
+      variant = 'warn'
     } else {
-      setTrendStatus('完了しましたが、候補語は見つかりませんでした。対象ページを表示してから、もう一度押してください。', 'warn')
+      message = '完了しましたが、候補語は見つかりませんでした。対象ページを表示してから、もう一度押してください。'
+      variant = 'warn'
     }
+    updateProgressModal({
+      current: variant === 'ready' ? 'Step 2へ候補を反映' : '確認が必要',
+      done: 4,
+      message,
+    })
+    setTrendStatus(message, variant)
+    completeProgressModal(message)
   } catch (error) {
-    setTrendStatus(friendlyExtensionError(error), 'warn')
+    const message = friendlyExtensionError(error)
+    setTrendStatus(message, 'warn')
+    failProgress(message)
   } finally {
     elements.trendAutoBtn.disabled = false
     elements.trendAutoBtn.textContent = originalLabel
@@ -2141,7 +2196,30 @@ function openProgressModal({ mode, title, total, message }) {
     stopped: false,
     failed: false,
     message: message ?? '',
+    current: '',
+    done: 0,
+    completed: false,
   }
+  elements.progressModal.hidden = false
+  renderProgressModal(state.extensionState)
+}
+
+function updateProgressModal({ current, done, total, message } = {}) {
+  if (current !== undefined) state.progress.current = current
+  if (done !== undefined) state.progress.done = done
+  if (total !== undefined) state.progress.total = total
+  if (message !== undefined) state.progress.message = message
+  state.progress.visible = true
+  elements.progressModal.hidden = false
+  renderProgressModal(state.extensionState)
+}
+
+function completeProgressModal(message) {
+  state.progress.completed = true
+  state.progress.wasActive = true
+  state.progress.done = Math.max(state.progress.done ?? 0, state.progress.total ?? 0)
+  state.progress.message = message ?? state.progress.message
+  state.progress.visible = true
   elements.progressModal.hidden = false
   renderProgressModal(state.extensionState)
 }
@@ -2164,20 +2242,30 @@ function failProgress(message) {
 }
 
 function renderProgressModal(extensionState = state.extensionState) {
-  const active = Boolean(extensionState?.active)
+  const localProgress = state.progress.mode === 'trend'
+  const active = localProgress
+    ? state.progress.started && !state.progress.completed && !state.progress.failed && !state.progress.stopped
+    : Boolean(extensionState?.active)
   if (active) state.progress.wasActive = true
 
-  const done = extensionState?.results?.length ?? 0
-  const remaining = extensionState?.remaining ?? Math.max(0, state.progress.total - done)
+  const done = localProgress ? state.progress.done ?? 0 : extensionState?.results?.length ?? 0
+  const remaining = localProgress
+    ? Math.max(0, state.progress.total - done)
+    : extensionState?.remaining ?? Math.max(0, state.progress.total - done)
   const total = Math.max(state.progress.total, done + remaining, done)
   const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
-  const completed = state.progress.started && state.progress.wasActive && !active && !state.progress.failed
+  const completed = localProgress
+    ? state.progress.completed && !state.progress.failed
+    : state.progress.started && state.progress.wasActive && !active && !state.progress.failed
   const stopped = completed && state.progress.stopped
   const failed = state.progress.failed || Boolean(extensionState?.error && !active)
-  const currentKeyword = active ? extensionState?.currentKeyword || '次のキーワードを準備中' : '-'
+  const currentKeyword = localProgress
+    ? state.progress.current || '-'
+    : active ? extensionState?.currentKeyword || '次のキーワードを準備中' : '-'
 
   const starting = state.progress.visible && state.progress.started && !state.progress.wasActive && !state.progress.failed && !state.progress.stopped
   setRunningControls(active || starting)
+  if (localProgress) elements.progressStopBtn.disabled = true
 
   elements.progressTitle.textContent = state.progress.title
   elements.progressCurrentKeyword.textContent = currentKeyword
@@ -2222,12 +2310,16 @@ function renderProgressModal(extensionState = state.extensionState) {
       setSimpleStatus(message)
     } else if (state.progress.mode === 'keyword') {
       setSimpleStatus(`${done}件の売上確認が完了しました。Step 4で候補と名詞候補を確認してください。必要ならCSV保存できます。`)
+    } else if (state.progress.mode === 'trend') {
+      setSimpleStatus(state.progress.message || `おすすめ自動探索が完了しました。Step 2に${state.candidates.length}件の候補を作りました。`)
     }
     elements.progressDetail.textContent = state.progress.mode === 'broad'
       ? `広め調査が完了しました。商品名を取り込めた場合は、種ワード欄も更新済みです。`
       : state.progress.mode === 'erank'
         ? `eRank確認が完了しました。弱い語句で止めず、関連語も見てEverBee候補を作りました。`
-        : `${done}件のEverBee調査が完了しました。`
+        : state.progress.mode === 'trend'
+          ? state.progress.message || `おすすめ自動探索が完了しました。Step 2に${state.candidates.length}件の候補を作りました。`
+          : `${done}件のEverBee調査が完了しました。`
     elements.progressHideBtn.textContent = '閉じる'
     return
   }
@@ -2239,7 +2331,9 @@ function renderProgressModal(extensionState = state.extensionState) {
       ? 'EverBeeで広め検索を進めています。画面から拾えた商品名は自動で種ワード抽出へ回します。'
       : state.progress.mode === 'erank'
         ? 'eRankで検索数・クリック・競合を順番に確認しています。'
-        : 'EverBeeでキーワードを順番に調査しています。完了するとこの画面が完了表示に変わります。'
+        : state.progress.mode === 'trend'
+          ? state.progress.message || 'eRank / Pinterest / Google から候補の元になる語句を探しています。'
+          : 'EverBeeでキーワードを順番に調査しています。完了するとこの画面が完了表示に変わります。'
     elements.progressHideBtn.textContent = '閉じて続行'
     return
   }
