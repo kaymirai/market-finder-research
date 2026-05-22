@@ -16,7 +16,7 @@ import {
   classifyCandidateKeyword,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260522-5'
+} from '../../shared/market-keyword-engine/index.js?v=20260522-6'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -885,8 +885,12 @@ function renderCandidates() {
 function scoreReasonLabels(score) {
   const normalized = score.normalized
   const reasons = []
-  if ((normalized.listingsAnalyzed ?? Infinity) < 3000) reasons.push('EverBee競合少なめ')
-  else if ((normalized.listingsAnalyzed ?? Infinity) < 6000) reasons.push('EverBee競合中くらい')
+  if ((normalized.listingsAnalyzed ?? Infinity) <= 3000) reasons.push('EverBee競合少なめ')
+  else if ((normalized.listingsAnalyzed ?? Infinity) <= 5000) reasons.push('EverBee競合許容')
+  else if ((normalized.listingsAnalyzed ?? 0) > 5000) reasons.push('商品数5,000超')
+  if ((normalized.salesDensity ?? 0) >= 5) reasons.push('販売密度A')
+  else if ((normalized.salesDensity ?? 0) >= 3) reasons.push('販売密度B')
+  else if (normalized.salesDensity !== null && normalized.salesDensity !== undefined) reasons.push('販売密度弱め')
   if ((normalized.topMonthlySales ?? 0) >= 30) reasons.push('月間販売が強い')
   else if ((normalized.topMonthlySales ?? 0) >= 10) reasons.push('月間販売あり')
   if ((normalized.topRevenue ?? 0) >= 1000) reasons.push('売上が強い')
@@ -898,6 +902,7 @@ function scoreReasonLabels(score) {
   if ((normalized.erankSearchVolume ?? 0) >= 300 || (normalized.erankClicks ?? 0) >= 100) reasons.push('eRank需要あり')
   if (hasErankDemand && (normalized.erankCompetition ?? Infinity) < 5000) reasons.push('eRank競合低め')
   if (hasErankDemand && (normalized.erankKeywordDifficulty ?? Infinity) <= 25) reasons.push('KD低め')
+  if ((normalized.erankClickDensity ?? 0) >= 20) reasons.push('クリック密度A')
   if (score.riskTerms.length > 0) reasons.push('要リスク確認')
   return reasons.slice(0, 5)
 }
@@ -961,9 +966,19 @@ function erankSourceLabel(row) {
 }
 
 function erankSourceKeyword(row) {
+  const direct = String(row.sourceKeyword ?? '').trim()
+  if (direct) return direct
   const notes = String(row.notes ?? '')
   const match = notes.match(/related keywords for\s+(.+)$/i)
   return match?.[1]?.trim() ?? ''
+}
+
+function mergeRowNotes(existingNote = '', incomingNote = '') {
+  return [existingNote, incomingNote]
+    .flatMap((note) => String(note ?? '').split(/\s+\/\s+/))
+    .map((note) => note.trim())
+    .filter((note, index, notes) => note && notes.indexOf(note) === index)
+    .join(' / ')
 }
 
 function displayMetricValue(value, fallback = '-') {
@@ -1224,6 +1239,8 @@ function renderEverbeeTableRow(item, selectedKey) {
   const labelClass = opportunityScoreClass(row.score)
   const scoreReasons = compactReasonChips(scoreReasonLabels(row.score), 2)
   const selectedClass = key === selectedKey ? ' is-selected' : ''
+  const sourceKeyword = erankSourceKeyword(row)
+  const sourceLine = sourceKeyword ? `eRank派生: ${sourceKeyword} から発見` : row.idea.theme
   const age = normalized.listingAgeMonths === null || normalized.listingAgeMonths === undefined
     ? '-'
     : `${normalized.listingAgeMonths} mo`
@@ -1235,7 +1252,7 @@ function renderEverbeeTableRow(item, selectedKey) {
       </span>
       <span class="table-cell keyword-cell" data-label="キーワード">
         <strong>${escapeHtml(normalized.keyword)}</strong>
-        <span class="table-subline">${escapeHtml(row.idea.theme)}</span>
+        <span class="table-subline">${escapeHtml(sourceLine)}</span>
         ${scoreReasons ? `<span class="table-reasons">${scoreReasons}</span>` : ''}
       </span>
       <span class="table-cell number-cell" data-label="商品数">${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</span>
@@ -1250,6 +1267,7 @@ function renderEverbeeDetail(row) {
   const normalized = row.score.normalized
   const labelClass = opportunityScoreClass(row.score)
   const tags = row.idea.tags.map((tag) => `<span class="pill">${escapeHtml(tag)}</span>`).join('')
+  const sourceKeyword = erankSourceKeyword(row)
   const scoreReasons = scoreReasonLabels(row.score)
     .map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`)
     .join('')
@@ -1268,6 +1286,7 @@ function renderEverbeeDetail(row) {
             <span class="pill">${escapeHtml(row.score.validation.label)}</span>
             <span class="pill">${escapeHtml(row.idea.theme)}</span>
           </div>
+          ${sourceKeyword ? `<div class="candidate-source-line">eRank派生元: ${escapeHtml(sourceKeyword)}</div>` : ''}
           ${scoreReasons ? `<div class="reason-line">${scoreReasons}</div>` : ''}
         </div>
       </div>
@@ -1284,6 +1303,9 @@ function renderEverbeeDetail(row) {
         <div class="metric"><span>eRank Comp</span><strong>${escapeHtml(displayMetricValue(normalized.erankCompetition, 'Unknown'))}</strong></div>
         <div class="metric"><span>eRank KD</span><strong>${escapeHtml(displayMetricValue(normalized.erankKeywordDifficulty, '未取得'))}</strong></div>
         <div class="metric"><span>eRank Trend</span><strong>${escapeHtml(displayMetricValue(normalized.erankTrend))}</strong></div>
+        <div class="metric"><span>Sales / 1000</span><strong>${escapeHtml(displayMetricValue(normalized.salesDensity?.toFixed?.(1) ?? normalized.salesDensity))}</strong></div>
+        <div class="metric"><span>Revenue / 1000</span><strong>${escapeHtml(displayMoneyValue(normalized.revenueDensity?.toFixed?.(0) ?? normalized.revenueDensity))}</strong></div>
+        <div class="metric"><span>Clicks / 1000</span><strong>${escapeHtml(displayMetricValue(normalized.erankClickDensity?.toFixed?.(1) ?? normalized.erankClickDensity))}</strong></div>
       </div>
 
       <div class="idea-grid">
@@ -1636,9 +1658,16 @@ function addResearchRow(row) {
   const incomingHasErank = rowHasErankInput(row)
   const incomingHasEverbee = rowHasEverbeeInput(row)
   const incomingCheckedAt = row.checkedAt || row.createdAt || row.updatedAt || now
+  const incomingNotes = String(row.notes ?? '').trim()
+  const mergedNotes = mergeRowNotes(existingRow?.notes, incomingNotes)
+  const sourceKeyword = String(row.sourceKeyword ?? '').trim()
+    || erankSourceKeyword(row)
+    || existingRow?.sourceKeyword
+    || erankSourceKeyword(existingRow ?? {})
 
   const nextRow = {
     keyword,
+    sourceKeyword,
     listingsAnalyzed: keepExistingWhenBlank('listingsAnalyzed'),
     topMonthlySales: keepExistingWhenBlank('topMonthlySales'),
     topRevenue: keepExistingWhenBlank('topRevenue'),
@@ -1656,7 +1685,7 @@ function addResearchRow(row) {
     everbeeCheckedAt: incomingHasEverbee
       ? (existingRow?.everbeeCheckedAt || row.everbeeCheckedAt || incomingCheckedAt)
       : existingRow?.everbeeCheckedAt ?? '',
-    notes: String(row.notes ?? '').trim() ? row.notes : existingRow?.notes ?? '',
+    notes: mergedNotes,
   }
 
   if (existingIndex >= 0) {
@@ -1900,6 +1929,7 @@ function exportStep4Csv() {
   const header = [
     'Rank',
     'Keyword',
+    'eRank Source Keyword',
     'Opportunity Score',
     'Grade',
     'Validation',
@@ -1914,6 +1944,9 @@ function exportStep4Csv() {
     'eRank Competition',
     'eRank KD',
     'eRank Trend',
+    'Sales Density per 1000 Listings',
+    'Revenue Density per 1000 Listings',
+    'Click Density per 1000 eRank Competition',
     'Product Theme',
     'Target',
     'Hero Nouns',
@@ -1934,6 +1967,7 @@ function exportStep4Csv() {
     return [
       index + 1,
       normalized.keyword,
+      erankSourceKeyword(row),
       row.score.score,
       row.score.label,
       row.score.validation.label,
@@ -1948,6 +1982,9 @@ function exportStep4Csv() {
       normalized.erankCompetition ?? '',
       normalized.erankKeywordDifficulty ?? '',
       normalized.erankTrend ?? '',
+      normalized.salesDensity !== null && normalized.salesDensity !== undefined ? normalized.salesDensity.toFixed(2) : '',
+      normalized.revenueDensity !== null && normalized.revenueDensity !== undefined ? normalized.revenueDensity.toFixed(2) : '',
+      normalized.erankClickDensity !== null && normalized.erankClickDensity !== undefined ? normalized.erankClickDensity.toFixed(2) : '',
       row.idea.theme,
       row.idea.target,
       (brief.heroNouns ?? []).join(', '),

@@ -833,6 +833,11 @@ export const DEFAULT_RISK_TERMS = [
   'chainsaw man',
   'death note',
   'evangelion',
+  'fourth wing',
+  'iron flame',
+  'onyx storm',
+  'acotar',
+  'a court of thorns and roses',
   'bts',
   'bangtan',
   'bangtan boys',
@@ -988,6 +993,7 @@ const FIELD_ALIASES = {
   erankCompetition: ['erank competition', 'competition', 'etsy competition'],
   erankKeywordDifficulty: ['erank kd', 'kd', 'keyword difficulty', 'difficulty'],
   erankTrend: ['erank trend', 'trend', 'monthly trend'],
+  sourceKeyword: ['source keyword', 'erank source keyword', 'source', '派生元'],
   notes: ['notes', 'note', 'memo', 'メモ'],
 }
 
@@ -1572,6 +1578,11 @@ function scoreBand(value, bands) {
   return 0
 }
 
+function densityPerThousand(numerator, denominator) {
+  if (numerator === null || denominator === null || denominator <= 0) return null
+  return (numerator / denominator) * 1000
+}
+
 export function scoreEverbeeResult(row = {}, options = {}) {
   const keyword = normalizePhrase(row.keyword)
   const listingsAnalyzed = parseNumber(row.listingsAnalyzed)
@@ -1586,60 +1597,65 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   const erankKeywordDifficulty = parseNumber(row.erankKeywordDifficulty)
   const erankTrend = parseNumber(row.erankTrend)
   const riskTerms = detectRiskTerms(`${keyword} ${row.notes ?? ''}`, splitSeedText(options.customRiskTerms))
+  const salesDensity = densityPerThousand(topMonthlySales, listingsAnalyzed)
+  const revenueDensity = densityPerThousand(topRevenue, listingsAnalyzed)
+  const erankClickDensity = densityPerThousand(erankClicks, erankCompetition)
 
   const competitionScore = scoreBand(listingsAnalyzed, [
-    { test: (value) => value !== null && value > 0 && value < 1000, points: 30 },
-    { test: (value) => value !== null && value < 3000, points: 24 },
-    { test: (value) => value !== null && value < 6000, points: 14 },
-    { test: (value) => value !== null && value < 10000, points: 6 },
+    { test: (value) => value !== null && value > 0 && value <= 999, points: 20 },
+    { test: (value) => value !== null && value <= 2999, points: 17 },
+    { test: (value) => value !== null && value <= 5000, points: 14 },
+    { test: (value) => value !== null && value <= 7999, points: 8 },
+    { test: (value) => value !== null && value <= 9999, points: 4 },
   ])
   const demandScore = scoreBand(topMonthlySales, [
-    { test: (value) => value !== null && value >= 30, points: 25 },
-    { test: (value) => value !== null && value >= 10, points: 20 },
-    { test: (value) => value !== null && value >= 5, points: 10 },
-    { test: (value) => value !== null && value > 0, points: 4 },
-  ])
-  const revenueScore = scoreBand(topRevenue, [
-    { test: (value) => value !== null && value >= 1000, points: 20 },
-    { test: (value) => value !== null && value >= 300, points: 16 },
-    { test: (value) => value !== null && value >= 100, points: 8 },
-    { test: (value) => value !== null && value > 0, points: 3 },
-  ])
-  const trendScore = scoreBand(listingAgeMonths, [
-    { test: (value) => value !== null && value >= 2 && value <= 6 && (topMonthlySales ?? 0) >= 10, points: 18 },
-    { test: (value) => value !== null && value >= 2 && value <= 12 && (topMonthlySales ?? 0) >= 10, points: 15 },
-    { test: (value) => value !== null && value <= 18 && (topMonthlySales ?? 0) > 0, points: 7 },
-    { test: (value) => value !== null && value < 2 && (topMonthlySales ?? 0) >= 10, points: 6 },
-  ])
-  const priceScore = scoreBand(averagePrice, [
-    { test: (value) => value !== null && value >= 18 && value <= 35, points: 10 },
-    { test: (value) => value !== null && value >= 12 && value <= 45, points: 6 },
+    { test: (value) => value !== null && value >= 50, points: 18 },
+    { test: (value) => value !== null && value >= 30, points: 15 },
+    { test: (value) => value !== null && value >= 10, points: 10 },
+    { test: (value) => value !== null && value >= 5, points: 5 },
     { test: (value) => value !== null && value > 0, points: 2 },
   ])
-  const erankDemandScore = Math.max(
-    scoreBand(erankSearchVolume, [
-      { test: (value) => value !== null && value >= 1000, points: 12 },
-      { test: (value) => value !== null && value >= 300, points: 8 },
-      { test: (value) => value !== null && value > 0, points: 3 },
-    ]),
-    scoreBand(erankClicks, [
-      { test: (value) => value !== null && value >= 500, points: 12 },
-      { test: (value) => value !== null && value >= 100, points: 8 },
-      { test: (value) => value !== null && value > 0, points: 3 },
-    ])
-  )
+  const revenueScore = scoreBand(topRevenue, [
+    { test: (value) => value !== null && value >= 2000, points: 12 },
+    { test: (value) => value !== null && value >= 1000, points: 9 },
+    { test: (value) => value !== null && value >= 300, points: 5 },
+    { test: (value) => value !== null && value >= 100, points: 2 },
+  ])
+  const trendScore = scoreBand(listingAgeMonths, [
+    { test: (value) => value !== null && value >= 2 && value <= 6 && (topMonthlySales ?? 0) >= 10, points: 10 },
+    { test: (value) => value !== null && value >= 2 && value <= 12 && (topMonthlySales ?? 0) >= 10, points: 8 },
+    { test: (value) => value !== null && value <= 18 && (topMonthlySales ?? 0) > 0, points: 4 },
+    { test: (value) => value !== null && value < 2 && (topMonthlySales ?? 0) >= 10, points: 2 },
+  ])
+  const priceScore = scoreBand(averagePrice, [
+    { test: (value) => value !== null && value >= 18 && value <= 35, points: 5 },
+    { test: (value) => value !== null && value >= 12 && value <= 45, points: 3 },
+    { test: (value) => value !== null && value > 0, points: 1 },
+  ])
+  const erankSearchScore = scoreBand(erankSearchVolume, [
+    { test: (value) => value !== null && value >= 1000, points: 7 },
+    { test: (value) => value !== null && value >= 300, points: 5 },
+    { test: (value) => value !== null && value >= 100, points: 2 },
+  ])
+  const erankClickScore = scoreBand(erankClicks, [
+    { test: (value) => value !== null && value >= 500, points: 10 },
+    { test: (value) => value !== null && value >= 100, points: 7 },
+    { test: (value) => value !== null && value >= 30, points: 4 },
+    { test: (value) => value !== null && value > 0, points: 1 },
+  ])
+  const erankDemandScore = erankSearchScore + erankClickScore
   const erankCompetitionScore = scoreBand(erankCompetition, [
     { test: (value) => value !== null && value > 0 && value < 5000, points: 8 },
     { test: (value) => value !== null && value < 20000, points: 5 },
     { test: (value) => value !== null && value < 50000, points: 2 },
   ])
   const erankCtrScore = scoreBand(erankCtr, [
-    { test: (value) => value !== null && value >= 70, points: 5 },
-    { test: (value) => value !== null && value >= 45, points: 3 },
-    { test: (value) => value !== null && value > 0, points: 1 },
+    { test: (value) => value !== null && value >= 70, points: 8 },
+    { test: (value) => value !== null && value >= 45, points: 5 },
+    { test: (value) => value !== null && value >= 30, points: 2 },
   ])
   const erankKeywordDifficultyScore = scoreBand(erankKeywordDifficulty, [
-    { test: (value) => value !== null && value >= 0 && value <= 10, points: 8 },
+    { test: (value) => value !== null && value >= 0 && value <= 10, points: 7 },
     { test: (value) => value !== null && value <= 25, points: 6 },
     { test: (value) => value !== null && value <= 45, points: 3 },
     { test: (value) => value !== null && value <= 60, points: 1 },
@@ -1652,8 +1668,34 @@ export function scoreEverbeeResult(row = {}, options = {}) {
     ? ((topMonthlySales ?? 0) >= 30 ? 6 : 14)
     : 0
   const tooFreshPenalty = listingAgeMonths !== null && listingAgeMonths < 2 && (topMonthlySales ?? 0) < 10 ? 8 : 0
-  const riskPenalty = riskTerms.length * 25 + oldReferencePenalty + tooFreshPenalty
-  const score = Math.max(0, Math.min(100, competitionScore + demandScore + revenueScore + trendScore + priceScore + erankDemandScore + erankCompetitionScore + erankCtrScore + erankKeywordDifficultyScore + erankTrendScore - riskPenalty))
+  const salesDensityScore = scoreBand(salesDensity, [
+    { test: (value) => value !== null && value >= 5, points: 15 },
+    { test: (value) => value !== null && value >= 3, points: 8 },
+    { test: (value) => value !== null && value >= 1.5, points: 3 },
+  ])
+  const revenueDensityScore = scoreBand(revenueDensity, [
+    { test: (value) => value !== null && value >= 150, points: 8 },
+    { test: (value) => value !== null && value >= 80, points: 4 },
+  ])
+  const erankClickDensityScore = scoreBand(erankClickDensity, [
+    { test: (value) => value !== null && value >= 20, points: 6 },
+    { test: (value) => value !== null && value >= 10, points: 3 },
+  ])
+  const listingCompetitionPenalty = scoreBand(listingsAnalyzed, [
+    { test: (value) => value !== null && value >= 20000, points: 35 },
+    { test: (value) => value !== null && value >= 10000, points: 15 },
+    { test: (value) => value !== null && value > 5000, points: 5 },
+  ])
+  const scoreCap = listingsAnalyzed !== null && listingsAnalyzed >= 20000
+    ? 39
+    : listingsAnalyzed !== null && listingsAnalyzed >= 10000
+      ? 49
+      : listingsAnalyzed !== null && listingsAnalyzed > 5000
+        ? 79
+        : 100
+  const riskPenalty = riskTerms.length * 25 + oldReferencePenalty + tooFreshPenalty + listingCompetitionPenalty
+  const rawScore = Math.max(0, Math.min(100, competitionScore + demandScore + revenueScore + trendScore + priceScore + erankDemandScore + erankCompetitionScore + erankCtrScore + erankKeywordDifficultyScore + erankTrendScore + salesDensityScore + revenueDensityScore + erankClickDensityScore - riskPenalty))
+  const score = riskTerms.length > 0 ? 0 : Math.min(scoreCap, rawScore)
   const hasEverbeeData = listingsAnalyzed !== null || topMonthlySales !== null || topRevenue !== null
   const hasErankData = erankSearchVolume !== null || erankClicks !== null || erankCtr !== null || erankCompetition !== null || erankKeywordDifficulty !== null || erankTrend !== null
   const everbeePositive = (topMonthlySales ?? 0) > 0 || (topRevenue ?? 0) > 0
@@ -1662,6 +1704,8 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   if (listingAgeMonths !== null && listingAgeMonths >= 24 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('古い商品中心のため参考のみ')
   if (listingAgeMonths !== null && listingAgeMonths < 2 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('新しすぎて売上確認が弱い')
   if (riskTerms.length > 0) exclusionReasons.push(`要確認語句: ${riskTerms.join(', ')}`)
+  if ((listingsAnalyzed ?? 0) >= 20000) exclusionReasons.push('商品数が多すぎるため競合過多')
+  if ((listingsAnalyzed ?? 0) > 5000 && (salesDensity ?? 0) < 3) exclusionReasons.push('商品数に対して月販売が弱い')
   if ((listingsAnalyzed ?? 0) >= 10000 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('競合が多く需要が弱い')
   if (!hasEverbeeData && hasErankData && !erankPositive) exclusionReasons.push('eRank検索需要が未確認')
   if (hasEverbeeData && !everbeePositive && hasErankData && !erankPositive) exclusionReasons.push('売上と検索需要の両方が弱い')
@@ -1670,6 +1714,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   if (exclusionReasons.length > 0) label = 'D: 除外候補'
   else if (score >= 80) label = 'A: 今すぐ候補'
   else if (score >= 62) label = 'B: 有望'
+  else if ((listingsAnalyzed ?? 0) >= 10000) label = 'C: 派生探索'
   if (hasErankData && erankPositive && hasEverbeeData && !everbeePositive && label !== 'D: 除外候補') label = 'C: 検索需要あり'
 
   let validationLabel = '未検証'
@@ -1692,8 +1737,15 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       erankCtrScore,
       erankKeywordDifficultyScore,
       erankTrendScore,
+      erankSearchScore,
+      erankClickScore,
+      salesDensityScore,
+      revenueDensityScore,
+      erankClickDensityScore,
       oldReferencePenalty,
       tooFreshPenalty,
+      listingCompetitionPenalty,
+      scoreCap,
       riskPenalty,
     },
     validation: {
@@ -1716,6 +1768,9 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       erankCompetition,
       erankKeywordDifficulty,
       erankTrend,
+      salesDensity,
+      revenueDensity,
+      erankClickDensity,
       notes: row.notes ?? '',
     },
     riskTerms,

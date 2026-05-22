@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260522-5">
+    <link rel="stylesheet" href="./styles.css?v=20260522-6">
   </head>
   <body>
     <main class="app-shell">
@@ -401,7 +401,7 @@
             <div class="legend">
               <span>A: すぐ商品化候補</span>
               <span>B: 有望</span>
-              <span>C: 追加確認</span>
+              <span>C: 派生探索・追加確認</span>
               <span>D: 除外候補</span>
             </div>
             <button id="downloadStep4CsvBtn" type="button" class="ghost-btn" data-optional="保存">名詞CSV保存</button>
@@ -415,6 +415,8 @@
           <span><strong>Age</strong> 売れている商品の出品期間</span>
           <span><strong>eRank</strong> 検索需要と競合の補助指標</span>
           <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
+          <span><strong>Sales/1000</strong> 競合1,000件あたりの月販売。5以上を強め、3未満を弱めに判定</span>
+          <span><strong>商品数</strong> Aは原則5,000件以下。10,000件以上は直接商品化ではなく派生探索扱い</span>
         </div>
         <div id="resultsList" class="results-list"></div>
       </section>
@@ -537,6 +539,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260522-5"></script>
+    <script type="module" src="./src/app.js?v=20260522-6"></script>
   </body>
 </html>
