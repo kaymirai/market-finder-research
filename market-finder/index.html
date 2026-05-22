@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260522-2">
+    <link rel="stylesheet" href="./styles.css?v=20260522-3">
   </head>
   <body>
     <main class="app-shell">
@@ -208,6 +208,12 @@
           </div>
           <button id="candidateErankBtn" type="button" class="primary-btn full-width">2 eRankで検索数を見る</button>
           <div class="mini-guide">eRankで検索数・クリック・競合・KDを見て、EverBeeへ進める語句を絞ります。</div>
+          <dl class="badge-guide" aria-label="候補バッジの見方">
+            <div><dt>調査OK</dt><dd>次のeRank確認に入れてよい候補です。人気確定ではありません。</dd></div>
+            <div><dt>2 words</dt><dd>キーワードの単語数です。短すぎる語句は広すぎる場合があります。</dd></div>
+            <div><dt>Trend候補</dt><dd>自動探索で拾った流行語候補です。人気かどうかはeRank/EverBeeで確認します。</dd></div>
+            <div><dt>eRank確認済み</dt><dd>eRankの数字を取得済みです。下のeRank結果で需要点を見ます。</dd></div>
+          </dl>
 
           <div id="candidateList" class="candidate-list"></div>
         </section>
@@ -531,6 +537,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260522-2"></script>
+    <script type="module" src="./src/app.js?v=20260522-3"></script>
   </body>
 </html>

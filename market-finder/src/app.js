@@ -16,7 +16,7 @@ import {
   normalizePhrase,
   resolveMarketEvent,
   isGenericCandidateKeyword,
-} from '../../shared/market-keyword-engine/index.js?v=20260522-2'
+} from '../../shared/market-keyword-engine/index.js?v=20260522-3'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -790,19 +790,26 @@ function renderCandidates() {
     const researched = findResearchRow(candidate.keyword)
     const resultScore = researched ? scoreEverbeeResult(researched, currentOptions()) : null
     const resultPill = resultScore?.validation.hasEverbeeData
-      ? `<span class="pill ready">EverBee ${resultScore.score}点</span>`
+      ? `<span class="pill ready" title="EverBeeの売上確認まで終わった狙い目スコアです。">EverBee ${resultScore.score}点</span>`
       : resultScore?.validation.hasErankData
-        ? '<span class="pill">eRank確認済み</span>'
+        ? '<span class="pill" title="eRankの検索数・クリック・競合・KDを取得済みです。人気確定ではありません。">eRank確認済み</span>'
       : ''
+    const categoryLabel = candidate.categoryLabel === 'Trend Scout' ? 'Trend候補' : candidate.categoryLabel
+    const categoryTitle = candidate.categoryLabel === 'Trend Scout'
+      ? '自動探索で拾った流行語候補です。人気かどうかはeRank/EverBeeで確認します。'
+      : '選択中の商品カテゴリです。'
+    const statusTitle = candidate.status === 'ready'
+      ? '次のeRank確認に入れてよい候補です。人気確定ではありません。'
+      : '商標・著作権などの確認が必要な候補です。'
 
     return `
       <article class="candidate-row">
         <div>
           <strong>${escapeHtml(candidate.keyword)}</strong>
           <div class="meta-line">
-            <span class="pill ${candidate.status === 'ready' ? 'ready' : 'review'}">${candidate.status === 'ready' ? '調査OK' : '要確認'}</span>
-            <span class="pill">${candidate.wordCount} words</span>
-            <span class="pill">${escapeHtml(candidate.categoryLabel)}</span>
+            <span class="pill ${candidate.status === 'ready' ? 'ready' : 'review'}" title="${escapeHtml(statusTitle)}">${candidate.status === 'ready' ? '調査OK' : '要確認'}</span>
+            <span class="pill" title="キーワードの単語数です。短すぎる語句は広すぎる場合があります。">${candidate.wordCount} words</span>
+            <span class="pill" title="${escapeHtml(categoryTitle)}">${escapeHtml(categoryLabel)}</span>
             ${resultPill}
             ${candidate.riskTerms.length ? `<span class="pill danger">${escapeHtml(candidate.riskTerms.join(', '))}</span>` : ''}
           </div>

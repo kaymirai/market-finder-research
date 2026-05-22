@@ -425,6 +425,35 @@ body.flow-auto .controls-panel .panel-heading {
   margin: 8px 0 12px;
 }
 
+.badge-guide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.badge-guide div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 9px 10px;
+}
+
+.badge-guide dt {
+  margin: 0 0 3px;
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badge-guide dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .route-note {
   display: grid;
   gap: 4px;
@@ -1905,6 +1934,7 @@ button.research-table-row {
     .erank-group-list,
     .bucket-grid,
     .seo-output-grid,
+    .badge-guide,
     .noun-grid,
     .two-col,
     .metric-grid,
