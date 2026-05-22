@@ -806,7 +806,11 @@ const GENERIC_WORDS = new Set([
   'graphic',
   'unisex',
   'women',
+  'womens',
   'men',
+  'mens',
+  'kids',
+  'adult',
   'for',
   'and',
   'the',
@@ -815,6 +819,88 @@ const GENERIC_WORDS = new Set([
   'day',
   'holiday',
   'season',
+])
+
+const MONTH_AXIS_WORDS = new Set([
+  'jan',
+  'january',
+  'feb',
+  'february',
+  'mar',
+  'march',
+  'apr',
+  'april',
+  'may',
+  'jun',
+  'june',
+  'jul',
+  'july',
+  'aug',
+  'august',
+  'sep',
+  'sept',
+  'september',
+  'oct',
+  'october',
+  'nov',
+  'november',
+  'dec',
+  'december',
+])
+
+const PRODUCT_FAMILY_TERMS = {
+  shirt: ['shirt', 'shirts', 'tshirt', 'tshirts', 'tee', 'tees', 'graphic tee'],
+  sweatshirt: ['sweatshirt', 'sweatshirts', 'hoodie', 'hoodies', 'crewneck', 'crewnecks'],
+  mug: ['mug', 'mugs', 'cup', 'cups', 'coffee mug'],
+  tote: ['tote bag', 'tote', 'canvas tote', 'bag'],
+  sticker: ['sticker', 'stickers', 'planner sticker', 'laptop sticker'],
+  'wall-art': ['wall art', 'poster', 'posters', 'art print', 'prints', 'printable', 'nursery art'],
+  digital: ['svg', 'png', 'template', 'digital download', 'planner', 'printable'],
+}
+
+const PRODUCT_TERM_TO_FAMILY = Object.entries(PRODUCT_FAMILY_TERMS).flatMap(([family, terms]) => (
+  terms.map((term) => ({ family, term: normalizePhrase(term) }))
+))
+
+const CATEGORY_PRODUCT_FAMILY = {
+  shirt: 'shirt',
+  sweatshirt: 'sweatshirt',
+  mug: 'mug',
+  tote: 'tote',
+  sticker: 'sticker',
+}
+
+const BROAD_OCCASION_WORDS = new Set([
+  'wedding',
+  'birthday',
+  'graduation',
+  'christmas',
+  'halloween',
+  'easter',
+  'thanksgiving',
+  'holiday',
+  'valentine',
+  'valentines',
+  'summer',
+  'spring',
+  'fall',
+  'autumn',
+  'winter',
+  'party',
+])
+
+const STYLE_ONLY_WORDS = new Set([
+  'funny',
+  'custom',
+  'personalized',
+  'retro',
+  'vintage',
+  'cute',
+  'embroidered',
+  'western',
+  'matching',
+  'minimalist',
+  'boho',
 ])
 
 const DEFAULT_HINT_KEEP_WORDS = new Set([
@@ -958,6 +1044,130 @@ function countWords(value) {
   return normalizePhrase(value).split(' ').filter(Boolean).length
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function phraseHasTerm(phrase, term) {
+  const normalizedPhrase = normalizePhrase(phrase)
+  const normalizedTerm = normalizePhrase(term)
+  if (!normalizedPhrase || !normalizedTerm) return false
+  return new RegExp(`(?:^|\\s)${escapeRegExp(normalizedTerm)}(?:\\s|$)`).test(normalizedPhrase)
+}
+
+function keywordProductFamilies(keyword) {
+  const normalized = normalizePhrase(keyword)
+  return unique(PRODUCT_TERM_TO_FAMILY
+    .filter(({ term }) => phraseHasTerm(normalized, term))
+    .map(({ family }) => family))
+}
+
+function isYearishToken(token) {
+  return /^(?:20\d{2}|\d{2})$/.test(token)
+}
+
+function hasMeaningfulYearPattern(keyword) {
+  const normalized = normalizePhrase(keyword)
+  return /\b(?:est|established|class of|senior|graduate|graduation|grad|new mom|new dad|mom to be|dad to be|bride|groom)\b/.test(normalized)
+}
+
+function candidateSpecificTokens(keyword, options = {}) {
+  const event = getEvent(options)
+  const category = getCategory(options.categoryId)
+  const eventTokens = phraseTokens(event.searchTerm)
+  const categoryTokens = [
+    category.searchTerm,
+    ...(category.tags ?? []),
+  ].flatMap(phraseTokens)
+  const stopWords = new Set([
+    ...GENERIC_WORDS,
+    ...MONTH_AXIS_WORDS,
+    ...STYLE_ONLY_WORDS,
+    ...BROAD_OCCASION_WORDS,
+    ...eventTokens,
+    ...categoryTokens,
+  ])
+
+  return phraseTokens(keyword)
+    .filter((token) => !stopWords.has(token))
+    .filter((token) => !isYearishToken(token))
+    .filter((token) => token.length >= 2)
+}
+
+export function classifyCandidateKeyword(keyword, options = {}) {
+  const normalized = normalizePhrase(keyword)
+  const tokens = phraseTokens(normalized)
+  if (tokens.length === 0) {
+    return { action: 'reject', label: '除外', reason: 'キーワードが空です', specificTokens: [] }
+  }
+
+  const specificTokens = candidateSpecificTokens(normalized, options)
+  const hasMonthAxis = tokens.some((token) => MONTH_AXIS_WORDS.has(token))
+  const hasYearish = tokens.some(isYearishToken)
+  if (hasMonthAxis && hasYearish && !hasMeaningfulYearPattern(normalized)) {
+    return {
+      action: 'reject',
+      label: '日付ノイズ',
+      reason: 'グラフや表の日付軸に見えるため候補から除外します',
+      specificTokens,
+    }
+  }
+
+  const category = getCategory(options.categoryId)
+  const expectedFamily = CATEGORY_PRODUCT_FAMILY[category.id]
+  const families = keywordProductFamilies(normalized)
+  const mismatchedFamilies = expectedFamily
+    ? families.filter((family) => family !== expectedFamily)
+    : []
+  if (mismatchedFamilies.length > 0) {
+    return {
+      action: 'reject',
+      label: '商品違い',
+      reason: '選択中の商品カテゴリと違う商品語が入っています',
+      specificTokens,
+      families,
+    }
+  }
+
+  if (expectedFamily && !families.includes(expectedFamily)) {
+    return {
+      action: 'explore',
+      label: '入口ワード',
+      reason: '選択中の商品語がないため、関連語探索用にします',
+      specificTokens,
+      families,
+    }
+  }
+
+  if (isGenericCandidateKeyword(normalized)) {
+    return {
+      action: 'explore',
+      label: '入口ワード',
+      reason: '商品名やgiftだけで広すぎるため、関連語探索用にします',
+      specificTokens,
+      families,
+    }
+  }
+
+  if (specificTokens.length === 0) {
+    return {
+      action: 'explore',
+      label: '入口ワード',
+      reason: 'イベント・商品・スタイルだけで広すぎるため、関連語探索用にします',
+      specificTokens,
+      families,
+    }
+  }
+
+  return {
+    action: 'candidate',
+    label: '調査候補',
+    reason: '買い手・用途・趣味・モチーフなどの具体語があります',
+    specificTokens,
+    families,
+  }
+}
+
 export function isGenericCandidateKeyword(keyword) {
   const tokens = phraseTokens(keyword)
   if (tokens.length === 0) return true
@@ -1072,7 +1282,7 @@ export function generateKeywordCandidates(options = {}) {
     buildKeywordTemplates(event, category, discoveryTargets, intents, seedKeywords, year)
       .map((keyword) => normalizePhrase(keyword))
       .filter((keyword) => countWords(keyword) >= 2)
-      .filter((keyword) => !isGenericCandidateKeyword(keyword))
+      .filter((keyword) => classifyCandidateKeyword(keyword, options).action === 'candidate')
       .filter((keyword) => !hasRepeatedAdjacentPhrase(keyword))
   )
 
@@ -1458,6 +1668,7 @@ export function scoreErankOpportunity(row = {}, options = {}) {
   const erankKeywordDifficulty = parseNumber(row.erankKeywordDifficulty)
   const erankTrend = parseNumber(row.erankTrend)
   const riskTerms = detectRiskTerms(`${keyword} ${row.notes ?? ''}`, splitSeedText(options.customRiskTerms))
+  const candidateClass = classifyCandidateKeyword(keyword, options)
 
   const searchScore = scoreBand(erankSearchVolume, [
     { test: (value) => value !== null && value >= 1000, points: 22 },
@@ -1501,15 +1712,19 @@ export function scoreErankOpportunity(row = {}, options = {}) {
     || erankTrend !== null
   const hasDemand = (erankSearchVolume ?? 0) > 0 || (erankClicks ?? 0) > 0 || (erankCtr ?? 0) > 0
   const riskPenalty = riskTerms.length * 30
+  const structuralPenalty = candidateClass.action === 'explore' ? 25 : 0
   const competitionConfidenceScore = Math.max(competitionScore, keywordDifficultyScore)
   const missingCompetitionSignal = erankCompetition === null && erankKeywordDifficulty === null
-  const rawScore = searchScore + clickScore + ctrScore + competitionConfidenceScore + trendScore - riskPenalty
+  const rawScore = searchScore + clickScore + ctrScore + competitionConfidenceScore + trendScore - riskPenalty - structuralPenalty
   const cappedScore = missingCompetitionSignal && rawScore >= 62 ? 61 : rawScore
-  const score = hasErankData && hasDemand
+  const score = candidateClass.action === 'reject'
+    ? 0
+    : hasErankData && hasDemand
     ? Math.max(0, Math.min(100, cappedScore))
     : 0
 
   const reasons = []
+  if (candidateClass.action !== 'candidate') reasons.push(candidateClass.reason)
   if ((erankSearchVolume ?? 0) >= 1000) reasons.push('検索数が強い')
   else if ((erankSearchVolume ?? 0) >= 300) reasons.push('検索数あり')
   else if ((erankSearchVolume ?? 0) > 0) reasons.push('少量の検索あり')
@@ -1526,12 +1741,15 @@ export function scoreErankOpportunity(row = {}, options = {}) {
 
   let action = 'hold'
   let label = '今回は保留'
-  if (riskTerms.length > 0) {
+  if (riskTerms.length > 0 || candidateClass.action === 'reject') {
     action = 'reject'
     label = '除外候補'
   } else if (!hasDemand) {
     action = 'reject'
     label = '需要未確認'
+  } else if (candidateClass.action === 'explore') {
+    action = 'expand'
+    label = '入口ワード'
   } else if (score >= 62) {
     action = 'everbee'
     label = 'EverBeeへ送る'
@@ -1564,6 +1782,7 @@ export function scoreErankOpportunity(row = {}, options = {}) {
       keywordDifficultyScore,
       trendScore,
       riskPenalty,
+      structuralPenalty,
     },
   }
 }

@@ -449,12 +449,34 @@
                 .trim()
         }
 
+        function isDateAxisNoise(value: string) {
+            const monthWords = new Set([
+                'jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april',
+                'may', 'jun', 'june', 'jul', 'july', 'aug', 'august', 'sep', 'sept',
+                'september', 'oct', 'october', 'nov', 'november', 'dec', 'december',
+            ])
+            const genericWords = new Set([
+                'shirt', 'shirts', 'tee', 'tshirt', 'tshirts', 'gift', 'gifts',
+                'mug', 'tote', 'bag', 'sticker', 'searches', 'clicks', 'views', 'pins',
+            ])
+            const words = value.toLowerCase().split(/\s+/).filter(Boolean)
+            const hasMonth = words.some((word) => monthWords.has(word))
+            const hasYearish = words.some((word) => /^(?:20\d{2}|\d{2})$/.test(word))
+            const specificWords = words.filter((word) => (
+                !monthWords.has(word)
+                && !genericWords.has(word)
+                && !/^(?:20\d{2}|\d{2}|[\d,]+)$/.test(word)
+            ))
+            return hasMonth && hasYearish && specificWords.length === 0
+        }
+
         function addCandidate(raw: string, note?: string) {
             const keyword = cleanCandidate(raw)
             const normalized = keyword.toLowerCase()
             if (!keyword || seen.has(normalized)) return
             if (keyword.length < 3 || keyword.length > 60) return
             if (!/[a-z]/i.test(keyword)) return
+            if (isDateAxisNoise(keyword)) return
             if (/https?:|www\.|@/.test(keyword)) return
             if (/^[\d\s,.$%+-]+$/.test(keyword)) return
             if (ignoredExact.has(normalized) || ignoredPattern.test(keyword)) return

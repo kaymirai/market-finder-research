@@ -13,10 +13,10 @@ import {
   buildSeoPlanFromBuckets,
   scoreEverbeeResult,
   scoreErankOpportunity,
+  classifyCandidateKeyword,
   normalizePhrase,
   resolveMarketEvent,
-  isGenericCandidateKeyword,
-} from '../../shared/market-keyword-engine/index.js?v=20260522-4'
+} from '../../shared/market-keyword-engine/index.js?v=20260522-5'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -413,12 +413,25 @@ function trendCandidateEntries() {
       }))
     })
     .filter((entry) => entry.keyword.split(' ').filter(Boolean).length >= 2)
+    .filter((entry) => keywordClass(entry.keyword).action === 'candidate')
     .slice(0, 50)
 }
 
 function trendCandidateKeywords() {
   return cleanKeywordList(trendCandidateEntries().map((entry) => entry.keyword))
     .slice(0, 50)
+}
+
+function keywordClassificationOptions() {
+  return {
+    eventId: elements.eventSelect.value,
+    customEventName: customEventName(),
+    categoryId: elements.categorySelect.value,
+  }
+}
+
+function keywordClass(keyword) {
+  return classifyCandidateKeyword(keyword, keywordClassificationOptions())
 }
 
 function currentOptions() {
@@ -1527,7 +1540,8 @@ function candidateSourceText(candidate, researched, resultScore) {
 
 function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Map()) {
   const normalized = normalizePhrase(keyword)
-  if (isGenericCandidateKeyword(normalized)) return null
+  const classification = keywordClass(normalized)
+  if (classification.action !== 'candidate') return null
   const generated = generatedMap.get(normalized)
   const trendMeta = trendMetaByKeyword.get(normalized)
   if (generated) {
@@ -1564,15 +1578,8 @@ function generateCandidates() {
     const key = normalizePhrase(entry.keyword)
     if (key && !trendMetaByKeyword.has(key)) trendMetaByKeyword.set(key, entry)
   })
-  const broad = generateBroadMarketQueries({
-    ...options,
-    year: '',
-    includeYear: false,
-    limit: 40,
-  })
   const keywords = cleanKeywordList([
     ...trendKeywords,
-    ...broad,
     ...generated.map((candidate) => candidate.keyword),
   ])
 
