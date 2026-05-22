@@ -773,6 +773,10 @@ export const DEFAULT_RISK_TERMS = [
   'barbie',
   'hello kitty',
   'grinch',
+  'bts',
+  'bangtan',
+  'bangtan boys',
+  'bt21',
   'swiftie',
   'taylor swift',
   'super bowl',
@@ -1717,7 +1721,7 @@ export function scoreErankOpportunity(row = {}, options = {}) {
   const missingCompetitionSignal = erankCompetition === null && erankKeywordDifficulty === null
   const rawScore = searchScore + clickScore + ctrScore + competitionConfidenceScore + trendScore - riskPenalty - structuralPenalty
   const cappedScore = missingCompetitionSignal && rawScore >= 62 ? 61 : rawScore
-  const score = candidateClass.action === 'reject'
+  const score = candidateClass.action === 'reject' || riskTerms.length > 0
     ? 0
     : hasErankData && hasDemand
     ? Math.max(0, Math.min(100, cappedScore))
