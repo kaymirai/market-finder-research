@@ -16,7 +16,7 @@ import {
   normalizePhrase,
   resolveMarketEvent,
   isGenericCandidateKeyword,
-} from '../../shared/market-keyword-engine/index.js?v=20260522-3'
+} from '../../shared/market-keyword-engine/index.js?v=20260522-4'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -48,6 +48,8 @@ const state = {
   extensionState: null,
   seoPlan: null,
   selectedResultKey: '',
+  recentTrendKeywords: new Set(),
+  lastTrendRunStartedAt: '',
 }
 
 const pendingExtensionRequests = new Map()
@@ -176,6 +178,23 @@ function escapeHtml(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+function formatDateTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString('ja-JP', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function isTimestampLike(value) {
+  const text = String(value ?? '').trim()
+  return /^\d{4}-\d{2}-\d{2}/.test(text) || /\d{1,2}:\d{2}/.test(text)
 }
 
 function safeStorage() {
@@ -328,23 +347,39 @@ function selectedYearOption() {
   return Number(value) || selectedEvent().defaultYear
 }
 
-function parseTrendScoutTerms(value) {
+function parseTrendScoutEntries(value) {
   const ignored = new Set(['keyword', 'keywords', 'trend', 'source', 'search', 'clicks', 'competition', 'kd', 'change', 'rank'])
-  return cleanKeywordList(String(value ?? '')
+  const entries = []
+  const seen = new Set()
+
+  String(value ?? '')
     .split(/\r?\n/)
-    .flatMap((line) => {
+    .forEach((line) => {
       const source = String(line ?? '').trim()
-      if (!source) return []
+      if (!source) return
       const cells = source.split(/\t|,|\|/).map((cell) => cell.trim()).filter(Boolean)
-      const candidate = (cells.length > 1 ? cells : [source])
-        .map((cell) => cell.replace(/^\s*#?\d+[\).\-\s]+/, '').trim())
-        .find((cell) => /[a-zA-Z]/.test(cell) && !ignored.has(normalizePhrase(cell)))
-      return candidate ? [candidate] : []
-    }))
+      const candidates = cells.length > 1 ? cells : [source]
+      const keywordIndex = candidates.findIndex((cell) => {
+        const cleaned = cell.replace(/^\s*#?\d+[\).\-\s]+/, '').trim()
+        return /[a-zA-Z]/.test(cleaned) && !ignored.has(normalizePhrase(cleaned)) && !isTimestampLike(cleaned)
+      })
+      if (keywordIndex < 0) return
+
+      const keyword = normalizePhrase(candidates[keywordIndex].replace(/^\s*#?\d+[\).\-\s]+/, '').trim())
+      if (!keyword || seen.has(keyword)) return
+      seen.add(keyword)
+
+      const rest = cells.filter((_, index) => index !== keywordIndex)
+      const capturedAt = rest.find((cell) => isTimestampLike(cell)) ?? ''
+      const sourceLabel = rest.find((cell) => !isTimestampLike(cell) && !ignored.has(normalizePhrase(cell))) ?? ''
+      entries.push({ keyword, source: sourceLabel, capturedAt })
+    })
+
+  return entries
 }
 
 function trendScoutTerms() {
-  return parseTrendScoutTerms(elements.trendScoutInput?.value)
+  return parseTrendScoutEntries(elements.trendScoutInput?.value).map((entry) => entry.keyword)
 }
 
 function combinedSeedKeywords() {
@@ -354,25 +389,35 @@ function combinedSeedKeywords() {
   ]).join('\n')
 }
 
-function trendCandidateKeywords() {
+function trendCandidateEntries() {
   const category = selectedCategory()
   const product = normalizePhrase(category.searchTerm)
   const eventTerm = normalizePhrase(selectedEvent().searchTerm)
   const year = selectedYearOption()
 
-  return cleanKeywordList(trendScoutTerms().flatMap((term) => {
-    const keyword = normalizePhrase(term)
-    if (!keyword) return []
-    const hasProduct = keyword.includes(product)
-    const base = hasProduct ? keyword : `${keyword} ${product}`
-    return [
-      base,
-      `${keyword} gift`,
-      eventTerm && !keyword.includes(eventTerm) ? `${eventTerm} ${base}` : '',
-      year ? `${base} ${year}` : '',
-    ]
-  }))
-    .filter((keyword) => keyword.split(' ').filter(Boolean).length >= 2)
+  return parseTrendScoutEntries(elements.trendScoutInput?.value)
+    .flatMap((entry) => {
+      const keyword = normalizePhrase(entry.keyword)
+      if (!keyword) return []
+      const hasProduct = keyword.includes(product)
+      const base = hasProduct ? keyword : `${keyword} ${product}`
+      return [
+        base,
+        `${keyword} gift`,
+        eventTerm && !keyword.includes(eventTerm) ? `${eventTerm} ${base}` : '',
+        year ? `${base} ${year}` : '',
+      ].filter(Boolean).map((candidateKeyword) => ({
+        ...entry,
+        keyword: normalizePhrase(candidateKeyword),
+        baseKeyword: keyword,
+      }))
+    })
+    .filter((entry) => entry.keyword.split(' ').filter(Boolean).length >= 2)
+    .slice(0, 50)
+}
+
+function trendCandidateKeywords() {
+  return cleanKeywordList(trendCandidateEntries().map((entry) => entry.keyword))
     .slice(0, 50)
 }
 
@@ -789,11 +834,14 @@ function renderCandidates() {
   elements.candidateList.innerHTML = state.candidates.map((candidate) => {
     const researched = findResearchRow(candidate.keyword)
     const resultScore = researched ? scoreEverbeeResult(researched, currentOptions()) : null
+    const erankCheckedAt = formatDateTime(researched?.erankCheckedAt)
+    const erankTitle = `eRankの検索数・クリック・競合・KDを取得済みです。人気確定ではありません。${erankCheckedAt ? ` 確認: ${erankCheckedAt}` : ''}`
     const resultPill = resultScore?.validation.hasEverbeeData
       ? `<span class="pill ready" title="EverBeeの売上確認まで終わった狙い目スコアです。">EverBee ${resultScore.score}点</span>`
       : resultScore?.validation.hasErankData
-        ? '<span class="pill" title="eRankの検索数・クリック・競合・KDを取得済みです。人気確定ではありません。">eRank確認済み</span>'
+        ? `<span class="pill" title="${escapeHtml(erankTitle)}">eRank確認済み</span>`
       : ''
+    const sourceText = candidateSourceText(candidate, researched, resultScore)
     const categoryLabel = candidate.categoryLabel === 'Trend Scout' ? 'Trend候補' : candidate.categoryLabel
     const categoryTitle = candidate.categoryLabel === 'Trend Scout'
       ? '自動探索で拾った流行語候補です。人気かどうかはeRank/EverBeeで確認します。'
@@ -813,6 +861,7 @@ function renderCandidates() {
             ${resultPill}
             ${candidate.riskTerms.length ? `<span class="pill danger">${escapeHtml(candidate.riskTerms.join(', '))}</span>` : ''}
           </div>
+          <div class="candidate-source-line">${escapeHtml(sourceText)}</div>
         </div>
         <div class="score-chip"><span>調査順<br>目安</span><strong>${candidate.score}</strong></div>
       </article>
@@ -1432,14 +1481,64 @@ function renderAll() {
   persistMarketFinderState()
 }
 
-function candidateFromKeyword(keyword, generatedMap, trendSet = new Set()) {
+function candidateProvenance(trendMeta, fallbackSourceLabel = '商品条件から自動生成') {
+  if (!trendMeta) {
+    return {
+      sourceLabel: fallbackSourceLabel,
+      sourceDetail: '',
+      sourceAt: '',
+      sourceBaseKeyword: '',
+    }
+  }
+
+  const baseKeyword = normalizePhrase(trendMeta.baseKeyword || trendMeta.keyword)
+  const isCurrentRun = state.recentTrendKeywords.has(baseKeyword)
+  const sourceDetail = String(trendMeta.source ?? '').trim()
+  const sourceLabel = isCurrentRun
+    ? '今回の自動探索で追加'
+    : /サンプル|sample/i.test(sourceDetail)
+      ? 'サンプル'
+      : '保存済み/手入力Trend'
+
+  return {
+    sourceLabel,
+    sourceDetail,
+    sourceAt: isCurrentRun ? (state.lastTrendRunStartedAt || trendMeta.capturedAt) : trendMeta.capturedAt,
+    sourceBaseKeyword: baseKeyword,
+  }
+}
+
+function candidateSourceText(candidate, researched, resultScore) {
+  const sourceLabel = candidate.sourceLabel || (candidate.categoryLabel === 'Trend Scout' ? '保存済み/手入力Trend' : '商品条件から自動生成')
+  const sourceDetail = candidate.sourceDetail ? `（${candidate.sourceDetail}）` : ''
+  const sourceAt = formatDateTime(candidate.sourceAt)
+  const parts = [`由来: ${sourceLabel}${sourceDetail}${sourceAt ? ` / ${sourceAt}` : ''}`]
+
+  if (candidate.sourceBaseKeyword && candidate.sourceBaseKeyword !== candidate.keyword) {
+    parts.push(`元語: ${candidate.sourceBaseKeyword}`)
+  }
+
+  if (resultScore?.validation.hasErankData) {
+    parts.push(`eRank確認: ${formatDateTime(researched?.erankCheckedAt) || '済み（時刻なし）'}`)
+  }
+
+  return parts.join('　')
+}
+
+function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Map()) {
   const normalized = normalizePhrase(keyword)
   if (isGenericCandidateKeyword(normalized)) return null
   const generated = generatedMap.get(normalized)
-  if (generated) return generated
+  const trendMeta = trendMetaByKeyword.get(normalized)
+  if (generated) {
+    return {
+      ...generated,
+      ...candidateProvenance(trendMeta),
+    }
+  }
   const event = selectedEvent()
   const category = selectedCategory()
-  const fromTrendScout = trendSet.has(normalized)
+  const fromTrendScout = Boolean(trendMeta)
   return {
     keyword: normalized,
     eventId: event.id,
@@ -1450,6 +1549,7 @@ function candidateFromKeyword(keyword, generatedMap, trendSet = new Set()) {
     wordCount: normalized.split(' ').filter(Boolean).length,
     riskTerms: [],
     status: 'ready',
+    ...candidateProvenance(trendMeta),
   }
 }
 
@@ -1457,8 +1557,13 @@ function generateCandidates() {
   const options = currentOptions()
   const generated = generateKeywordCandidates(options)
   const generatedMap = new Map(generated.map((candidate) => [normalizePhrase(candidate.keyword), candidate]))
-  const trendKeywords = trendCandidateKeywords()
-  const trendSet = new Set(trendKeywords.map((keyword) => normalizePhrase(keyword)))
+  const trendEntries = trendCandidateEntries()
+  const trendKeywords = cleanKeywordList(trendEntries.map((entry) => entry.keyword)).slice(0, 50)
+  const trendMetaByKeyword = new Map()
+  trendEntries.forEach((entry) => {
+    const key = normalizePhrase(entry.keyword)
+    if (key && !trendMetaByKeyword.has(key)) trendMetaByKeyword.set(key, entry)
+  })
   const broad = generateBroadMarketQueries({
     ...options,
     year: '',
@@ -1472,7 +1577,7 @@ function generateCandidates() {
   ])
 
   state.candidates = keywords
-    .map((keyword) => candidateFromKeyword(keyword, generatedMap, trendSet))
+    .map((keyword) => candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword))
     .filter(Boolean)
     .slice(0, Number(elements.limitInput.value) || 80)
   state.candidateMessage = state.candidates.length > 0
@@ -1520,6 +1625,10 @@ function addResearchRow(row) {
     const incoming = row[field]
     return String(incoming ?? '').trim() !== '' ? incoming : existingRow?.[field]
   }
+  const now = new Date().toISOString()
+  const incomingHasErank = rowHasErankInput(row)
+  const incomingHasEverbee = rowHasEverbeeInput(row)
+  const incomingCheckedAt = row.checkedAt || row.createdAt || row.updatedAt || now
 
   const nextRow = {
     keyword,
@@ -1534,6 +1643,12 @@ function addResearchRow(row) {
     erankCompetition: keepExistingWhenBlank('erankCompetition'),
     erankKeywordDifficulty: keepExistingWhenBlank('erankKeywordDifficulty'),
     erankTrend: keepExistingWhenBlank('erankTrend'),
+    erankCheckedAt: incomingHasErank
+      ? (existingRow?.erankCheckedAt || row.erankCheckedAt || incomingCheckedAt)
+      : existingRow?.erankCheckedAt ?? '',
+    everbeeCheckedAt: incomingHasEverbee
+      ? (existingRow?.everbeeCheckedAt || row.everbeeCheckedAt || incomingCheckedAt)
+      : existingRow?.everbeeCheckedAt ?? '',
     notes: String(row.notes ?? '').trim() ? row.notes : existingRow?.notes ?? '',
   }
 
@@ -1911,13 +2026,15 @@ function clearResearchJob() {
 }
 
 function fillTrendSample() {
+  const sampleAt = new Date().toISOString()
+  state.recentTrendKeywords = new Set()
   elements.trendScoutInput.value = [
-    'summerween',
-    'pickleball mom',
-    'western birthday',
-    'book nook',
-    'coastal grandma',
-    'teacher era',
+    `summerween | サンプル | ${sampleAt}`,
+    `pickleball mom | サンプル | ${sampleAt}`,
+    `western birthday | サンプル | ${sampleAt}`,
+    `book nook | サンプル | ${sampleAt}`,
+    `coastal grandma | サンプル | ${sampleAt}`,
+    `teacher era | サンプル | ${sampleAt}`,
   ].join('\n')
   resetCandidatesForInputChange('サンプルを入れました。Step 2はまだ空です。「おすすめ自動探索をはじめる」を押してください。')
   setTrendStatus('サンプルの流行語を入れました。まだStep 2には入っていません。', 'warn')
@@ -1940,13 +2057,16 @@ function applyTrendScoutTerms() {
 function appendTrendScoutCandidates(candidates) {
   const existing = new Set(trendScoutTerms().map((term) => normalizePhrase(term)))
   const nextLines = []
+  const capturedAt = state.lastTrendRunStartedAt || new Date().toISOString()
 
   candidates.forEach((candidate) => {
     const keyword = normalizePhrase(candidate?.keyword ?? candidate)
-    if (!keyword || existing.has(keyword)) return
+    if (!keyword) return
+    state.recentTrendKeywords.add(keyword)
+    if (existing.has(keyword)) return
     existing.add(keyword)
     const source = String(candidate?.source ?? '').trim()
-    nextLines.push(source ? `${keyword} | ${source}` : keyword)
+    nextLines.push([keyword, source || '自動探索', capturedAt].join(' | '))
   })
 
   if (nextLines.length === 0) return 0
@@ -1957,6 +2077,8 @@ function appendTrendScoutCandidates(candidates) {
 
 async function collectTrendScoutTerms() {
   const originalLabel = elements.trendAutoBtn.textContent
+  state.lastTrendRunStartedAt = new Date().toISOString()
+  state.recentTrendKeywords = new Set()
   elements.trendAutoBtn.disabled = true
   elements.trendAutoBtn.textContent = '取得中...'
   openProgressModal({
