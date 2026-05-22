@@ -1596,6 +1596,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   const erankCompetition = parseNumber(row.erankCompetition)
   const erankKeywordDifficulty = parseNumber(row.erankKeywordDifficulty)
   const erankTrend = parseNumber(row.erankTrend)
+  const candidateClass = classifyCandidateKeyword(keyword, options)
   const riskTerms = detectRiskTerms(`${keyword} ${row.notes ?? ''}`, splitSeedText(options.customRiskTerms))
   const salesDensity = densityPerThousand(topMonthlySales, listingsAnalyzed)
   const revenueDensity = densityPerThousand(topRevenue, listingsAnalyzed)
@@ -1695,7 +1696,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
         : 100
   const riskPenalty = riskTerms.length * 25 + oldReferencePenalty + tooFreshPenalty + listingCompetitionPenalty
   const rawScore = Math.max(0, Math.min(100, competitionScore + demandScore + revenueScore + trendScore + priceScore + erankDemandScore + erankCompetitionScore + erankCtrScore + erankKeywordDifficultyScore + erankTrendScore + salesDensityScore + revenueDensityScore + erankClickDensityScore - riskPenalty))
-  const score = riskTerms.length > 0 ? 0 : Math.min(scoreCap, rawScore)
+  const score = riskTerms.length > 0 || candidateClass.action === 'reject' ? 0 : Math.min(scoreCap, rawScore)
   const hasEverbeeData = listingsAnalyzed !== null || topMonthlySales !== null || topRevenue !== null
   const hasErankData = erankSearchVolume !== null || erankClicks !== null || erankCtr !== null || erankCompetition !== null || erankKeywordDifficulty !== null || erankTrend !== null
   const everbeePositive = (topMonthlySales ?? 0) > 0 || (topRevenue ?? 0) > 0
@@ -1703,6 +1704,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   const exclusionReasons = []
   if (listingAgeMonths !== null && listingAgeMonths >= 24 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('古い商品中心のため参考のみ')
   if (listingAgeMonths !== null && listingAgeMonths < 2 && (topMonthlySales ?? 0) < 10) exclusionReasons.push('新しすぎて売上確認が弱い')
+  if (candidateClass.action === 'reject') exclusionReasons.push(candidateClass.reason)
   if (riskTerms.length > 0) exclusionReasons.push(`要確認語句: ${riskTerms.join(', ')}`)
   if ((listingsAnalyzed ?? 0) >= 20000) exclusionReasons.push('商品数が多すぎるため競合過多')
   if ((listingsAnalyzed ?? 0) > 5000 && (salesDensity ?? 0) < 3) exclusionReasons.push('商品数に対して月販売が弱い')
@@ -1742,6 +1744,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       salesDensityScore,
       revenueDensityScore,
       erankClickDensityScore,
+      candidateAction: candidateClass.action,
       oldReferencePenalty,
       tooFreshPenalty,
       listingCompetitionPenalty,
@@ -1771,10 +1774,154 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       salesDensity,
       revenueDensity,
       erankClickDensity,
+      candidateClass,
       notes: row.notes ?? '',
     },
     riskTerms,
     exclusionReasons,
+  }
+}
+
+function evidenceValue(value, suffix = '') {
+  if (value === null || value === undefined || value === '') return '-'
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const rounded = Math.round(value * 10) / 10
+    return `${rounded}${suffix}`
+  }
+  return `${value}${suffix}`
+}
+
+function evidenceStatus(status, label, detail) {
+  return { status, label, detail }
+}
+
+function listingEvidence(value) {
+  if (value === null) return evidenceStatus('warn', '未取得', 'EverBeeの商品数がないため、競合の重さを判定できません。')
+  if (value <= 5000) return evidenceStatus('strong', '直接候補の範囲', 'A候補の入口です。販売密度と売上が強ければ商品化候補にできます。')
+  if (value < 10000) return evidenceStatus('watch', 'やや多い', 'Aにはせず、販売密度が強い時だけB候補にします。')
+  if (value < 20000) return evidenceStatus('weak', '多い', '直接商品化ではなく、細かい派生語を探す市場語として扱います。')
+  return evidenceStatus('bad', '多すぎる', '新規ショップが直接狙うには競合過多です。原則Dまたは参考市場です。')
+}
+
+function salesDensityEvidence(value) {
+  if (value === null) return evidenceStatus('warn', '未取得', '月販売と商品数がそろうと販売密度を計算できます。')
+  if (value >= 5) return evidenceStatus('strong', '販売密度が強い', '競合1,000件あたり月5販売以上。新規が狙う根拠になります。')
+  if (value >= 3) return evidenceStatus('watch', '販売密度あり', '競合1,000件あたり月3販売以上。B候補または追加確認です。')
+  if (value >= 1.5) return evidenceStatus('weak', '市場語寄り', '需要はありますが、直接狙うより派生語を掘る方が安全です。')
+  return evidenceStatus('bad', '販売密度が弱い', '商品数に対して売上が弱く、穴場とは言いにくいです。')
+}
+
+function revenueDensityEvidence(value) {
+  if (value === null) return evidenceStatus('warn', '未取得', '売上と商品数がそろうと収益密度を計算できます。')
+  if (value >= 150) return evidenceStatus('strong', '収益密度が強い', '競合1,000件あたり$150以上。収益性の根拠になります。')
+  if (value >= 80) return evidenceStatus('watch', '収益密度あり', '競合1,000件あたり$80以上。販売密度と一緒に見ます。')
+  return evidenceStatus('weak', '収益密度は弱め', '売上はあっても競合数に対する収益の厚みは弱めです。')
+}
+
+function ageEvidence(value, monthlySales) {
+  if (value === null) return evidenceStatus('warn', '未取得', 'Listing Ageが取れると、最近売れている商品か判断できます。')
+  if (value >= 2 && value <= 12 && (monthlySales ?? 0) >= 10) return evidenceStatus('strong', '新しめで売れている', '2〜12か月で月10販売以上。今も反応がある可能性が高いです。')
+  if (value <= 18 && (monthlySales ?? 0) > 0) return evidenceStatus('watch', '売上反応あり', '古すぎない商品で販売があります。')
+  if (value < 2 && (monthlySales ?? 0) < 10) return evidenceStatus('weak', '新しすぎる', 'まだ売上判断が安定しません。保留寄りです。')
+  if (value >= 24 && (monthlySales ?? 0) < 10) return evidenceStatus('bad', '古い商品中心', '古い商品だけが弱く売れている可能性があり、参考中心です。')
+  return evidenceStatus('weak', '参考', 'Listing Age単体では強い根拠になりません。')
+}
+
+function erankEvidence(normalized) {
+  const clicks = normalized.erankClicks
+  const competition = normalized.erankCompetition
+  const kd = normalized.erankKeywordDifficulty
+  const clickDensity = normalized.erankClickDensity
+  if (clicks === null && competition === null && kd === null) {
+    return evidenceStatus('warn', '未取得', 'eRankの検索需要・競合・KDがあると、EverBee前の根拠がつながります。')
+  }
+  if ((clickDensity ?? 0) >= 20 || (kd !== null && kd <= 25)) return evidenceStatus('strong', 'eRank根拠あり', 'クリック密度またはKDが良く、検索需要側の後押しがあります。')
+  if ((clickDensity ?? 0) >= 10 || (clicks ?? 0) >= 100 || (kd !== null && kd <= 45)) return evidenceStatus('watch', 'eRank追加確認', '検索需要はあります。EverBeeの販売密度と合わせて判断します。')
+  return evidenceStatus('weak', 'eRankは弱め', '検索需要または競合の根拠が弱めです。')
+}
+
+function everbeePickEvidence(notes = '') {
+  const source = String(notes ?? '')
+  const picked = source.match(/\bpicked=([^;]+)/)?.[1]?.trim()
+  const visibleRows = source.match(/\bvisible rows=(\d+)/i)?.[1] ?? ''
+  if (!picked) return evidenceStatus('warn', '取得方式不明', 'EverBeeの表示行から代表商品を選んだ根拠は記録されていません。')
+  if (picked === 'recent-sales') return evidenceStatus('strong', '新しめ販売を優先', `${visibleRows ? `${visibleRows}行を見て、` : ''}2〜12か月で売れている商品を代表値にしています。`)
+  if (picked === 'warm-sales') return evidenceStatus('watch', '販売反応を優先', `${visibleRows ? `${visibleRows}行を見て、` : ''}18か月以内で販売がある商品を代表値にしています。`)
+  if (picked === 'sales-leader') return evidenceStatus('weak', '販売上位を採用', '新しめ商品が弱いため、見えている範囲の販売上位を代表値にしています。')
+  return evidenceStatus('weak', picked, 'EverBeeの表示行から代表値を選んでいます。')
+}
+
+export function explainEverbeeScore(score) {
+  const normalized = score.normalized ?? {}
+  const listing = listingEvidence(normalized.listingsAnalyzed)
+  const salesDensity = salesDensityEvidence(normalized.salesDensity)
+  const revenueDensity = revenueDensityEvidence(normalized.revenueDensity)
+  const age = ageEvidence(normalized.listingAgeMonths, normalized.topMonthlySales)
+  const erank = erankEvidence(normalized)
+  const everbeePick = everbeePickEvidence(normalized.notes)
+  const risk = score.riskTerms?.length
+    ? evidenceStatus('bad', 'IP/商標リスク', `要確認語句: ${score.riskTerms.join(', ')}`)
+    : evidenceStatus('strong', '大きなリスク語なし', '既知の危険語リストには当たりませんでした。最後にEtsy上で確認してください。')
+
+  const summary = score.label?.startsWith('A')
+    ? '商品数・販売密度・需要の根拠がそろっているため、直接商品化候補です。'
+    : score.label?.startsWith('B')
+      ? '直接狙える可能性はありますが、販売密度や競合を見ながら慎重に商品化します。'
+      : score.label?.startsWith('C')
+        ? '需要はありますが、直接商品化より派生語を掘るための市場語です。'
+        : '除外または参考市場です。売れていても、新規が入れる根拠が足りません。'
+
+  return {
+    summary,
+    rows: [
+      {
+        ...listing,
+        key: 'listings',
+        metric: '商品数',
+        value: evidenceValue(normalized.listingsAnalyzed),
+      },
+      {
+        ...salesDensity,
+        key: 'salesDensity',
+        metric: 'Sales/1000',
+        value: evidenceValue(normalized.salesDensity),
+      },
+      {
+        ...revenueDensity,
+        key: 'revenueDensity',
+        metric: 'Revenue/1000',
+        value: normalized.revenueDensity === null ? '-' : `$${evidenceValue(normalized.revenueDensity)}`,
+      },
+      {
+        ...age,
+        key: 'age',
+        metric: '新しさ',
+        value: normalized.listingAgeMonths === null ? '-' : `${normalized.listingAgeMonths} mo`,
+      },
+      {
+        ...erank,
+        key: 'erank',
+        metric: 'eRank根拠',
+        value: [
+          normalized.erankClicks === null ? '' : `Clicks ${normalized.erankClicks}`,
+          normalized.erankCompetition === null ? '' : `Comp ${normalized.erankCompetition}`,
+          normalized.erankKeywordDifficulty === null ? '' : `KD ${normalized.erankKeywordDifficulty}`,
+          normalized.erankClickDensity === null ? '' : `Clicks/1000 ${evidenceValue(normalized.erankClickDensity)}`,
+        ].filter(Boolean).join(' / ') || '-',
+      },
+      {
+        ...everbeePick,
+        key: 'everbeePick',
+        metric: 'EverBee取得',
+        value: everbeePick.label,
+      },
+      {
+        ...risk,
+        key: 'risk',
+        metric: 'リスク',
+        value: score.riskTerms?.length ? score.riskTerms.join(', ') : 'OK',
+      },
+    ],
   }
 }
 

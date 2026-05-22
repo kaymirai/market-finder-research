@@ -12,11 +12,13 @@ import {
   classifyKeywordBucket,
   buildSeoPlanFromBuckets,
   scoreEverbeeResult,
+  explainEverbeeScore,
   scoreErankOpportunity,
   classifyCandidateKeyword,
+  detectRiskTerms,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260522-6'
+} from '../../shared/market-keyword-engine/index.js?v=20260522-7'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -196,6 +198,37 @@ function isTimestampLike(value) {
   const text = String(value ?? '').trim()
   return /^\d{4}-\d{2}-\d{2}/.test(text) || /\d{1,2}:\d{2}/.test(text)
 }
+
+const TREND_MONTH_WORDS = new Set([
+  'jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april',
+  'may', 'jun', 'june', 'jul', 'july', 'aug', 'august', 'sep', 'sept',
+  'september', 'oct', 'october', 'nov', 'november', 'dec', 'december',
+])
+
+const TREND_GENERIC_WORDS = new Set([
+  'shirt',
+  'shirts',
+  'tee',
+  'tshirt',
+  'tshirts',
+  'gift',
+  'gifts',
+  'mug',
+  'tote',
+  'bag',
+  'sticker',
+  'wall',
+  'art',
+  'wedding',
+  'birthday',
+  'holiday',
+  'christmas',
+  'halloween',
+  'graduation',
+  'party',
+  'custom',
+  'personalized',
+])
 
 function safeStorage() {
   try {
@@ -396,6 +429,12 @@ function trendCandidateEntries() {
   const year = selectedYearOption()
 
   return parseTrendScoutEntries(elements.trendScoutInput?.value)
+    .map((entry) => ({
+      ...entry,
+      trendQuality: trendSeedQuality(entry),
+    }))
+    .filter((entry) => entry.trendQuality.usable)
+    .sort((a, b) => b.trendQuality.score - a.trendQuality.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
     .flatMap((entry) => {
       const keyword = normalizePhrase(entry.keyword)
       if (!keyword) return []
@@ -403,7 +442,6 @@ function trendCandidateEntries() {
       const base = hasProduct ? keyword : `${keyword} ${product}`
       return [
         base,
-        `${keyword} gift`,
         eventTerm && !keyword.includes(eventTerm) ? `${eventTerm} ${base}` : '',
         year ? `${base} ${year}` : '',
       ].filter(Boolean).map((candidateKeyword) => ({
@@ -420,6 +458,40 @@ function trendCandidateEntries() {
 function trendCandidateKeywords() {
   return cleanKeywordList(trendCandidateEntries().map((entry) => entry.keyword))
     .slice(0, 50)
+}
+
+function isTrendDateAxisNoise(keyword) {
+  const words = normalizePhrase(keyword).split(' ').filter(Boolean)
+  const hasMonth = words.some((word) => TREND_MONTH_WORDS.has(word))
+  const hasYearish = words.some((word) => /^(?:20\d{2}|\d{2})$/.test(word))
+  const specificWords = words.filter((word) => (
+    !TREND_MONTH_WORDS.has(word)
+    && !TREND_GENERIC_WORDS.has(word)
+    && !/^(?:20\d{2}|\d{2}|[\d,]+)$/.test(word)
+  ))
+  return hasMonth && hasYearish && specificWords.length === 0
+}
+
+function trendSeedQuality(entry) {
+  const keyword = normalizePhrase(entry?.keyword)
+  const words = keyword.split(' ').filter(Boolean)
+  if (!keyword) return { usable: false, score: 0, reason: '空です' }
+  if (isTrendDateAxisNoise(keyword)) return { usable: false, score: 0, reason: '月/年だけのグラフ軸です' }
+  if (words.every((word) => TREND_GENERIC_WORDS.has(word) || /^\d+$/.test(word))) {
+    return { usable: false, score: 0, reason: '商品名やイベント名だけで広すぎます' }
+  }
+  if (detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/)).length > 0) return { usable: false, score: 0, reason: 'リスク語句を含みます' }
+
+  const source = String(entry?.source ?? '').toLowerCase()
+  const sourceScore = source.includes('erank') ? 34 : source.includes('pinterest') ? 28 : source.includes('google') ? 24 : 18
+  const specificityScore = words.reduce((score, word) => {
+    if (TREND_GENERIC_WORDS.has(word) || TREND_MONTH_WORDS.has(word) || /^\d+$/.test(word)) return score
+    return score + (word.length >= 7 ? 10 : 6)
+  }, 0)
+  const phraseBonus = words.length >= 2 ? 8 : words[0]?.length >= 7 ? 4 : 0
+  const broadPenalty = words.length <= 2 && words.some((word) => ['wedding', 'birthday', 'gift', 'shirt', 'tshirt', 'wall', 'art'].includes(word)) ? 16 : 0
+  const score = Math.max(0, Math.min(100, sourceScore + specificityScore + phraseBonus - broadPenalty))
+  return { usable: score >= 22, score, reason: score >= 22 ? 'トレンド種として採用' : '広すぎるため除外' }
 }
 
 function keywordClassificationOptions() {
@@ -1014,6 +1086,28 @@ function renderChips(values = []) {
     : '<span class="empty-inline">候補なし</span>'
 }
 
+function renderDecisionEvidence(score) {
+  const evidence = explainEverbeeScore(score)
+  const rows = evidence.rows.map((row) => `
+    <div class="decision-row decision-${escapeHtml(row.status)}">
+      <span>${escapeHtml(row.metric)}</span>
+      <strong>${escapeHtml(row.value)}</strong>
+      <em>${escapeHtml(row.label)}</em>
+      <p>${escapeHtml(row.detail)}</p>
+    </div>
+  `).join('')
+
+  return `
+    <section class="decision-panel">
+      <div class="mini-heading">
+        <span>判定理由</span>
+      </div>
+      <p>${escapeHtml(evidence.summary)}</p>
+      <div class="decision-grid">${rows}</div>
+    </section>
+  `
+}
+
 function renderNounBrief(brief = {}) {
   return `
     <section class="noun-brief">
@@ -1307,6 +1401,7 @@ function renderEverbeeDetail(row) {
         <div class="metric"><span>Revenue / 1000</span><strong>${escapeHtml(displayMoneyValue(normalized.revenueDensity?.toFixed?.(0) ?? normalized.revenueDensity))}</strong></div>
         <div class="metric"><span>Clicks / 1000</span><strong>${escapeHtml(displayMetricValue(normalized.erankClickDensity?.toFixed?.(1) ?? normalized.erankClickDensity))}</strong></div>
       </div>
+      ${renderDecisionEvidence(row.score)}
 
       <div class="idea-grid">
         <div><span>ターゲット</span><p>${escapeHtml(row.idea.target)}</p></div>
@@ -1932,6 +2027,7 @@ function exportStep4Csv() {
     'eRank Source Keyword',
     'Opportunity Score',
     'Grade',
+    'Decision Summary',
     'Validation',
     'Listings Analyzed',
     'Top Monthly Sales',
@@ -1970,6 +2066,7 @@ function exportStep4Csv() {
       erankSourceKeyword(row),
       row.score.score,
       row.score.label,
+      explainEverbeeScore(row.score).summary,
       row.score.validation.label,
       normalized.listingsAnalyzed ?? '',
       normalized.topMonthlySales ?? '',
@@ -2106,10 +2203,12 @@ function appendTrendScoutCandidates(candidates) {
   candidates.forEach((candidate) => {
     const keyword = normalizePhrase(candidate?.keyword ?? candidate)
     if (!keyword) return
+    const source = String(candidate?.source ?? '').trim()
+    const quality = trendSeedQuality({ keyword, source })
+    if (!quality.usable) return
     state.recentTrendKeywords.add(keyword)
     if (existing.has(keyword)) return
     existing.add(keyword)
-    const source = String(candidate?.source ?? '').trim()
     nextLines.push([keyword, source || '自動探索', capturedAt].join(' | '))
   })
 
@@ -2128,15 +2227,15 @@ async function collectTrendScoutTerms() {
   openProgressModal({
     mode: 'trend',
     title: 'おすすめ自動探索',
-    total: state.extensionConnected ? 4 : 2,
+    total: state.extensionConnected ? 3 : 2,
     message: '開始しました。Step 2に入れる候補を作っています。',
   })
   resetCandidatesForInputChange('おすすめ元から探しています。完了するとここに候補が入ります。')
   updateProgressModal({
-    current: state.extensionConnected ? '4サイトの候補語を確認中' : '商品条件から候補を作成中',
+    current: state.extensionConnected ? '3サイトの候補語を確認中' : '商品条件から候補を作成中',
     done: 0,
     message: state.extensionConnected
-      ? '取得中です。eRank / Pinterest / Google を開いて、見えている語句を拾っています。Marketplace Insightsは無料枠を使うため、ここでは無理に使いません。'
+      ? '取得中です。eRank / Pinterest / Google を開いて、見えている語句を拾っています。'
       : 'Chrome連携はまだ使えません。まず商品条件と入力済みの流行語だけで候補を作ります。',
   })
   setTrendStatus(state.progress.message, 'working')
@@ -2174,7 +2273,7 @@ async function collectTrendScoutTerms() {
     })
     const result = await requestExtension('COLLECT_TRENDS', {
       sources: ['erank', 'pinterest', 'google'],
-      limit: 18,
+      limit: 24,
     }, 90000)
     const response = result.response ?? {}
     const trends = Array.isArray(response.trends) ? response.trends : []
@@ -2203,7 +2302,7 @@ async function collectTrendScoutTerms() {
     }
     updateProgressModal({
       current: variant === 'ready' ? 'Step 2へ候補を反映' : '確認が必要',
-      done: 4,
+      done: 3,
       message,
     })
     setTrendStatus(message, variant)

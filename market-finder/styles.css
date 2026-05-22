@@ -1587,6 +1587,75 @@ button.research-table-row {
   font-size: 13px;
 }
 
+.decision-panel {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfefd;
+  padding: 12px;
+}
+
+.decision-panel p {
+  margin: 0;
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.decision-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.decision-row {
+  display: grid;
+  grid-template-columns: 92px minmax(78px, .45fr) minmax(104px, .55fr);
+  gap: 8px;
+  align-items: start;
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.decision-row span,
+.decision-row em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.decision-row strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.decision-row p {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.decision-strong {
+  background: #ecfdf5;
+}
+
+.decision-watch {
+  background: #fffbeb;
+}
+
+.decision-weak {
+  background: #eff6ff;
+}
+
+.decision-bad {
+  background: #fff1f2;
+}
+
 .idea-grid {
   display: grid;
   gap: 10px;
