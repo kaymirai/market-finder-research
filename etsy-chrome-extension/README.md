@@ -14,7 +14,7 @@ Market Finderの候補キーワードをeRank Keyword ToolとEverBee Product Ana
 C:\work\AntiGravity\Etsy_product\etsy-chrome-extension
 ```
 
-更新後は、拡張カードのReloadを押してください。バージョン `1.17` になっていればYouTube OCR取り込み版です。
+更新後は、拡張カードのReloadを押してください。バージョン `1.18` になっていればYouTube OCR取り込み版です。
 
 ## Market Finderから使う
 
@@ -36,12 +36,12 @@ Market Finderページに「接続済み」と出ない場合は、Chrome拡張�
 
 1. YouTube動画を開き、キーワード表が見える場面まで進める
 2. できれば全画面または大きめの表示にする
-3. 必要ならYouTubeタブ上で拡張アイコンを一度クリックする
-4. Market FinderのStep 1にある `YouTube動画の文字を拾う` を押す
-5. 読み取れた語句を確認し、`流行語欄へ追加` を押す
+3. Market FinderのStep 1にある `1 読み取り開始` を押す
+4. 読み取れた語句を確認し、`2 Step 2候補へ追加` を押す
+5. 必要なら `CSV保存` でOCR結果を保存する
 6. Step 2で候補化し、eRankとEverBeeで確認する
 
-OCRはChromeのネイティブ `TextDetector` が使える環境で動きます。使えない環境では、エラー表示後に手動貼り付けへ切り替えてください。
+OCRはChromeのネイティブ `TextDetector` が使える環境で動きます。使えない環境では、エラー表示後に手動貼り付けへ切り替えてください。YouTube画面キャプチャのため、個人用拡張として `<all_urls>` 権限を使います。
 
 ## ポップアップから使う
 

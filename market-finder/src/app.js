@@ -2533,6 +2533,9 @@ function closeAdvancedModal() {
 
 function friendlyExtensionError(error) {
   const message = error instanceof Error ? error.message : String(error ?? '')
+  if (/(?:<all_urls>|activeTab).*permission is required|either the .*activeTab.*permission is required/i.test(message)) {
+    return 'Chrome拡張の画面キャプチャ権限が不足しています。拡張をReloadして、バージョン1.18になっているか確認してからMarket Finderページも再読み込みしてください。'
+  }
   if (/extension context invalidated/i.test(message)) {
     return 'Chrome拡張を更新したあと、ページ側の接続が古くなっています。Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。'
   }
