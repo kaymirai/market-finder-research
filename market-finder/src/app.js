@@ -880,13 +880,18 @@ async function startYoutubeOcrCapture() {
       maxKeywords: 500,
     }, durationSec * 1000 + 45000)
     const response = result.response ?? {}
-    const rows = Array.isArray(response.rows) ? response.rows : []
+    const directRows = Array.isArray(response.rows) ? response.rows : []
+    const fallbackFrames = Array.isArray(response.fallbackFrames) ? response.fallbackFrames : []
+    const fallbackRows = directRows.length === 0 && fallbackFrames.length > 0
+      ? await runTesseractFallbackFrames(fallbackFrames)
+      : []
+    const rows = [...directRows, ...fallbackRows]
     state.youtubeOcrRows = mergeYoutubeOcrRows(state.youtubeOcrRows, rows)
     renderYoutubeOcrRows()
     persistMarketFinderState()
 
-    const message = response.ok
-      ? `${rows.length}件の語句を読み取りました。確認して「流行語欄へ追加」を押してください。`
+    const message = rows.length > 0
+      ? `${rows.length}件の語句を読み取りました。確認して「2 Step 2候補へ追加」を押してください。`
       : response.error || response.warning || 'YouTube OCRで語句を取得できませんでした。'
     updateProgressModal({
       current: response.detector ? `OCR: ${response.detector}` : 'OCR確認',
@@ -894,7 +899,7 @@ async function startYoutubeOcrCapture() {
       message,
     })
     completeProgressModal(message)
-    setYoutubeOcrStatus(message, response.ok ? 'ready' : 'warn')
+    setYoutubeOcrStatus(message, rows.length > 0 ? 'ready' : 'warn')
   } catch (error) {
     const message = friendlyExtensionError(error)
     failProgress(message)
@@ -903,6 +908,119 @@ async function startYoutubeOcrCapture() {
     elements.youtubeOcrStartBtn.disabled = false
     elements.youtubeOcrStartBtn.textContent = originalLabel
   }
+}
+
+async function runTesseractFallbackFrames(frames) {
+  const tesseract = window.Tesseract
+  if (!tesseract?.recognize) {
+    setYoutubeOcrStatus('Chrome標準OCRが使えないため無料OCRへ切り替えたいのですが、Tesseract.jsを読み込めませんでした。ネット接続を確認してページを再読み込みしてください。', 'warn')
+    return []
+  }
+
+  const rows = []
+  const seen = new Set()
+  const limitedFrames = frames.slice(0, 12)
+  for (let index = 0; index < limitedFrames.length; index += 1) {
+    const frame = limitedFrames[index]
+    updateProgressModal({
+      current: `無料OCR ${index + 1}/${limitedFrames.length}`,
+      done: index,
+      total: limitedFrames.length,
+      message: 'Chrome標準OCRが使えないため、無料OCRで画像を読み取っています。少し時間がかかります。',
+    })
+    try {
+      const result = await tesseract.recognize(frame.dataUrl, 'eng')
+      const text = result?.data?.text ?? ''
+      extractYoutubeKeywordsFromText(text).forEach((keyword) => {
+        const key = keyword.toLowerCase()
+        if (seen.has(key)) return
+        seen.add(key)
+        rows.push({
+          keyword,
+          source: 'YouTube OCR',
+          timestamp: frame.timestamp || '',
+          confidence: Math.max(0.35, Math.min(0.92, (result?.data?.confidence ?? 45) / 100)),
+          rawText: text,
+          frame: frame.frame ?? index + 1,
+          note: frame.title ? `YouTube: ${frame.title}` : 'YouTube video OCR',
+        })
+      })
+    } catch (error) {
+      console.warn('[Market Finder] Tesseract OCR failed', error)
+    }
+  }
+
+  updateProgressModal({
+    current: '無料OCR完了',
+    done: limitedFrames.length,
+    total: limitedFrames.length,
+    message: `${rows.length}件の語句を無料OCRで読み取りました。`,
+  })
+  return rows
+}
+
+function extractYoutubeKeywordsFromText(text) {
+  const ignoredExact = new Set([
+    'youtube',
+    'share',
+    'save',
+    'subscribe',
+    'subscribed',
+    'like',
+    'comments',
+    'replay',
+    'play',
+    'pause',
+    'settings',
+    'keyword',
+    'keywords',
+    'etsy',
+    'searches',
+    'competition',
+    'rank',
+    'volume',
+  ])
+  const ignoredPattern = /\b(?:youtube|subscribe|subscribed|comments?|views?|likes?|share|save|playlist|autoplay|settings|caption|transcript|sponsor|affiliate|download|template|search volume|competition|keyword tool|erank|everbee)\b/i
+  const seen = new Set()
+  const results = []
+
+  String(text ?? '')
+    .split(/\n|\r|•|·|;|\t/)
+    .map((line) => cleanYoutubeOcrLine(line))
+    .filter(Boolean)
+    .forEach((keyword) => {
+      const key = keyword.toLowerCase()
+      if (seen.has(key)) return
+      if (ignoredExact.has(key) || ignoredPattern.test(keyword)) return
+      if (!/[a-z]/i.test(keyword)) return
+      if (/^[\d\s,.$%+-]+$/.test(keyword)) return
+      if (/https?:|www\.|@/.test(keyword)) return
+      const words = keyword.split(/\s+/).filter(Boolean)
+      if (words.length < 1 || words.length > 7) return
+      if (keyword.length < 3 || keyword.length > 70) return
+      if (words.some((word) => word.length > 24)) return
+      seen.add(key)
+      results.push(keyword)
+    })
+
+  return results
+}
+
+function cleanYoutubeOcrLine(value) {
+  return String(value ?? '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[|_]/g, ' ')
+    .replace(/^[#\s]*\d{1,4}[\).\]:\-\s]+/, '')
+    .replace(/\b(?:top|rank|score|searches|clicks|competition|volume)\b\s*[:=-]?\s*\d[\d,.$%]*/gi, '')
+    .replace(/\d[\d,.$%]*\s*(?:searches|clicks|views|competition|results)\b/gi, '')
+    .replace(/[^a-z0-9\s'&+/-]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[^\w]+|[^\w]+$/g, '')
+    .trim()
+    .toLowerCase()
 }
 
 function mergeYoutubeOcrRows(currentRows, nextRows) {

@@ -68,6 +68,7 @@
         text?: string
         error?: string
         detector?: string
+        imageDataUrl?: string
         currentTime?: number
         title?: string
         crop?: {
@@ -620,6 +621,12 @@
         const rows: YoutubeOcrKeyword[] = []
         const seen = new Set<string>()
         const rawFrames: string[] = []
+        const fallbackFrames: Array<{
+            dataUrl: string
+            timestamp: string
+            frame: number
+            title: string
+        }> = []
         let detector = ''
         let title = ''
         let lastError = ''
@@ -630,6 +637,18 @@
             const ocr = await ocrCapturedImageInTab(tabId, dataUrl)
             if (!ocr.ok) {
                 lastError = ocr.error || 'Chromeの画面OCRが使えませんでした。'
+                title = ocr.title || title
+                if (ocr.imageDataUrl) {
+                    fallbackFrames.push({
+                        dataUrl: ocr.imageDataUrl,
+                        timestamp: formatOcrTimestamp(ocr.currentTime),
+                        frame,
+                        title: ocr.title || title,
+                    })
+                    if (fallbackFrames.length >= 12) break
+                    if (frame < maxFrames) await delay(intervalMs)
+                    continue
+                }
                 break
             }
 
@@ -664,7 +683,8 @@
                 ok: false,
                 rows,
                 frames: rawFrames.length,
-                error: `${lastError} ChromeのTextDetectorが無効な環境では、動画内文字の自動OCRはできません。`,
+                fallbackFrames,
+                error: `${lastError} ChromeのTextDetectorが無効な環境なので、無料OCRフォールバックへ切り替えます。`,
             }
         }
 
@@ -752,11 +772,6 @@
             detect(source: CanvasImageSource): Promise<TextDetection[]>
         }
 
-        const detectorConstructor = (window as Window & { TextDetector?: NativeTextDetector }).TextDetector
-        if (!detectorConstructor) {
-            return { ok: false, error: 'ChromeのTextDetector OCRが利用できません。' }
-        }
-
         const image = await new Promise<HTMLImageElement>((resolve, reject) => {
             const img = new Image()
             img.onload = () => resolve(img)
@@ -788,6 +803,24 @@
         if (!context) return { ok: false, error: 'OCR用キャンバスを作れませんでした。' }
         context.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
 
+        const currentTime = Number((video as HTMLVideoElement | null)?.currentTime ?? 0)
+        const title = String(document.title ?? '').replace(/\s*-\s*YouTube\s*$/i, '').trim()
+        const imageDataUrl = canvas.toDataURL('image/jpeg', 0.72)
+        const detectorConstructor = (window as Window & { TextDetector?: NativeTextDetector }).TextDetector
+        if (!detectorConstructor) {
+            return {
+                ok: false,
+                error: 'ChromeのTextDetector OCRが利用できません。',
+                imageDataUrl,
+                currentTime: Number.isFinite(currentTime) ? currentTime : 0,
+                title,
+                crop: {
+                    width: canvas.width,
+                    height: canvas.height,
+                },
+            }
+        }
+
         const detector = new detectorConstructor()
         const detections = await detector.detect(canvas)
         const text = detections
@@ -795,13 +828,11 @@
             .filter((value): value is string => Boolean(value))
             .join('\n')
 
-        const currentTime = Number((video as HTMLVideoElement | null)?.currentTime ?? 0)
-        const title = String(document.title ?? '').replace(/\s*-\s*YouTube\s*$/i, '').trim()
-
         return {
             ok: true,
             text,
             detector: 'TextDetector',
+            imageDataUrl,
             currentTime: Number.isFinite(currentTime) ? currentTime : 0,
             title,
             crop: {

@@ -41,7 +41,7 @@ Market Finderページに「接続済み」と出ない場合は、Chrome拡張�
 5. 必要なら `CSV保存` でOCR結果を保存する
 6. Step 2で候補化し、eRankとEverBeeで確認する
 
-OCRはChromeのネイティブ `TextDetector` が使える環境で動きます。使えない環境では、エラー表示後に手動貼り付けへ切り替えてください。YouTube画面キャプチャのため、個人用拡張として `<all_urls>` 権限を使います。
+OCRはまずChromeのネイティブ `TextDetector` を試します。使えない環境では、Market Finder側でTesseract.jsの無料OCRへ切り替えます。Tesseract.jsは初回読み込みにネット接続が必要です。YouTube画面キャプチャのため、個人用拡張として `<all_urls>` 権限を使います。
 
 ## ポップアップから使う
 
