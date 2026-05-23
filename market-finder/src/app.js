@@ -24,6 +24,9 @@ const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
 const PERSISTENCE_KEY = 'etsy-mirai-market-finder-state-v1'
 const PERSISTENCE_VERSION = 1
+const SEARCH_SEED_METADATA_URL = './data/etsy-search-keyword-metadata-2026-05-23.csv'
+const SEARCH_SEED_PICK_LIMIT = 20
+const SEARCH_SEED_PREVIEW_LIMIT = 6
 
 const state = {
   candidates: [],
@@ -54,6 +57,9 @@ const state = {
   lastTrendRunStartedAt: '',
   youtubeOcrRows: [],
   youtubeOcrFrames: [],
+  searchSeedRows: [],
+  searchSeedLoaded: false,
+  searchSeedError: '',
 }
 
 const pendingExtensionRequests = new Map()
@@ -86,6 +92,10 @@ const elements = {
   trendAutoBtn: document.querySelector('#trendAutoBtn'),
   trendApplyBtn: document.querySelector('#trendApplyBtn'),
   trendStatus: document.querySelector('#trendStatus'),
+  searchSeedCount: document.querySelector('#searchSeedCount'),
+  searchSeedList: document.querySelector('#searchSeedList'),
+  searchSeedApplyBtn: document.querySelector('#searchSeedApplyBtn'),
+  searchSeedStatus: document.querySelector('#searchSeedStatus'),
   youtubeOcrDurationInput: document.querySelector('#youtubeOcrDurationInput'),
   youtubeOcrIntervalInput: document.querySelector('#youtubeOcrIntervalInput'),
   youtubeOcrStartBtn: document.querySelector('#youtubeOcrStartBtn'),
@@ -394,6 +404,116 @@ function selectedYearOption() {
   const value = String(elements.yearInput.value ?? '').trim()
   if (value === '') return ''
   return Number(value) || selectedEvent().defaultYear
+}
+
+function parseCsvLine(line) {
+  const cells = []
+  let current = ''
+  let quoted = false
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    const next = line[index + 1]
+    if (char === '"' && quoted && next === '"') {
+      current += '"'
+      index += 1
+      continue
+    }
+    if (char === '"') {
+      quoted = !quoted
+      continue
+    }
+    if (char === ',' && !quoted) {
+      cells.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  cells.push(current)
+  return cells.map((cell) => cell.trim())
+}
+
+function parseSearchSeedCsv(value) {
+  const lines = String(value ?? '').split(/\r?\n/).filter(Boolean)
+  if (lines.length < 2) return []
+  const headers = parseCsvLine(lines[0]).map((header) => normalizePhrase(header).replace(/\s+/g, '_'))
+
+  return lines.slice(1)
+    .map((line) => {
+      const cells = parseCsvLine(line)
+      const row = {}
+      headers.forEach((header, index) => {
+        row[header] = cells[index] ?? ''
+      })
+      const keyword = normalizePhrase(row.keyword)
+      const searches = Number(String(row.searches ?? '').replace(/,/g, ''))
+      const results = Number(String(row.results ?? '').replace(/,/g, ''))
+      const ratio = Number(String(row.search_result_ratio ?? '').replace(/,/g, ''))
+      if (!keyword || !Number.isFinite(searches) || searches <= 0) return null
+      return {
+        keyword,
+        searches,
+        results: Number.isFinite(results) ? results : null,
+        searchResultRatio: Number.isFinite(ratio) ? ratio : null,
+        capturedAt: row.captured_at ?? '',
+        confidence: row.confidence ?? '',
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.searches - a.searches || a.keyword.localeCompare(b.keyword, 'en'))
+}
+
+function categorySeedTerms(category = selectedCategory()) {
+  const product = normalizePhrase(category.searchTerm)
+  const map = {
+    shirt: ['shirt', 't-shirt', 'tshirt', 'tee'],
+    sweatshirt: ['sweatshirt', 'crewneck'],
+    mug: ['mug', 'cup', 'drinkware'],
+    'tote bag': ['tote bag', 'tote', 'bag'],
+    sticker: ['sticker', 'stickers'],
+  }
+  return map[product] ?? [product]
+}
+
+function phraseHasTerm(keyword, term) {
+  const keywordTokens = normalizePhrase(keyword).split(' ').filter(Boolean)
+  const termTokens = normalizePhrase(term).split(' ').filter(Boolean)
+  if (termTokens.length === 0) return false
+  for (let index = 0; index <= keywordTokens.length - termTokens.length; index += 1) {
+    const matches = termTokens.every((token, offset) => keywordTokens[index + offset] === token)
+    if (matches) return true
+  }
+  return false
+}
+
+function searchSeedMatchesCategory(row, category = selectedCategory()) {
+  const keyword = normalizePhrase(row.keyword)
+  return categorySeedTerms(category).some((term) => phraseHasTerm(keyword, term))
+}
+
+function searchSeedLooksUseful(row) {
+  const keyword = normalizePhrase(row.keyword)
+  const words = keyword.split(' ').filter(Boolean)
+  if (words.length < 2) return false
+  if (detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/)).length > 0) return false
+  return keywordClass(keyword).action === 'candidate'
+}
+
+function searchSeedRowsForCurrentCategory(limit = SEARCH_SEED_PICK_LIMIT) {
+  const matching = state.searchSeedRows
+    .filter((row) => searchSeedMatchesCategory(row))
+    .filter((row) => searchSeedLooksUseful(row))
+  const fallback = state.searchSeedRows
+    .filter((row) => searchSeedLooksUseful(row))
+    .slice(0, limit)
+  return (matching.length > 0 ? matching : fallback).slice(0, limit)
+}
+
+function formatCompactNumber(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toLocaleString('en-US')
 }
 
 function parseTrendScoutEntries(value) {
@@ -1273,6 +1393,73 @@ function fillBroadSample() {
   extractBroadMarketHints()
 }
 
+function renderSearchSeedRows() {
+  if (!elements.searchSeedList) return
+  if (state.searchSeedError) {
+    elements.searchSeedCount.textContent = '未読込'
+    elements.searchSeedList.innerHTML = '<div class="empty-state small">検索種データを読み込めませんでした。</div>'
+    elements.searchSeedStatus.textContent = state.searchSeedError
+    elements.searchSeedApplyBtn.disabled = true
+    return
+  }
+
+  if (!state.searchSeedLoaded) {
+    elements.searchSeedCount.textContent = '読込中'
+    elements.searchSeedList.innerHTML = '<div class="empty-state small">検索数順データを読み込んでいます。</div>'
+    elements.searchSeedApplyBtn.disabled = true
+    return
+  }
+
+  const rows = searchSeedRowsForCurrentCategory(SEARCH_SEED_PREVIEW_LIMIT)
+  elements.searchSeedCount.textContent = `${state.searchSeedRows.length}件`
+  elements.searchSeedApplyBtn.disabled = rows.length === 0
+  if (rows.length === 0) {
+    elements.searchSeedList.innerHTML = '<div class="empty-state small">この商品に近い種ワードがありません。商品を変えるか、流行語を手入力してください。</div>'
+    elements.searchSeedStatus.textContent = '検索数順データは読み込み済みですが、今の商品に合う候補が少なめです。'
+    return
+  }
+
+  elements.searchSeedList.innerHTML = rows.map((row) => `
+    <div class="search-seed-item">
+      <div>
+        <strong>${escapeHtml(row.keyword)}</strong>
+        <span>商品数 ${formatCompactNumber(row.results)} / 比率 ${row.searchResultRatio ?? '-'}</span>
+      </div>
+      <div class="search-seed-score">
+        <small>Search</small>
+        <b>${formatCompactNumber(row.searches)}</b>
+      </div>
+    </div>
+  `).join('')
+  elements.searchSeedStatus.textContent = `検索数が多い順に${rows.length}件を表示中。ボタンを押すとStep 2候補に使います。`
+}
+
+function appendSearchSeedRowsToTrendScout(options = {}) {
+  const rows = searchSeedRowsForCurrentCategory(options.limit ?? SEARCH_SEED_PICK_LIMIT)
+  if (rows.length === 0) return 0
+  const capturedAt = state.lastTrendRunStartedAt || new Date().toISOString()
+  const candidates = rows.map((row) => ({
+    keyword: row.keyword,
+    source: `YouTube Search Seed searches ${row.searches}`,
+    capturedAt,
+  }))
+  return appendTrendScoutCandidates(candidates)
+}
+
+function applySearchSeeds() {
+  state.lastTrendRunStartedAt = new Date().toISOString()
+  const added = appendSearchSeedRowsToTrendScout()
+  generateCandidates()
+  const made = state.candidates.length
+  if (added === 0 && made === 0) {
+    elements.searchSeedStatus.textContent = '追加できる検索種ワードがありませんでした。商品を変えて試してください。'
+    setTrendStatus('検索数順データから候補を作れませんでした。商品を変えて試してください。', 'warn')
+    return
+  }
+  elements.searchSeedStatus.textContent = `検索数順データから${added}件を追加し、Step 2に${made}件の候補を作りました。`
+  setTrendStatus(`検索数順データを使ってStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`, 'ready')
+}
+
 function renderCandidates() {
   elements.candidateCount.textContent = String(state.candidates.length)
   elements.copyKeywordsBtn.disabled = state.candidates.length === 0
@@ -1977,6 +2164,7 @@ function renderTrendScoutStatus() {
 function renderAll() {
   renderTrendScoutStatus()
   renderBroadHints()
+  renderSearchSeedRows()
   renderCandidates()
   renderErankResults()
   renderResultsTable()
@@ -1984,6 +2172,22 @@ function renderAll() {
   renderYoutubeOcrFrames()
   renderSeoPlan()
   persistMarketFinderState()
+}
+
+async function loadSearchSeedMetadata() {
+  try {
+    const response = await fetch(`${SEARCH_SEED_METADATA_URL}?v=20260524-1`, { cache: 'no-store' })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const text = await response.text()
+    state.searchSeedRows = parseSearchSeedCsv(text)
+    state.searchSeedLoaded = true
+    state.searchSeedError = ''
+    renderSearchSeedRows()
+  } catch (error) {
+    state.searchSeedLoaded = false
+    state.searchSeedError = `検索種データを読み込めませんでした: ${error?.message || error}`
+    renderSearchSeedRows()
+  }
 }
 
 function candidateProvenance(trendMeta, fallbackSourceLabel = '商品条件から自動生成') {
@@ -2614,13 +2818,14 @@ async function collectTrendScoutTerms() {
       : 'Chrome連携はまだ使えません。まず商品条件と入力済みの流行語だけで候補を作ります。',
   })
   setTrendStatus(state.progress.message, 'working')
+  const searchSeedAdded = appendSearchSeedRowsToTrendScout()
 
   if (!state.extensionConnected) {
     try {
       generateCandidates()
       const made = state.candidates.length
       const message = made > 0
-        ? `Chrome連携はまだ使えませんが、商品条件だけでStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
+        ? `Chrome連携はまだ使えませんが、検索数順データ${searchSeedAdded}件と商品条件からStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
         : 'Chrome連携はまだ使えません。Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。'
       updateProgressModal({
         current: made > 0 ? 'Step 2へ候補を反映' : '候補なし',
@@ -2665,9 +2870,9 @@ async function collectTrendScoutTerms() {
     let variant = 'ready'
     if (added > 0) {
       const note = errors.length > 0 ? ` 取得できなかったページ: ${errors.slice(0, 2).join(' / ')}` : ''
-      message = `完了しました。${added}件の流行語を追加し、Step 2に${state.candidates.length}件の候補を作りました。次は「検索されているか見る」です。${note}`
+      message = `完了しました。検索数順データ${searchSeedAdded}件と外部の流行語${added}件を使い、Step 2に${state.candidates.length}件の候補を作りました。次は「検索されているか見る」です。${note}`
     } else if (trends.length > 0 && state.candidates.length > 0) {
-      message = `完了しました。新しく追加する語句はありませんでしたが、既存の流行語からStep 2に${state.candidates.length}件の候補を作りました。`
+      message = `完了しました。検索数順データ${searchSeedAdded}件と既存の流行語からStep 2に${state.candidates.length}件の候補を作りました。`
     } else if (errors.length > 0) {
       message = `完了しましたが、自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`
       variant = 'warn'
@@ -3246,6 +3451,7 @@ function bindEvents() {
   elements.trendSampleBtn.addEventListener('click', fillTrendSample)
   elements.trendAutoBtn.addEventListener('click', collectTrendScoutTerms)
   elements.trendApplyBtn.addEventListener('click', applyTrendScoutTerms)
+  elements.searchSeedApplyBtn.addEventListener('click', applySearchSeeds)
   elements.youtubeOcrStartBtn.addEventListener('click', startYoutubeOcrCapture)
   elements.youtubeOcrApplyBtn.addEventListener('click', applyYoutubeOcrToTrendScout)
   elements.youtubeOcrDownloadBtn.addEventListener('click', exportYoutubeOcrCsv)
@@ -3309,6 +3515,7 @@ function init() {
   }
   setRunningControls(false)
   initExtensionBridge()
+  loadSearchSeedMetadata()
 }
 
 init()

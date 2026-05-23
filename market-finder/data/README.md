@@ -6,7 +6,7 @@ This folder keeps manually or semi-automatically collected keyword metadata that
 
 Source: YouTube keyword table screenshots captured on 2026-05-23.
 
-The data currently contains 882 deduped rows from 81 screenshots. It is approximate and should be treated as a starting point only. It is useful for finding broad terms with visible buyer search demand and a rough search-to-results ratio. It is not sales proof. Market Finder should still validate candidates with eRank and EverBee before treating any keyword as a product opportunity.
+The data currently contains 882 deduped rows from 81 screenshots. It is sorted by `searches` descending and is loaded by Market Finder as the "search volume seed" list. It is approximate and should be treated as a starting point only. It is useful for finding broad terms with visible buyer search demand and a rough search-to-results ratio. It is not sales proof. Market Finder should still validate candidates with eRank and EverBee before treating any keyword as a product opportunity.
 
 Columns:
 

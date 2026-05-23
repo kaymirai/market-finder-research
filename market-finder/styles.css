@@ -542,6 +542,62 @@ body.flow-auto .controls-panel .panel-heading {
   background: #fffdf4;
 }
 
+.search-seed-box {
+  border-color: #bbf7d0;
+  background: #f7fef9;
+}
+
+.search-seed-list {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.search-seed-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #dcfce7;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.search-seed-item strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.search-seed-item span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.search-seed-score {
+  min-width: 70px;
+  border-radius: 8px;
+  background: #ecfdf5;
+  color: #047857;
+  padding: 6px;
+  text-align: center;
+}
+
+.search-seed-score small {
+  display: block;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.search-seed-score b {
+  display: block;
+  font-size: 16px;
+  line-height: 1;
+}
+
 .youtube-ocr-steps {
   display: grid;
   gap: 8px;
