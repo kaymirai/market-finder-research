@@ -14,7 +14,7 @@ Market Finderの候補キーワードをeRank Keyword ToolとEverBee Product Ana
 C:\work\AntiGravity\Etsy_product\etsy-chrome-extension
 ```
 
-更新後は、拡張カードのReloadを押してください。バージョン `1.5` になっていればBroad Market Scan連携版です。
+更新後は、拡張カードのReloadを押してください。バージョン `1.17` になっていればYouTube OCR取り込み版です。
 
 ## Market Finderから使う
 
@@ -29,6 +29,19 @@ C:\work\AntiGravity\Etsy_product\etsy-chrome-extension
 Broad Market Scanの `EverBeeで広め調査` から起動した場合は、EverBee画面で拾えた商品名もMarket Finderへ戻し、種ワード抽出に使います。
 
 Market Finderページに「接続済み」と出ない場合は、Chrome拡張をReloadしてMarket Finderページもリロードしてください。
+
+## YouTube OCR取り込み
+
+動画内に出てくるキーワード一覧を、Market Finderの流行語候補として拾うための一回用機能です。
+
+1. YouTube動画を開き、キーワード表が見える場面まで進める
+2. できれば全画面または大きめの表示にする
+3. 必要ならYouTubeタブ上で拡張アイコンを一度クリックする
+4. Market FinderのStep 1にある `YouTube動画の文字を拾う` を押す
+5. 読み取れた語句を確認し、`流行語欄へ追加` を押す
+6. Step 2で候補化し、eRankとEverBeeで確認する
+
+OCRはChromeのネイティブ `TextDetector` が使える環境で動きます。使えない環境では、エラー表示後に手動貼り付けへ切り替えてください。
 
 ## ポップアップから使う
 

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260522-7">
+    <link rel="stylesheet" href="./styles.css?v=20260523-1">
   </head>
   <body>
     <main class="app-shell">
@@ -138,6 +138,31 @@
             <button id="trendApplyBtn" type="button" class="ghost-btn full-width" data-optional="任意">候補を作る</button>
           </div>
 
+          <div class="paste-box compact-box youtube-ocr-box">
+            <div class="mini-heading">
+              <span>YouTube動画の文字を拾う</span>
+              <span class="soft-pill">今回用</span>
+            </div>
+            <p class="box-help">動画でキーワード一覧が見えている場面を開き、できれば全画面にしてから押します。うまく撮れない時はYouTubeタブで拡張アイコンを一度クリックしてから戻ってください。</p>
+            <div class="two-col">
+              <label class="field">
+                <span>読む秒数</span>
+                <input id="youtubeOcrDurationInput" type="number" min="5" max="180" value="30">
+              </label>
+              <label class="field">
+                <span>間隔 秒</span>
+                <input id="youtubeOcrIntervalInput" type="number" min="0.5" max="5" step="0.5" value="1">
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="youtubeOcrStartBtn" type="button" class="ghost-btn">YouTubeから文字を拾う</button>
+              <button id="youtubeOcrApplyBtn" type="button" class="ghost-btn">流行語欄へ追加</button>
+              <button id="youtubeOcrDownloadBtn" type="button" class="ghost-btn">OCR CSV保存</button>
+            </div>
+            <textarea id="youtubeOcrOutput" rows="6" readonly placeholder="読み取れたキーワードがここに出ます。"></textarea>
+            <div id="youtubeOcrStatus" class="inline-status">YouTube動画タブを開いて、キーワード一覧が見える状態にしてから使います。</div>
+          </div>
+
           <label class="field advanced-only">
             <span>Step 2に表示する候補数</span>
             <input id="limitInput" type="number" min="10" max="250" value="80">
@@ -235,7 +260,7 @@
               <li>Chrome拡張を読み込み済み</li>
               <li>このページを 127.0.0.1:3021 で開いている</li>
               <li>EverBeeにログイン済み</li>
-              <li>拡張バージョン 1.5</li>
+              <li>拡張バージョン 1.17</li>
             </ul>
 
             <label class="field">
@@ -539,6 +564,6 @@
       </div>
     </div>
 
-    <script type="module" src="./src/app.js?v=20260522-7"></script>
+    <script type="module" src="./src/app.js?v=20260523-1"></script>
   </body>
 </html>

@@ -18,7 +18,7 @@ import {
   detectRiskTerms,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260522-7'
+} from '../../shared/market-keyword-engine/index.js?v=20260523-1'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -52,6 +52,7 @@ const state = {
   selectedResultKey: '',
   recentTrendKeywords: new Set(),
   lastTrendRunStartedAt: '',
+  youtubeOcrRows: [],
 }
 
 const pendingExtensionRequests = new Map()
@@ -84,6 +85,13 @@ const elements = {
   trendAutoBtn: document.querySelector('#trendAutoBtn'),
   trendApplyBtn: document.querySelector('#trendApplyBtn'),
   trendStatus: document.querySelector('#trendStatus'),
+  youtubeOcrDurationInput: document.querySelector('#youtubeOcrDurationInput'),
+  youtubeOcrIntervalInput: document.querySelector('#youtubeOcrIntervalInput'),
+  youtubeOcrStartBtn: document.querySelector('#youtubeOcrStartBtn'),
+  youtubeOcrApplyBtn: document.querySelector('#youtubeOcrApplyBtn'),
+  youtubeOcrDownloadBtn: document.querySelector('#youtubeOcrDownloadBtn'),
+  youtubeOcrOutput: document.querySelector('#youtubeOcrOutput'),
+  youtubeOcrStatus: document.querySelector('#youtubeOcrStatus'),
   broadQueryInput: document.querySelector('#broadQueryInput'),
   broadBuildQueriesBtn: document.querySelector('#broadBuildQueriesBtn'),
   broadStartBtn: document.querySelector('#broadStartBtn'),
@@ -291,6 +299,8 @@ function persistMarketFinderState() {
       limit: elements.limitInput.value,
       seedKeywords: elements.seedInput.value,
       trendScoutKeywords: elements.trendScoutInput.value,
+      youtubeOcrDuration: elements.youtubeOcrDurationInput.value,
+      youtubeOcrInterval: elements.youtubeOcrIntervalInput.value,
       customRiskTerms: elements.riskInput.value,
       targets: selectedTargets(),
       broadQueries: elements.broadQueryInput.value,
@@ -308,6 +318,7 @@ function persistMarketFinderState() {
       broadSnippetKeys: Array.from(state.broadSnippetKeys),
       selectedResultKey: state.selectedResultKey,
       seoPlan: state.seoPlan,
+      youtubeOcrRows: state.youtubeOcrRows,
     },
   }
 
@@ -336,6 +347,8 @@ function restorePersistedState() {
   setInputValue(elements.limitInput, form.limit)
   setInputValue(elements.seedInput, form.seedKeywords)
   setInputValue(elements.trendScoutInput, form.trendScoutKeywords)
+  setInputValue(elements.youtubeOcrDurationInput, form.youtubeOcrDuration)
+  setInputValue(elements.youtubeOcrIntervalInput, form.youtubeOcrInterval)
   setInputValue(elements.riskInput, form.customRiskTerms)
   setInputValue(elements.broadQueryInput, form.broadQueries)
   setInputValue(elements.researchJobInput, form.researchJob)
@@ -351,6 +364,7 @@ function restorePersistedState() {
   state.broadSnippetKeys = new Set(Array.isArray(savedState.broadSnippetKeys) ? savedState.broadSnippetKeys : [])
   state.selectedResultKey = String(savedState.selectedResultKey ?? '')
   state.seoPlan = savedState.seoPlan ?? null
+  state.youtubeOcrRows = Array.isArray(savedState.youtubeOcrRows) ? savedState.youtubeOcrRows : []
 
   return persisted
 }
@@ -483,7 +497,7 @@ function trendSeedQuality(entry) {
   if (detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/)).length > 0) return { usable: false, score: 0, reason: 'リスク語句を含みます' }
 
   const source = String(entry?.source ?? '').toLowerCase()
-  const sourceScore = source.includes('erank') ? 34 : source.includes('pinterest') ? 28 : source.includes('google') ? 24 : 18
+  const sourceScore = source.includes('erank') ? 34 : source.includes('youtube') ? 30 : source.includes('pinterest') ? 28 : source.includes('google') ? 24 : 18
   const specificityScore = words.reduce((score, word) => {
     if (TREND_GENERIC_WORDS.has(word) || TREND_MONTH_WORDS.has(word) || /^\d+$/.test(word)) return score
     return score + (word.length >= 7 ? 10 : 6)
@@ -818,6 +832,138 @@ function extractBroadMarketHints() {
 
 function csvCell(value) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`
+}
+
+function setYoutubeOcrStatus(message, variant = '') {
+  if (!elements.youtubeOcrStatus) return
+  elements.youtubeOcrStatus.textContent = message
+  elements.youtubeOcrStatus.className = `inline-status${variant ? ` ${variant}` : ''}`
+}
+
+function renderYoutubeOcrRows() {
+  if (!elements.youtubeOcrOutput) return
+  elements.youtubeOcrOutput.value = state.youtubeOcrRows
+    .map((row) => row.keyword)
+    .join('\n')
+}
+
+function youtubeOcrDurationSec() {
+  return Math.max(5, Math.min(Number(elements.youtubeOcrDurationInput?.value) || 30, 180))
+}
+
+function youtubeOcrIntervalMs() {
+  return Math.max(500, Math.min((Number(elements.youtubeOcrIntervalInput?.value) || 1) * 1000, 5000))
+}
+
+async function startYoutubeOcrCapture() {
+  const durationSec = youtubeOcrDurationSec()
+  const intervalMs = youtubeOcrIntervalMs()
+  const total = Math.max(1, Math.ceil((durationSec * 1000) / intervalMs))
+  const originalLabel = elements.youtubeOcrStartBtn.textContent
+
+  elements.youtubeOcrStartBtn.disabled = true
+  elements.youtubeOcrStartBtn.textContent = '読み取り中...'
+  state.lastTrendRunStartedAt = new Date().toISOString()
+  state.recentTrendKeywords = new Set()
+  openProgressModal({
+    mode: 'trend',
+    title: 'YouTube OCR取り込み',
+    total,
+    message: 'YouTube動画タブを前面にして、画面の文字を読み取っています。',
+  })
+  setYoutubeOcrStatus('読み取り中です。キーワード表が見える状態を保ってください。', 'working')
+
+  try {
+    const result = await requestExtension('CAPTURE_YOUTUBE_OCR', {
+      durationSec,
+      intervalMs,
+      maxKeywords: 500,
+    }, durationSec * 1000 + 45000)
+    const response = result.response ?? {}
+    const rows = Array.isArray(response.rows) ? response.rows : []
+    state.youtubeOcrRows = mergeYoutubeOcrRows(state.youtubeOcrRows, rows)
+    renderYoutubeOcrRows()
+    persistMarketFinderState()
+
+    const message = response.ok
+      ? `${rows.length}件の語句を読み取りました。確認して「流行語欄へ追加」を押してください。`
+      : response.error || response.warning || 'YouTube OCRで語句を取得できませんでした。'
+    updateProgressModal({
+      current: response.detector ? `OCR: ${response.detector}` : 'OCR確認',
+      done: total,
+      message,
+    })
+    completeProgressModal(message)
+    setYoutubeOcrStatus(message, response.ok ? 'ready' : 'warn')
+  } catch (error) {
+    const message = friendlyExtensionError(error)
+    failProgress(message)
+    setYoutubeOcrStatus(message, 'warn')
+  } finally {
+    elements.youtubeOcrStartBtn.disabled = false
+    elements.youtubeOcrStartBtn.textContent = originalLabel
+  }
+}
+
+function mergeYoutubeOcrRows(currentRows, nextRows) {
+  const seen = new Set()
+  return [...currentRows, ...nextRows]
+    .map((row) => ({
+      keyword: normalizePhrase(row.keyword),
+      source: row.source || 'YouTube OCR',
+      timestamp: row.timestamp || '',
+      confidence: row.confidence ?? '',
+      rawText: row.rawText || '',
+      frame: row.frame ?? '',
+      note: row.note || '',
+    }))
+    .filter((row) => row.keyword)
+    .filter((row) => {
+      if (seen.has(row.keyword)) return false
+      seen.add(row.keyword)
+      return true
+    })
+}
+
+function applyYoutubeOcrToTrendScout() {
+  if (state.youtubeOcrRows.length === 0) {
+    setYoutubeOcrStatus('先にYouTubeから文字を拾ってください。', 'warn')
+    return
+  }
+
+  const added = appendTrendScoutCandidates(state.youtubeOcrRows.map((row) => ({
+    keyword: row.keyword,
+    source: 'YouTube OCR',
+  })))
+  if (added === 0) {
+    setYoutubeOcrStatus('追加できる新しい語句がありませんでした。すでに追加済み、または広すぎる語句です。', 'warn')
+    return
+  }
+
+  generateCandidates()
+  setYoutubeOcrStatus(`${added}件を流行語欄へ追加し、Step 2候補を作りました。`, 'ready')
+  setTrendStatus(`YouTube OCRから${added}件を追加しました。次は「検索されているか見る」です。`, 'ready')
+}
+
+function exportYoutubeOcrCsv() {
+  if (state.youtubeOcrRows.length === 0) {
+    setYoutubeOcrStatus('保存するYouTube OCR結果がありません。', 'warn')
+    return
+  }
+
+  const header = ['Keyword', 'Source', 'Timestamp', 'Confidence', 'Frame', 'Notes', 'Raw Text']
+  const lines = state.youtubeOcrRows.map((row) => [
+    row.keyword,
+    row.source,
+    row.timestamp,
+    row.confidence,
+    row.frame,
+    row.note,
+    row.rawText,
+  ].map(csvCell).join(','))
+  const date = new Date().toISOString().slice(0, 10)
+  downloadTextFile(`market-finder-youtube-ocr-${date}.csv`, `\ufeff${[header.map(csvCell).join(','), ...lines].join('\n')}`, 'text/csv;charset=utf-8')
+  setYoutubeOcrStatus(`${state.youtubeOcrRows.length}件のYouTube OCR結果をCSV保存しました。`, 'ready')
 }
 
 function appendBroadListingRows(rows) {
@@ -1607,6 +1753,7 @@ function renderAll() {
   renderCandidates()
   renderErankResults()
   renderResultsTable()
+  renderYoutubeOcrRows()
   renderSeoPlan()
   persistMarketFinderState()
 }
@@ -2855,6 +3002,8 @@ function bindEvents() {
     elements.reachBucketInput,
     elements.bestSellerBucketInput,
     elements.simpleSeoKeywordsInput,
+    elements.youtubeOcrDurationInput,
+    elements.youtubeOcrIntervalInput,
   ].forEach((input) => {
     input.addEventListener('input', persistMarketFinderState)
   })
@@ -2866,6 +3015,9 @@ function bindEvents() {
   elements.trendSampleBtn.addEventListener('click', fillTrendSample)
   elements.trendAutoBtn.addEventListener('click', collectTrendScoutTerms)
   elements.trendApplyBtn.addEventListener('click', applyTrendScoutTerms)
+  elements.youtubeOcrStartBtn.addEventListener('click', startYoutubeOcrCapture)
+  elements.youtubeOcrApplyBtn.addEventListener('click', applyYoutubeOcrToTrendScout)
+  elements.youtubeOcrDownloadBtn.addEventListener('click', exportYoutubeOcrCsv)
   elements.addResearchBtn.addEventListener('click', addManualResearch)
   elements.importCsvBtn.addEventListener('click', importCsv)
   elements.sampleCsvBtn.addEventListener('click', fillSampleCsv)

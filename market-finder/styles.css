@@ -537,6 +537,28 @@ body.flow-auto .controls-panel .panel-heading {
   background: #f8fbff;
 }
 
+.youtube-ocr-box {
+  border-color: #fde68a;
+  background: #fffdf4;
+}
+
+.soft-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: var(--amber);
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.youtube-ocr-box textarea[readonly] {
+  min-height: 132px;
+  background: #fff;
+}
+
 .source-pill-row {
   display: flex;
   flex-wrap: wrap;

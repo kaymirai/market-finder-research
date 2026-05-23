@@ -116,6 +116,17 @@
             }));
             return true;
         }
+        if (request.action === 'CAPTURE_YOUTUBE_OCR') {
+            rememberMarketFinderTab(sender);
+            captureYoutubeOcr(request)
+                .then((response) => sendResponse(response))
+                .catch((error) => sendResponse({
+                ok: false,
+                rows: [],
+                error: error.message,
+            }));
+            return true;
+        }
         if (request.action === 'STOP_MARKET_RESEARCH') {
             marketActive = false;
             marketQueue = [];
@@ -473,6 +484,270 @@
             });
         });
         return result.slice(0, limit);
+    }
+    async function captureYoutubeOcr(request) {
+        var _a, _b;
+        const tabId = await findYoutubeTab();
+        const tab = await getTabById(tabId);
+        if (tab.windowId === undefined)
+            throw new Error('YouTubeタブのウィンドウを確認できませんでした。');
+        await activateTab(tabId);
+        const durationSec = Math.max(5, Math.min(Number(request.durationSec) || 30, 180));
+        const intervalMs = Math.max(500, Math.min(Number(request.intervalMs) || 1000, 5000));
+        const maxFrames = Math.max(1, Math.min(Math.ceil((durationSec * 1000) / intervalMs), 180));
+        const maxKeywords = Math.max(20, Math.min(Number(request.maxKeywords) || 300, 1000));
+        const rows = [];
+        const seen = new Set();
+        const rawFrames = [];
+        let detector = '';
+        let title = '';
+        let lastError = '';
+        for (let frame = 1; frame <= maxFrames && rows.length < maxKeywords; frame += 1) {
+            const currentTab = await getTabById(tabId);
+            const dataUrl = await captureVisibleTabImage((_a = currentTab.windowId) !== null && _a !== void 0 ? _a : tab.windowId);
+            const ocr = await ocrCapturedImageInTab(tabId, dataUrl);
+            if (!ocr.ok) {
+                lastError = ocr.error || 'Chromeの画面OCRが使えませんでした。';
+                break;
+            }
+            detector = ocr.detector || detector;
+            title = ocr.title || title;
+            const frameText = String((_b = ocr.text) !== null && _b !== void 0 ? _b : '').trim();
+            if (frameText)
+                rawFrames.push(frameText);
+            const timestamp = formatOcrTimestamp(ocr.currentTime);
+            extractYoutubeKeywordsFromOcrText(frameText).forEach((keyword) => {
+                const key = keyword.toLowerCase();
+                if (seen.has(key) || rows.length >= maxKeywords)
+                    return;
+                seen.add(key);
+                rows.push({
+                    keyword,
+                    source: 'YouTube OCR',
+                    timestamp,
+                    confidence: detector === 'TextDetector' ? 0.65 : 0.5,
+                    rawText: frameText,
+                    frame,
+                    note: title ? `YouTube: ${title}` : 'YouTube video OCR',
+                });
+            });
+            if (frame < maxFrames && rows.length < maxKeywords)
+                await delay(intervalMs);
+        }
+        focusMarketFinderTab();
+        if (!detector && lastError) {
+            return {
+                ok: false,
+                rows,
+                frames: rawFrames.length,
+                error: `${lastError} ChromeのTextDetectorが無効な環境では、動画内文字の自動OCRはできません。`,
+            };
+        }
+        return {
+            ok: rows.length > 0,
+            rows,
+            frames: rawFrames.length,
+            detector,
+            title,
+            warning: rows.length === 0 ? '文字は読めましたが、キーワードらしい行を抽出できませんでした。動画を大きく表示し、キーワード表が見えている場面で再実行してください。' : '',
+        };
+    }
+    function findYoutubeTab() {
+        return new Promise((resolve, reject) => {
+            chrome.tabs.query({ active: true, currentWindow: true }, (activeTabs) => {
+                const activeTab = activeTabs[0];
+                if ((activeTab === null || activeTab === void 0 ? void 0 : activeTab.id) && isYoutubeUrl(activeTab.url)) {
+                    resolve(activeTab.id);
+                    return;
+                }
+                chrome.tabs.query({}, (tabs) => {
+                    const tab = tabs.find((item) => item.id && isYoutubeUrl(item.url));
+                    if (tab === null || tab === void 0 ? void 0 : tab.id) {
+                        resolve(tab.id);
+                        return;
+                    }
+                    reject(new Error('YouTube動画タブが見つかりません。動画ページを開き、キーワード表が見える状態で再実行してください。'));
+                });
+            });
+        });
+    }
+    function isYoutubeUrl(value) {
+        if (!value)
+            return false;
+        try {
+            const url = new URL(value);
+            return /(^|\.)youtube\.com$/i.test(url.hostname) || /(^|\.)youtu\.be$/i.test(url.hostname);
+        }
+        catch (_a) {
+            return false;
+        }
+    }
+    function getTabById(tabId) {
+        return new Promise((resolve, reject) => {
+            chrome.tabs.get(tabId, (tab) => {
+                var _a;
+                if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                    reject(new Error(((_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message) || 'タブを確認できませんでした。'));
+                    return;
+                }
+                resolve(tab);
+            });
+        });
+    }
+    function captureVisibleTabImage(windowId) {
+        return new Promise((resolve, reject) => {
+            chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
+                var _a;
+                if (chrome.runtime.lastError || !dataUrl) {
+                    reject(new Error(((_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message) || 'YouTube画面をキャプチャできませんでした。YouTubeタブで拡張アイコンを一度クリックしてから再実行してください。'));
+                    return;
+                }
+                resolve(dataUrl);
+            });
+        });
+    }
+    async function ocrCapturedImageInTab(tabId, dataUrl) {
+        var _a;
+        const injection = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: ocrCapturedImageInPage,
+            args: [dataUrl],
+        });
+        const result = (_a = injection[0]) === null || _a === void 0 ? void 0 : _a.result;
+        return result !== null && result !== void 0 ? result : { ok: false, error: 'OCR結果を受け取れませんでした。' };
+    }
+    async function ocrCapturedImageInPage(dataUrl) {
+        var _a, _b;
+        const detectorConstructor = window.TextDetector;
+        if (!detectorConstructor) {
+            return { ok: false, error: 'ChromeのTextDetector OCRが利用できません。' };
+        }
+        const image = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error('キャプチャ画像を読み込めませんでした。'));
+            img.src = dataUrl;
+        });
+        const dpr = window.devicePixelRatio || 1;
+        const video = document.querySelector('video');
+        const rect = video === null || video === void 0 ? void 0 : video.getBoundingClientRect();
+        const imageWidth = image.naturalWidth || image.width;
+        const imageHeight = image.naturalHeight || image.height;
+        let sx = Math.round(imageWidth * 0.04);
+        let sy = Math.round(imageHeight * 0.08);
+        let sw = Math.round(imageWidth * 0.92);
+        let sh = Math.round(imageHeight * 0.78);
+        if (rect && rect.width > 80 && rect.height > 80) {
+            sx = Math.max(0, Math.round(rect.left * dpr));
+            sy = Math.max(0, Math.round(rect.top * dpr));
+            sw = Math.min(imageWidth - sx, Math.round(rect.width * dpr));
+            sh = Math.min(imageHeight - sy, Math.round(rect.height * dpr));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, sw);
+        canvas.height = Math.max(1, sh);
+        const context = canvas.getContext('2d');
+        if (!context)
+            return { ok: false, error: 'OCR用キャンバスを作れませんでした。' };
+        context.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        const detector = new detectorConstructor();
+        const detections = await detector.detect(canvas);
+        const text = detections
+            .map((item) => item.rawValue)
+            .filter((value) => Boolean(value))
+            .join('\n');
+        const currentTime = Number((_a = video === null || video === void 0 ? void 0 : video.currentTime) !== null && _a !== void 0 ? _a : 0);
+        const title = String((_b = document.title) !== null && _b !== void 0 ? _b : '').replace(/\s*-\s*YouTube\s*$/i, '').trim();
+        return {
+            ok: true,
+            text,
+            detector: 'TextDetector',
+            currentTime: Number.isFinite(currentTime) ? currentTime : 0,
+            title,
+            crop: {
+                width: canvas.width,
+                height: canvas.height,
+            },
+        };
+    }
+    function extractYoutubeKeywordsFromOcrText(text) {
+        const ignoredExact = new Set([
+            'youtube',
+            'share',
+            'save',
+            'subscribe',
+            'subscribed',
+            'like',
+            'comments',
+            'replay',
+            'play',
+            'pause',
+            'settings',
+            'full screen',
+            'closed captions',
+            'keyword',
+            'keywords',
+            'etsy',
+            'searches',
+            'competition',
+            'rank',
+            'volume',
+        ]);
+        const ignoredPattern = /\b(?:youtube|subscribe|subscribed|comments?|views?|likes?|share|save|playlist|autoplay|settings|caption|transcript|sponsor|affiliate|download|template|search volume|competition|keyword tool|erank|everbee)\b/i;
+        const seen = new Set();
+        const results = [];
+        String(text !== null && text !== void 0 ? text : '')
+            .split(/\n|\r|•|·|;|\t/)
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .forEach((line) => {
+            const keyword = cleanYoutubeOcrLine(line);
+            const key = keyword.toLowerCase();
+            if (!keyword || seen.has(key))
+                return;
+            if (ignoredExact.has(key) || ignoredPattern.test(keyword))
+                return;
+            if (!/[a-z]/i.test(keyword))
+                return;
+            if (/^[\d\s,.$%+-]+$/.test(keyword))
+                return;
+            if (/https?:|www\.|@/.test(keyword))
+                return;
+            const words = keyword.split(/\s+/).filter(Boolean);
+            if (words.length < 1 || words.length > 7)
+                return;
+            if (keyword.length < 3 || keyword.length > 70)
+                return;
+            if (words.some((word) => word.length > 24))
+                return;
+            seen.add(key);
+            results.push(keyword);
+        });
+        return results;
+    }
+    function cleanYoutubeOcrLine(value) {
+        return String(value !== null && value !== void 0 ? value : '')
+            .replace(/\u00a0/g, ' ')
+            .replace(/[“”]/g, '"')
+            .replace(/[‘’]/g, "'")
+            .replace(/[|_]/g, ' ')
+            .replace(/^[#\s]*\d{1,4}[\).\]:\-\s]+/, '')
+            .replace(/\b(?:top|rank|score|searches|clicks|competition|volume)\b\s*[:=-]?\s*\d[\d,.$%]*/gi, '')
+            .replace(/\d[\d,.$%]*\s*(?:searches|clicks|views|competition|results)\b/gi, '')
+            .replace(/[^a-z0-9\s'&+/-]/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^[^\w]+|[^\w]+$/g, '')
+            .trim()
+            .toLowerCase();
+    }
+    function formatOcrTimestamp(seconds) {
+        const total = Math.max(0, Math.floor(Number(seconds) || 0));
+        const hours = Math.floor(total / 3600);
+        const minutes = Math.floor((total % 3600) / 60);
+        const secs = total % 60;
+        const pad = (value) => String(value).padStart(2, '0');
+        return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`;
     }
     function isUsableResearchUrl(value, allowEtsy = false) {
         if (!value)
