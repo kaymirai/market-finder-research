@@ -145,7 +145,7 @@
             </div>
             <div class="youtube-ocr-steps">
               <div><span>準備</span><strong>YouTubeでキーワード表が見える場面を開く</strong><small>動画を止めてもOK。できれば全画面か大きめ表示。</small></div>
-              <div><span>1</span><strong>下の「1 読み取り開始」を押す</strong><small>30秒間、1秒ごとに画面の文字を読みます。</small></div>
+              <div><span>1</span><strong>下の「1 スクショ取得＋OCR」を押す</strong><small>スクショを自動で撮って、画像を下に残します。</small></div>
               <div><span>2</span><strong>読み取れた語句を確認して追加</strong><small>追加するとStep 2のeRank候補になります。</small></div>
             </div>
             <div class="two-col">
@@ -159,12 +159,13 @@
               </label>
             </div>
             <div class="button-row">
-              <button id="youtubeOcrStartBtn" type="button" class="primary-btn">1 読み取り開始</button>
+              <button id="youtubeOcrStartBtn" type="button" class="primary-btn">1 スクショ取得＋OCR</button>
               <button id="youtubeOcrApplyBtn" type="button" class="ghost-btn">2 Step 2候補へ追加</button>
               <button id="youtubeOcrDownloadBtn" type="button" class="ghost-btn optional-action">CSV保存</button>
             </div>
+            <div id="youtubeOcrFramePreview" class="youtube-ocr-frame-preview" hidden></div>
             <textarea id="youtubeOcrOutput" rows="6" readonly placeholder="読み取れたキーワードがここに出ます。"></textarea>
-            <div id="youtubeOcrStatus" class="inline-status">まずYouTube動画を開き、キーワード表が見える場面にしてから「1 読み取り開始」を押します。</div>
+            <div id="youtubeOcrStatus" class="inline-status">まずYouTube動画を開き、キーワード表が見える場面にしてから「1 スクショ取得＋OCR」を押します。</div>
           </div>
 
           <label class="field advanced-only">
