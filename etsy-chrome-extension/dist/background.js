@@ -153,6 +153,16 @@
         if ((_a = sender.tab) === null || _a === void 0 ? void 0 : _a.id)
             marketFinderTabId = sender.tab.id;
     }
+    function shouldRetryTabEditError(message) {
+        return /tabs cannot be edited right now/i.test(message);
+    }
+    function focusWindowQuietly(windowId) {
+        chrome.windows.update(windowId, { focused: true }, () => {
+            var _a;
+            // Reading lastError prevents harmless focus failures from surfacing in chrome://extensions.
+            const _message = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+        });
+    }
     function focusMarketFinderTab() {
         if (marketFinderTabId === null)
             return;
@@ -161,19 +171,30 @@
                 marketFinderTabId = null;
                 return;
             }
-            if (tab.windowId !== undefined) {
-                chrome.windows.update(tab.windowId, { focused: true });
-            }
-            chrome.tabs.update(tab.id, { active: true });
+            activateTab(tab.id);
         });
     }
-    function activateTab(tabId) {
+    function activateTab(tabId, attempt = 0) {
         return new Promise((resolve) => {
             chrome.tabs.get(tabId, (tab) => {
-                if (!chrome.runtime.lastError && (tab === null || tab === void 0 ? void 0 : tab.windowId) !== undefined) {
-                    chrome.windows.update(tab.windowId, { focused: true });
+                var _a;
+                const getError = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+                if (getError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                    resolve();
+                    return;
+                }
+                if (tab.windowId !== undefined) {
+                    focusWindowQuietly(tab.windowId);
                 }
                 chrome.tabs.update(tabId, { active: true }, () => {
+                    var _a;
+                    const updateError = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+                    if (updateError && shouldRetryTabEditError(updateError) && attempt < 2) {
+                        setTimeout(() => {
+                            activateTab(tabId, attempt + 1).then(resolve);
+                        }, 800);
+                        return;
+                    }
                     setTimeout(resolve, 500);
                 });
             });
@@ -317,6 +338,8 @@
     }
     function closeTabQuietly(tabId) {
         chrome.tabs.remove(tabId, () => {
+            var _a;
+            const _message = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
             // The tab may have been closed by the user. Nothing else to do.
         });
     }
@@ -815,7 +838,9 @@
         if (!item)
             return;
         chrome.tabs.create({ url: item.product_link, active: false }, (tab) => {
-            if (!(tab === null || tab === void 0 ? void 0 : tab.id)) {
+            var _a;
+            const createError = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+            if (createError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
                 scheduleNextImage();
                 return;
             }
@@ -849,6 +874,8 @@
     function closeCurrentImageTabAndContinue() {
         if (activeImageTabId) {
             chrome.tabs.remove(activeImageTabId, () => {
+                var _a;
+                const _message = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
                 activeImageTabId = null;
                 scheduleNextImage();
             });
@@ -970,18 +997,34 @@
     function navigateEverbeeProductAnalytics(tabId, keyword) {
         return new Promise((resolve, reject) => {
             const url = `https://app.everbee.io/product-analytics?search_term=${encodeURIComponent(keyword)}`;
+            updateTabUrlAndActivate(tabId, url)
+                .then(() => waitForTabComplete(tabId))
+                .then(() => setTimeout(resolve, 3500))
+                .catch(reject);
+        });
+    }
+    function updateTabUrlAndActivate(tabId, url, attempt = 0) {
+        return new Promise((resolve, reject) => {
             chrome.tabs.update(tabId, { url, active: true }, (tab) => {
                 var _a;
-                if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
-                    reject(new Error(((_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message) || 'EverBee Product Analyticsを開けませんでした。'));
+                const updateError = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+                if (updateError) {
+                    if (shouldRetryTabEditError(updateError) && attempt < 2) {
+                        setTimeout(() => {
+                            updateTabUrlAndActivate(tabId, url, attempt + 1).then(resolve).catch(reject);
+                        }, 800);
+                        return;
+                    }
+                    reject(new Error(updateError || 'EverBee Product Analyticsを開けませんでした。'));
                     return;
                 }
-                if (tab.windowId !== undefined) {
-                    chrome.windows.update(tab.windowId, { focused: true });
+                if (!(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                    reject(new Error('EverBee Product Analyticsを開けませんでした。'));
+                    return;
                 }
-                waitForTabComplete(tabId)
-                    .then(() => setTimeout(resolve, 3500))
-                    .catch(reject);
+                if (tab.windowId !== undefined)
+                    focusWindowQuietly(tab.windowId);
+                resolve(tab);
             });
         });
     }
@@ -1003,8 +1046,10 @@
     }
     function createEverbeeTab(resolve, reject) {
         chrome.tabs.create({ url: marketEverbeeUrl, active: true }, async (tab) => {
-            if (!(tab === null || tab === void 0 ? void 0 : tab.id)) {
-                reject(new Error('EverBeeタブを開けませんでした。'));
+            var _a;
+            const createError = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+            if (createError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                reject(new Error(createError || 'EverBeeタブを開けませんでした。'));
                 return;
             }
             marketTabId = tab.id;
@@ -1061,8 +1106,10 @@
     }
     function createErankTab(resolve, reject) {
         chrome.tabs.create({ url: marketErankUrl, active: true }, async (tab) => {
-            if (!(tab === null || tab === void 0 ? void 0 : tab.id)) {
-                reject(new Error('eRankタブを開けませんでした。'));
+            var _a;
+            const createError = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+            if (createError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                reject(new Error(createError || 'eRankタブを開けませんでした。'));
                 return;
             }
             erankTabId = tab.id;

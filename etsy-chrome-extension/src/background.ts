@@ -244,6 +244,17 @@
         if (sender.tab?.id) marketFinderTabId = sender.tab.id
     }
 
+    function shouldRetryTabEditError(message: string) {
+        return /tabs cannot be edited right now/i.test(message)
+    }
+
+    function focusWindowQuietly(windowId: number) {
+        chrome.windows.update(windowId, { focused: true }, () => {
+            // Reading lastError prevents harmless focus failures from surfacing in chrome://extensions.
+            const _message = chrome.runtime.lastError?.message
+        })
+    }
+
     function focusMarketFinderTab() {
         if (marketFinderTabId === null) return
         chrome.tabs.get(marketFinderTabId, (tab) => {
@@ -252,20 +263,30 @@
                 return
             }
 
-            if (tab.windowId !== undefined) {
-                chrome.windows.update(tab.windowId, { focused: true })
-            }
-            chrome.tabs.update(tab.id, { active: true })
+            activateTab(tab.id)
         })
     }
 
-    function activateTab(tabId: number) {
+    function activateTab(tabId: number, attempt = 0): Promise<void> {
         return new Promise<void>((resolve) => {
             chrome.tabs.get(tabId, (tab) => {
-                if (!chrome.runtime.lastError && tab?.windowId !== undefined) {
-                    chrome.windows.update(tab.windowId, { focused: true })
+                const getError = chrome.runtime.lastError?.message
+                if (getError || !tab?.id) {
+                    resolve()
+                    return
+                }
+
+                if (tab.windowId !== undefined) {
+                    focusWindowQuietly(tab.windowId)
                 }
                 chrome.tabs.update(tabId, { active: true }, () => {
+                    const updateError = chrome.runtime.lastError?.message
+                    if (updateError && shouldRetryTabEditError(updateError) && attempt < 2) {
+                        setTimeout(() => {
+                            activateTab(tabId, attempt + 1).then(resolve)
+                        }, 800)
+                        return
+                    }
                     setTimeout(resolve, 500)
                 })
             })
@@ -409,6 +430,7 @@
 
     function closeTabQuietly(tabId: number) {
         chrome.tabs.remove(tabId, () => {
+            const _message = chrome.runtime.lastError?.message
             // The tab may have been closed by the user. Nothing else to do.
         })
     }
@@ -936,7 +958,8 @@
         if (!item) return
 
         chrome.tabs.create({ url: item.product_link, active: false }, (tab) => {
-            if (!tab?.id) {
+            const createError = chrome.runtime.lastError?.message
+            if (createError || !tab?.id) {
                 scheduleNextImage()
                 return
             }
@@ -974,6 +997,7 @@
     function closeCurrentImageTabAndContinue() {
         if (activeImageTabId) {
             chrome.tabs.remove(activeImageTabId, () => {
+                const _message = chrome.runtime.lastError?.message
                 activeImageTabId = null
                 scheduleNextImage()
             })
@@ -1106,19 +1130,34 @@
     function navigateEverbeeProductAnalytics(tabId: number, keyword: string) {
         return new Promise<void>((resolve, reject) => {
             const url = `https://app.everbee.io/product-analytics?search_term=${encodeURIComponent(keyword)}`
+            updateTabUrlAndActivate(tabId, url)
+                .then(() => waitForTabComplete(tabId))
+                .then(() => setTimeout(resolve, 3500))
+                .catch(reject)
+        })
+    }
+
+    function updateTabUrlAndActivate(tabId: number, url: string, attempt = 0): Promise<chrome.tabs.Tab> {
+        return new Promise((resolve, reject) => {
             chrome.tabs.update(tabId, { url, active: true }, (tab) => {
-                if (chrome.runtime.lastError || !tab?.id) {
-                    reject(new Error(chrome.runtime.lastError?.message || 'EverBee Product Analyticsを開けませんでした。'))
+                const updateError = chrome.runtime.lastError?.message
+                if (updateError) {
+                    if (shouldRetryTabEditError(updateError) && attempt < 2) {
+                        setTimeout(() => {
+                            updateTabUrlAndActivate(tabId, url, attempt + 1).then(resolve).catch(reject)
+                        }, 800)
+                        return
+                    }
+                    reject(new Error(updateError || 'EverBee Product Analyticsを開けませんでした。'))
+                    return
+                }
+                if (!tab?.id) {
+                    reject(new Error('EverBee Product Analyticsを開けませんでした。'))
                     return
                 }
 
-                if (tab.windowId !== undefined) {
-                    chrome.windows.update(tab.windowId, { focused: true })
-                }
-
-                waitForTabComplete(tabId)
-                    .then(() => setTimeout(resolve, 3500))
-                    .catch(reject)
+                if (tab.windowId !== undefined) focusWindowQuietly(tab.windowId)
+                resolve(tab)
             })
         })
     }
@@ -1142,8 +1181,9 @@
 
     function createEverbeeTab(resolve: (tabId: number) => void, reject: (error: Error) => void) {
         chrome.tabs.create({ url: marketEverbeeUrl, active: true }, async (tab) => {
-            if (!tab?.id) {
-                reject(new Error('EverBeeタブを開けませんでした。'))
+            const createError = chrome.runtime.lastError?.message
+            if (createError || !tab?.id) {
+                reject(new Error(createError || 'EverBeeタブを開けませんでした。'))
                 return
             }
 
@@ -1206,8 +1246,9 @@
 
     function createErankTab(resolve: (tabId: number) => void, reject: (error: Error) => void) {
         chrome.tabs.create({ url: marketErankUrl, active: true }, async (tab) => {
-            if (!tab?.id) {
-                reject(new Error('eRankタブを開けませんでした。'))
+            const createError = chrome.runtime.lastError?.message
+            if (createError || !tab?.id) {
+                reject(new Error(createError || 'eRankタブを開けませんでした。'))
                 return
             }
 
