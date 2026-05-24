@@ -92,7 +92,6 @@ const elements = {
   trendStatus: document.querySelector('#trendStatus'),
   searchSeedCount: document.querySelector('#searchSeedCount'),
   searchSeedList: document.querySelector('#searchSeedList'),
-  searchSeedApplyBtn: document.querySelector('#searchSeedApplyBtn'),
   searchSeedStatus: document.querySelector('#searchSeedStatus'),
   broadQueryInput: document.querySelector('#broadQueryInput'),
   broadBuildQueriesBtn: document.querySelector('#broadBuildQueriesBtn'),
@@ -1026,20 +1025,17 @@ function renderSearchSeedRows() {
     elements.searchSeedCount.textContent = '未読込'
     elements.searchSeedList.innerHTML = '<div class="empty-state small">検索種データを読み込めませんでした。</div>'
     elements.searchSeedStatus.textContent = state.searchSeedError
-    elements.searchSeedApplyBtn.disabled = true
     return
   }
 
   if (!state.searchSeedLoaded) {
     elements.searchSeedCount.textContent = '読込中'
     elements.searchSeedList.innerHTML = '<div class="empty-state small">検索数順データを読み込んでいます。</div>'
-    elements.searchSeedApplyBtn.disabled = true
     return
   }
 
   const rows = searchSeedRowsForCurrentCategory(SEARCH_SEED_PREVIEW_LIMIT)
   elements.searchSeedCount.textContent = `${state.searchSeedRows.length}件`
-  elements.searchSeedApplyBtn.disabled = rows.length === 0
   if (rows.length === 0) {
     elements.searchSeedList.innerHTML = '<div class="empty-state small">この商品に近い種ワードがありません。商品を変えるか、流行語を手入力してください。</div>'
     elements.searchSeedStatus.textContent = '検索数順データは読み込み済みですが、今の商品に合う候補が少なめです。'
@@ -1058,7 +1054,7 @@ function renderSearchSeedRows() {
       </div>
     </div>
   `).join('')
-  elements.searchSeedStatus.textContent = `検索数が多い順に${rows.length}件を表示中。ボタンを押すとStep 2候補に使います。`
+  elements.searchSeedStatus.textContent = `検索数が多い順に${rows.length}件を表示中。上の「1 ここを押して候補を作る」で自動的に使います。`
 }
 
 function appendSearchSeedRowsToTrendScout(options = {}) {
@@ -1071,20 +1067,6 @@ function appendSearchSeedRowsToTrendScout(options = {}) {
     capturedAt,
   }))
   return appendTrendScoutCandidates(candidates)
-}
-
-function applySearchSeeds() {
-  state.lastTrendRunStartedAt = new Date().toISOString()
-  const added = appendSearchSeedRowsToTrendScout()
-  generateCandidates()
-  const made = state.candidates.length
-  if (added === 0 && made === 0) {
-    elements.searchSeedStatus.textContent = '追加できる検索種ワードがありませんでした。商品を変えて試してください。'
-    setTrendStatus('検索数順データから候補を作れませんでした。商品を変えて試してください。', 'warn')
-    return
-  }
-  elements.searchSeedStatus.textContent = `検索数順データから${added}件を追加し、Step 2に${made}件の候補を作りました。`
-  setTrendStatus(`検索数順データを使ってStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`, 'ready')
 }
 
 function renderCandidates() {
@@ -3074,7 +3056,6 @@ function bindEvents() {
   elements.trendSampleBtn.addEventListener('click', fillTrendSample)
   elements.trendAutoBtn.addEventListener('click', collectTrendScoutTerms)
   elements.trendApplyBtn.addEventListener('click', applyTrendScoutTerms)
-  elements.searchSeedApplyBtn.addEventListener('click', applySearchSeeds)
   elements.addResearchBtn.addEventListener('click', addManualResearch)
   elements.importCsvBtn.addEventListener('click', importCsv)
   elements.sampleCsvBtn.addEventListener('click', fillSampleCsv)

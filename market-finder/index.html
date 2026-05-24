@@ -121,19 +121,18 @@
           </label>
 
           <div class="start-action-box">
-            <button id="trendAutoBtn" type="button" class="primary-btn full-width">1 おすすめ自動探索をはじめる</button>
-            <div id="trendStatus" class="inline-status">商品を選んだら、1のボタンを押します。見つかった語句からStep 2の候補を作ります。</div>
+            <button id="trendAutoBtn" type="button" class="primary-btn full-width">1 ここを押して候補を作る</button>
+            <div id="trendStatus" class="inline-status">押すボタンはここだけです。検索数順データも自動で使って、Step 2の候補を作ります。</div>
           </div>
 
           <div class="paste-box compact-box search-seed-box">
             <div class="mini-heading">
-              <span>検索数が多い種ワード</span>
+              <span>需要の入口ワード（自動で使います）</span>
               <span id="searchSeedCount" class="soft-pill">読み込み中</span>
             </div>
-            <p class="box-help">スクショから作った882件のデータを、検索数が多い順に使います。売上確定ではないので、次にeRankとEverBeeで確認します。</p>
+            <p class="box-help">ここは見るだけです。上の「1 ここを押して候補を作る」を押すと、検索数が多いワードを材料として自動で使います。ここに出た語句は最終候補ではありません。</p>
             <div id="searchSeedList" class="search-seed-list"></div>
-            <button id="searchSeedApplyBtn" type="button" class="ghost-btn full-width">検索数順からStep 2候補を作る</button>
-            <div id="searchSeedStatus" class="inline-status">商品を選ぶと、近い種ワードを上に表示します。</div>
+            <div id="searchSeedStatus" class="inline-status">商品を選ぶと、近い入口ワードを表示します。操作は不要です。</div>
           </div>
 
           <div class="paste-box compact-box trend-scout-box advanced-only">
