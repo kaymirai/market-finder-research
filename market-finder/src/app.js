@@ -141,6 +141,8 @@ const elements = {
   delayInput: document.querySelector('#delayInput'),
   startExtensionBtn: document.querySelector('#startExtensionBtn'),
   stopExtensionBtn: document.querySelector('#stopExtensionBtn'),
+  quickExtensionBadge: document.querySelector('#quickExtensionBadge'),
+  quickExtensionStatus: document.querySelector('#quickExtensionStatus'),
   extensionBadge: document.querySelector('#extensionBadge'),
   extensionStatus: document.querySelector('#extensionStatus'),
   progressModal: document.querySelector('#progressModal'),
@@ -2892,25 +2894,39 @@ function handleExtensionMessage(event) {
 }
 
 function updateExtensionBadge() {
-  elements.extensionBadge.textContent = state.extensionConnected ? '接続済み' : '未接続'
-  elements.extensionBadge.className = `status-badge ${state.extensionConnected ? 'ready' : 'warn'}`
+  const label = state.extensionConnected ? '接続済み' : '未接続'
+  const className = `status-badge ${state.extensionConnected ? 'ready' : 'warn'}`
+  elements.extensionBadge.textContent = label
+  elements.extensionBadge.className = className
+  if (elements.quickExtensionBadge) {
+    elements.quickExtensionBadge.textContent = label
+    elements.quickExtensionBadge.className = className
+  }
 }
 
 function renderExtensionState() {
   updateExtensionBadge()
   const extensionState = state.extensionState
   if (!extensionState) {
-    elements.extensionStatus.textContent = state.extensionConnected
+    const message = state.extensionConnected
       ? 'Chrome拡張と接続しました。'
       : 'Chrome拡張の再読み込み後に使えます。'
+    elements.extensionStatus.textContent = message
+    if (elements.quickExtensionStatus) {
+      elements.quickExtensionStatus.textContent = state.extensionConnected
+        ? '接続済みです。eRankやEverBeeの自動取得を使えます。'
+        : '未接続です。実Chromeで開き、Chrome拡張をReloadしてからページを再読み込みしてください。'
+    }
     renderProgressModal(extensionState)
     return
   }
 
   const done = extensionState.results?.length ?? 0
-  elements.extensionStatus.textContent = extensionState.active
+  const message = extensionState.active
     ? `調査中: ${extensionState.currentKeyword || '-'} / 完了 ${done}件 / 残り ${extensionState.remaining}件`
     : `待機中 / 完了 ${done}件`
+  elements.extensionStatus.textContent = message
+  if (elements.quickExtensionStatus) elements.quickExtensionStatus.textContent = message
   renderProgressModal(extensionState)
 }
 

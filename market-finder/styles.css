@@ -532,6 +532,23 @@ body.flow-auto .controls-panel .panel-heading {
   padding: 12px;
 }
 
+.connection-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #ccfbf1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.connection-strip > span:first-child {
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .trend-scout-box {
   border-color: #bfdbfe;
   background: #f8fbff;
