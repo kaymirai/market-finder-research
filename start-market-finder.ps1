@@ -7,7 +7,8 @@ $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Port = 4173
-$AppUrl = "http://127.0.0.1:$Port/market-finder/"
+$AppPath = "http://127.0.0.1:$Port/market-finder/"
+$AppUrl = "${AppPath}?v=$(Get-Date -Format 'yyyyMMddHHmmss')"
 $ResearchUrls = @(
   'https://erank.com/tools/keyword-tool',
   'https://app.everbee.io/product-analytics',
@@ -16,7 +17,7 @@ $ResearchUrls = @(
 
 function Test-MarketFinderServer {
   try {
-    $response = Invoke-WebRequest -UseBasicParsing -Uri $AppUrl -TimeoutSec 2
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $AppPath -TimeoutSec 2
     return [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
   } catch {
     return $false
