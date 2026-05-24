@@ -483,20 +483,54 @@ function searchSeedLooksUseful(row) {
   return keywordClass(keyword).action === 'candidate'
 }
 
+function searchSeedOpportunityScore(row) {
+  const searches = Number(row.searches) || 0
+  const results = Number(row.results) || 0
+  const ratio = Number(row.searchResultRatio) || 0
+  const searchScore = Math.min(35, Math.log10(searches + 1) * 8)
+  const ratioScore = Math.min(50, Math.log10(1 + (ratio * 100)) * 25)
+  const resultScore = results <= 0
+    ? 0
+    : results <= 5000
+      ? 15
+      : results <= 30000
+        ? 12
+        : results <= 100000
+          ? 8
+          : results <= 500000
+            ? 3
+            : -8
+  return Math.max(0, Math.min(100, Math.round(searchScore + ratioScore + resultScore)))
+}
+
+function rankSearchSeedRows(rows) {
+  return [...rows].sort((left, right) => (
+    searchSeedOpportunityScore(right) - searchSeedOpportunityScore(left)
+    || (Number(right.searchResultRatio) || 0) - (Number(left.searchResultRatio) || 0)
+    || (Number(right.searches) || 0) - (Number(left.searches) || 0)
+    || left.keyword.localeCompare(right.keyword, 'en')
+  ))
+}
+
 function searchSeedRowsForCurrentCategory(limit = SEARCH_SEED_PICK_LIMIT) {
   const matching = state.searchSeedRows
     .filter((row) => searchSeedMatchesCategory(row))
     .filter((row) => searchSeedLooksUseful(row))
   const fallback = state.searchSeedRows
     .filter((row) => searchSeedLooksUseful(row))
-    .slice(0, limit)
-  return (matching.length > 0 ? matching : fallback).slice(0, limit)
+  return rankSearchSeedRows(matching.length > 0 ? matching : fallback).slice(0, limit)
 }
 
 function formatCompactNumber(value) {
   const number = Number(value)
   if (!Number.isFinite(number)) return '-'
   return number.toLocaleString('en-US')
+}
+
+function formatSeedRatio(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toFixed(number >= 1 ? 2 : 3).replace(/\.?0+$/, '')
 }
 
 function parseTrendScoutEntries(value) {
@@ -602,7 +636,7 @@ function trendSeedQuality(entry) {
   if (detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/)).length > 0) return { usable: false, score: 0, reason: 'リスク語句を含みます' }
 
   const source = String(entry?.source ?? '').toLowerCase()
-  const sourceScore = source.includes('erank') ? 34 : source.includes('search volume') ? 30 : source.includes('pinterest') ? 28 : source.includes('google') ? 24 : 18
+  const sourceScore = source.includes('erank') ? 34 : (source.includes('search volume') || source.includes('search opportunity')) ? 30 : source.includes('pinterest') ? 28 : source.includes('google') ? 24 : 18
   const specificityScore = words.reduce((score, word) => {
     if (TREND_GENERIC_WORDS.has(word) || TREND_MONTH_WORDS.has(word) || /^\d+$/.test(word)) return score
     return score + (word.length >= 7 ? 10 : 6)
@@ -1046,15 +1080,15 @@ function renderSearchSeedRows() {
     <div class="search-seed-item">
       <div>
         <strong>${escapeHtml(row.keyword)}</strong>
-        <span>商品数 ${formatCompactNumber(row.results)} / 比率 ${row.searchResultRatio ?? '-'}</span>
+        <span>Search ${formatCompactNumber(row.searches)} / 商品数 ${formatCompactNumber(row.results)} / 率 ${formatSeedRatio(row.searchResultRatio)}</span>
       </div>
       <div class="search-seed-score">
-        <small>Search</small>
-        <b>${formatCompactNumber(row.searches)}</b>
+        <small>入口</small>
+        <b>${searchSeedOpportunityScore(row)}</b>
       </div>
     </div>
   `).join('')
-  elements.searchSeedStatus.textContent = `検索数が多い順に${rows.length}件を表示中。上の「1 ここを押して候補を作る」で自動的に使います。`
+  elements.searchSeedStatus.textContent = `検索数と率のバランスがよい順に${rows.length}件を表示中。上の「1 ここを押して候補を作る」で自動的に使います。`
 }
 
 function appendSearchSeedRowsToTrendScout(options = {}) {
@@ -1063,7 +1097,7 @@ function appendSearchSeedRowsToTrendScout(options = {}) {
   const capturedAt = state.lastTrendRunStartedAt || new Date().toISOString()
   const candidates = rows.map((row) => ({
     keyword: row.keyword,
-    source: `Search Volume Seed searches ${row.searches}`,
+    source: `Search Opportunity Seed searches ${row.searches} ratio ${row.searchResultRatio ?? '-'}`,
     capturedAt,
   }))
   return appendTrendScoutCandidates(candidates)
