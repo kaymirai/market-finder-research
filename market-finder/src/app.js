@@ -1064,7 +1064,7 @@ function renderSearchSeedRows() {
 
   if (!state.searchSeedLoaded) {
     elements.searchSeedCount.textContent = '読込中'
-    elements.searchSeedList.innerHTML = '<div class="empty-state small">検索数順データを読み込んでいます。</div>'
+    elements.searchSeedList.innerHTML = '<div class="empty-state small">入口ワードデータを読み込んでいます。</div>'
     return
   }
 
@@ -1072,7 +1072,7 @@ function renderSearchSeedRows() {
   elements.searchSeedCount.textContent = `${state.searchSeedRows.length}件`
   if (rows.length === 0) {
     elements.searchSeedList.innerHTML = '<div class="empty-state small">この商品に近い種ワードがありません。商品を変えるか、流行語を手入力してください。</div>'
-    elements.searchSeedStatus.textContent = '検索数順データは読み込み済みですが、今の商品に合う候補が少なめです。'
+    elements.searchSeedStatus.textContent = '入口ワードデータは読み込み済みですが、今の商品に合う候補が少なめです。'
     return
   }
 
@@ -2456,7 +2456,7 @@ async function collectTrendScoutTerms() {
     done: 0,
     message: state.extensionConnected
       ? '取得中です。eRank / Pinterest / Google を開いて、見えている語句を拾っています。'
-      : 'Chrome連携はまだ使えません。まず商品条件と入力済みの流行語だけで候補を作ります。',
+      : '外部サイトの自動取得は未接続です。商品条件と入口ワードだけで候補を作ります。',
   })
   setTrendStatus(state.progress.message, 'working')
   const searchSeedAdded = appendSearchSeedRowsToTrendScout()
@@ -2466,8 +2466,8 @@ async function collectTrendScoutTerms() {
       generateCandidates()
       const made = state.candidates.length
       const message = made > 0
-        ? `Chrome連携はまだ使えませんが、検索数順データ${searchSeedAdded}件と商品条件からStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
-        : 'Chrome連携はまだ使えません。Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。'
+        ? `候補作成は完了しました。外部サイトの自動取得は未接続ですが、入口ワード${searchSeedAdded}件と商品条件からStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
+        : '候補を作れませんでした。外部サイトの自動取得も使う場合は、Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。'
       updateProgressModal({
         current: made > 0 ? 'Step 2へ候補を反映' : '候補なし',
         done: 2,
@@ -2511,9 +2511,9 @@ async function collectTrendScoutTerms() {
     let variant = 'ready'
     if (added > 0) {
       const note = errors.length > 0 ? ` 取得できなかったページ: ${errors.slice(0, 2).join(' / ')}` : ''
-      message = `完了しました。検索数順データ${searchSeedAdded}件と外部の流行語${added}件を使い、Step 2に${state.candidates.length}件の候補を作りました。次は「検索されているか見る」です。${note}`
+      message = `完了しました。入口ワード${searchSeedAdded}件と外部の流行語${added}件を使い、Step 2に${state.candidates.length}件の候補を作りました。次は「検索されているか見る」です。${note}`
     } else if (trends.length > 0 && state.candidates.length > 0) {
-      message = `完了しました。検索数順データ${searchSeedAdded}件と既存の流行語からStep 2に${state.candidates.length}件の候補を作りました。`
+      message = `完了しました。入口ワード${searchSeedAdded}件と既存の流行語からStep 2に${state.candidates.length}件の候補を作りました。`
     } else if (errors.length > 0) {
       message = `完了しましたが、自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`
       variant = 'warn'
