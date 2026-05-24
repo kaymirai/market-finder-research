@@ -9,9 +9,6 @@
         erankUrl?: string
         limit?: number
         delayMs?: number
-        durationSec?: number
-        intervalMs?: number
-        maxKeywords?: number
     }
 
     const PAGE_SOURCE = 'market-finder-page'
@@ -92,14 +89,6 @@
                 return
             }
 
-            if (request.action === 'CAPTURE_YOUTUBE_OCR') {
-                const response = await sendRuntimeMessage('CAPTURE_YOUTUBE_OCR', {
-                    durationSec: request.durationSec,
-                    intervalMs: request.intervalMs,
-                    maxKeywords: request.maxKeywords,
-                })
-                postToPage({ action: 'YOUTUBE_OCR_RESULTS', requestId: request.requestId, ok: true, response })
-            }
         } catch (error) {
             postToPage({
                 action: 'MARKET_ERROR',

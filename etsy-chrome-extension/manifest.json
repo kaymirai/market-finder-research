@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "EtsyMirai Research Helper",
-  "version": "1.18",
+  "version": "1.19",
   "description": "Market Finderのキーワード調査とEtsy商品画像取得を補助します。",
   "permissions": [
     "activeTab",
@@ -10,9 +10,6 @@
     "scripting"
   ],
   "host_permissions": [
-    "<all_urls>",
-    "https://www.youtube.com/*",
-    "https://youtube.com/*",
     "https://*.etsy.com/*",
     "https://*.everbee.io/*",
     "https://erank.com/*",

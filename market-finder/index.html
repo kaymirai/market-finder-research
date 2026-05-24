@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260524-1">
+    <link rel="stylesheet" href="./styles.css?v=20260524-2">
   </head>
   <body>
     <main class="app-shell">
@@ -147,36 +147,6 @@
             </div>
             <textarea id="trendScoutInput" rows="4" placeholder="例: summerween&#10;book nook&#10;pickleball mom&#10;western birthday"></textarea>
             <button id="trendApplyBtn" type="button" class="ghost-btn full-width" data-optional="任意">候補を作る</button>
-          </div>
-
-          <div class="paste-box compact-box youtube-ocr-box">
-            <div class="mini-heading">
-              <span>YouTube動画の文字を拾う</span>
-              <span class="soft-pill">今回用</span>
-            </div>
-            <div class="youtube-ocr-steps">
-              <div><span>準備</span><strong>YouTubeでキーワード表が見える場面を開く</strong><small>動画を止めてもOK。できれば全画面か大きめ表示。</small></div>
-              <div><span>1</span><strong>下の「1 スクショ取得＋OCR」を押す</strong><small>スクショを自動で撮って、画像を下に残します。</small></div>
-              <div><span>2</span><strong>読み取れた語句を確認して追加</strong><small>追加するとStep 2のeRank候補になります。</small></div>
-            </div>
-            <div class="two-col">
-              <label class="field">
-                <span>読む秒数（そのままでOK）</span>
-                <input id="youtubeOcrDurationInput" type="number" min="5" max="180" value="30">
-              </label>
-              <label class="field">
-                <span>間隔 秒（そのままでOK）</span>
-                <input id="youtubeOcrIntervalInput" type="number" min="0.5" max="5" step="0.5" value="1">
-              </label>
-            </div>
-            <div class="button-row">
-              <button id="youtubeOcrStartBtn" type="button" class="primary-btn">1 スクショ取得＋OCR</button>
-              <button id="youtubeOcrApplyBtn" type="button" class="ghost-btn">2 Step 2候補へ追加</button>
-              <button id="youtubeOcrDownloadBtn" type="button" class="ghost-btn optional-action">CSV保存</button>
-            </div>
-            <div id="youtubeOcrFramePreview" class="youtube-ocr-frame-preview" hidden></div>
-            <textarea id="youtubeOcrOutput" rows="6" readonly placeholder="読み取れたキーワードがここに出ます。"></textarea>
-            <div id="youtubeOcrStatus" class="inline-status">まずYouTube動画を開き、キーワード表が見える場面にしてから「1 スクショ取得＋OCR」を押します。</div>
           </div>
 
           <label class="field advanced-only">
@@ -579,8 +549,6 @@
         </div>
       </div>
     </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="./src/app.js?v=20260524-1"></script>
+    <script type="module" src="./src/app.js?v=20260524-2"></script>
   </body>
 </html>

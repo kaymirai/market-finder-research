@@ -55,8 +55,6 @@ const state = {
   selectedResultKey: '',
   recentTrendKeywords: new Set(),
   lastTrendRunStartedAt: '',
-  youtubeOcrRows: [],
-  youtubeOcrFrames: [],
   searchSeedRows: [],
   searchSeedLoaded: false,
   searchSeedError: '',
@@ -96,14 +94,6 @@ const elements = {
   searchSeedList: document.querySelector('#searchSeedList'),
   searchSeedApplyBtn: document.querySelector('#searchSeedApplyBtn'),
   searchSeedStatus: document.querySelector('#searchSeedStatus'),
-  youtubeOcrDurationInput: document.querySelector('#youtubeOcrDurationInput'),
-  youtubeOcrIntervalInput: document.querySelector('#youtubeOcrIntervalInput'),
-  youtubeOcrStartBtn: document.querySelector('#youtubeOcrStartBtn'),
-  youtubeOcrApplyBtn: document.querySelector('#youtubeOcrApplyBtn'),
-  youtubeOcrDownloadBtn: document.querySelector('#youtubeOcrDownloadBtn'),
-  youtubeOcrFramePreview: document.querySelector('#youtubeOcrFramePreview'),
-  youtubeOcrOutput: document.querySelector('#youtubeOcrOutput'),
-  youtubeOcrStatus: document.querySelector('#youtubeOcrStatus'),
   broadQueryInput: document.querySelector('#broadQueryInput'),
   broadBuildQueriesBtn: document.querySelector('#broadBuildQueriesBtn'),
   broadStartBtn: document.querySelector('#broadStartBtn'),
@@ -311,8 +301,6 @@ function persistMarketFinderState() {
       limit: elements.limitInput.value,
       seedKeywords: elements.seedInput.value,
       trendScoutKeywords: elements.trendScoutInput.value,
-      youtubeOcrDuration: elements.youtubeOcrDurationInput.value,
-      youtubeOcrInterval: elements.youtubeOcrIntervalInput.value,
       customRiskTerms: elements.riskInput.value,
       targets: selectedTargets(),
       broadQueries: elements.broadQueryInput.value,
@@ -330,7 +318,6 @@ function persistMarketFinderState() {
       broadSnippetKeys: Array.from(state.broadSnippetKeys),
       selectedResultKey: state.selectedResultKey,
       seoPlan: state.seoPlan,
-      youtubeOcrRows: state.youtubeOcrRows,
     },
   }
 
@@ -359,8 +346,6 @@ function restorePersistedState() {
   setInputValue(elements.limitInput, form.limit)
   setInputValue(elements.seedInput, form.seedKeywords)
   setInputValue(elements.trendScoutInput, form.trendScoutKeywords)
-  setInputValue(elements.youtubeOcrDurationInput, form.youtubeOcrDuration)
-  setInputValue(elements.youtubeOcrIntervalInput, form.youtubeOcrInterval)
   setInputValue(elements.riskInput, form.customRiskTerms)
   setInputValue(elements.broadQueryInput, form.broadQueries)
   setInputValue(elements.researchJobInput, form.researchJob)
@@ -376,7 +361,6 @@ function restorePersistedState() {
   state.broadSnippetKeys = new Set(Array.isArray(savedState.broadSnippetKeys) ? savedState.broadSnippetKeys : [])
   state.selectedResultKey = String(savedState.selectedResultKey ?? '')
   state.seoPlan = savedState.seoPlan ?? null
-  state.youtubeOcrRows = Array.isArray(savedState.youtubeOcrRows) ? savedState.youtubeOcrRows : []
 
   return persisted
 }
@@ -619,7 +603,7 @@ function trendSeedQuality(entry) {
   if (detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/)).length > 0) return { usable: false, score: 0, reason: 'リスク語句を含みます' }
 
   const source = String(entry?.source ?? '').toLowerCase()
-  const sourceScore = source.includes('erank') ? 34 : source.includes('youtube') ? 30 : source.includes('pinterest') ? 28 : source.includes('google') ? 24 : 18
+  const sourceScore = source.includes('erank') ? 34 : source.includes('search volume') ? 30 : source.includes('pinterest') ? 28 : source.includes('google') ? 24 : 18
   const specificityScore = words.reduce((score, word) => {
     if (TREND_GENERIC_WORDS.has(word) || TREND_MONTH_WORDS.has(word) || /^\d+$/.test(word)) return score
     return score + (word.length >= 7 ? 10 : 6)
@@ -956,363 +940,6 @@ function csvCell(value) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`
 }
 
-function setYoutubeOcrStatus(message, variant = '') {
-  if (!elements.youtubeOcrStatus) return
-  elements.youtubeOcrStatus.textContent = message
-  elements.youtubeOcrStatus.className = `inline-status${variant ? ` ${variant}` : ''}`
-}
-
-function renderYoutubeOcrRows() {
-  if (!elements.youtubeOcrOutput) return
-  elements.youtubeOcrOutput.value = state.youtubeOcrRows
-    .map((row) => row.keyword)
-    .join('\n')
-}
-
-function renderYoutubeOcrFrames() {
-  if (!elements.youtubeOcrFramePreview) return
-  if (!state.youtubeOcrFrames.length) {
-    elements.youtubeOcrFramePreview.hidden = true
-    elements.youtubeOcrFramePreview.innerHTML = ''
-    return
-  }
-
-  elements.youtubeOcrFramePreview.hidden = false
-  elements.youtubeOcrFramePreview.innerHTML = state.youtubeOcrFrames.slice(0, 6).map((frame, index) => `
-    <figure>
-      <img src="${escapeHtml(frame.dataUrl)}" alt="YouTube screenshot ${index + 1}">
-      <figcaption>${escapeHtml(frame.timestamp || `frame ${frame.frame ?? index + 1}`)}</figcaption>
-    </figure>
-  `).join('')
-}
-
-function youtubeOcrDurationSec() {
-  return Math.max(5, Math.min(Number(elements.youtubeOcrDurationInput?.value) || 30, 180))
-}
-
-function youtubeOcrIntervalMs() {
-  return Math.max(500, Math.min((Number(elements.youtubeOcrIntervalInput?.value) || 1) * 1000, 5000))
-}
-
-async function startYoutubeOcrCapture() {
-  const durationSec = youtubeOcrDurationSec()
-  const intervalMs = youtubeOcrIntervalMs()
-  const total = Math.max(1, Math.ceil((durationSec * 1000) / intervalMs))
-  const originalLabel = elements.youtubeOcrStartBtn.textContent
-
-  elements.youtubeOcrStartBtn.disabled = true
-  elements.youtubeOcrStartBtn.textContent = 'スクショ取得中...'
-  state.youtubeOcrFrames = []
-  renderYoutubeOcrFrames()
-  state.lastTrendRunStartedAt = new Date().toISOString()
-  state.recentTrendKeywords = new Set()
-  openProgressModal({
-    mode: 'trend',
-    title: 'YouTube OCR取り込み',
-    total,
-    message: 'YouTube動画タブを前面にして、画面の文字を読み取っています。',
-  })
-  setYoutubeOcrStatus('読み取り中です。キーワード表が見える状態を保ってください。', 'working')
-
-  try {
-    const result = await requestExtension('CAPTURE_YOUTUBE_OCR', {
-      durationSec,
-      intervalMs,
-      maxKeywords: 500,
-    }, durationSec * 1000 + 45000)
-    const response = result.response ?? {}
-    const directRows = Array.isArray(response.rows) ? response.rows : []
-    const fallbackFrames = Array.isArray(response.fallbackFrames) ? response.fallbackFrames : []
-    state.youtubeOcrFrames = fallbackFrames
-    renderYoutubeOcrFrames()
-    const fallbackRows = directRows.length === 0 && fallbackFrames.length > 0
-      ? await runTesseractFallbackFrames(fallbackFrames)
-      : []
-    const rows = [...directRows, ...fallbackRows]
-    state.youtubeOcrRows = mergeYoutubeOcrRows(state.youtubeOcrRows, rows)
-    renderYoutubeOcrRows()
-    persistMarketFinderState()
-
-    const message = rows.length > 0
-      ? `${rows.length}件の語句を読み取りました。確認して「2 Step 2候補へ追加」を押してください。`
-      : response.error || response.warning || 'YouTube OCRで語句を取得できませんでした。'
-    updateProgressModal({
-      current: response.detector ? `OCR: ${response.detector}` : 'OCR確認',
-      done: total,
-      message,
-    })
-    completeProgressModal(message)
-    setYoutubeOcrStatus(message, rows.length > 0 ? 'ready' : 'warn')
-  } catch (error) {
-    const message = friendlyExtensionError(error)
-    failProgress(message)
-    setYoutubeOcrStatus(message, 'warn')
-  } finally {
-    elements.youtubeOcrStartBtn.disabled = false
-    elements.youtubeOcrStartBtn.textContent = originalLabel
-  }
-}
-
-async function runTesseractFallbackFrames(frames) {
-  const tesseract = window.Tesseract
-  if (!tesseract?.recognize) {
-    setYoutubeOcrStatus('Chrome標準OCRが使えないため無料OCRへ切り替えたいのですが、Tesseract.jsを読み込めませんでした。ネット接続を確認してページを再読み込みしてください。', 'warn')
-    return []
-  }
-
-  const rows = []
-  const seen = new Set()
-  const limitedFrames = frames.slice(0, 12)
-  for (let index = 0; index < limitedFrames.length; index += 1) {
-    const frame = limitedFrames[index]
-    updateProgressModal({
-      current: `無料OCR ${index + 1}/${limitedFrames.length}`,
-      done: index,
-      total: limitedFrames.length,
-      message: 'Chrome標準OCRが使えないため、無料OCRで画像を読み取っています。少し時間がかかります。',
-    })
-    try {
-      const ocrImages = await prepareYoutubeOcrImages(frame.dataUrl)
-      for (const ocrImage of ocrImages) {
-        const result = await tesseract.recognize(ocrImage.dataUrl, 'eng')
-        const text = result?.data?.text ?? ''
-        extractYoutubeKeywordsFromText(text).forEach((keyword) => {
-          const key = keyword.toLowerCase()
-          if (seen.has(key)) return
-          seen.add(key)
-          rows.push({
-            keyword,
-            source: 'YouTube OCR',
-            timestamp: frame.timestamp || '',
-            confidence: Math.max(0.35, Math.min(0.92, (result?.data?.confidence ?? 45) / 100)),
-            rawText: text,
-            frame: frame.frame ?? index + 1,
-            note: frame.title ? `YouTube: ${frame.title} / ${ocrImage.label}` : `YouTube video OCR / ${ocrImage.label}`,
-          })
-        })
-        if (rows.length >= 80) break
-      }
-    } catch (error) {
-      console.warn('[Market Finder] Tesseract OCR failed', error)
-    }
-  }
-
-  updateProgressModal({
-    current: '無料OCR完了',
-    done: limitedFrames.length,
-    total: limitedFrames.length,
-    message: `${rows.length}件の語句を無料OCRで読み取りました。`,
-  })
-  return rows
-}
-
-async function prepareYoutubeOcrImages(dataUrl) {
-  const image = await loadImage(dataUrl)
-  const result = []
-  const keywordCrop = createOcrCrop(dataUrl, image, {
-    label: 'keyword column',
-    x: 0.07,
-    y: 0.04,
-    width: 0.42,
-    height: 0.92,
-    scale: 3,
-    threshold: true,
-  })
-  if (keywordCrop) result.push(keywordCrop)
-
-  const wideCrop = createOcrCrop(dataUrl, image, {
-    label: 'left table',
-    x: 0,
-    y: 0.04,
-    width: 0.54,
-    height: 0.92,
-    scale: 2.4,
-    threshold: true,
-  })
-  if (wideCrop) result.push(wideCrop)
-
-  return result.length ? result : [{ label: 'original', dataUrl }]
-}
-
-function loadImage(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('OCR画像を読み込めませんでした。'))
-    image.src = dataUrl
-  })
-}
-
-function createOcrCrop(sourceDataUrl, image, options) {
-  const sourceWidth = image.naturalWidth || image.width
-  const sourceHeight = image.naturalHeight || image.height
-  if (!sourceWidth || !sourceHeight) return null
-
-  const sx = Math.max(0, Math.floor(sourceWidth * options.x))
-  const sy = Math.max(0, Math.floor(sourceHeight * options.y))
-  const sw = Math.min(sourceWidth - sx, Math.floor(sourceWidth * options.width))
-  const sh = Math.min(sourceHeight - sy, Math.floor(sourceHeight * options.height))
-  if (sw <= 0 || sh <= 0) return null
-
-  const scale = options.scale || 2
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.floor(sw * scale)
-  canvas.height = Math.floor(sh * scale)
-  const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) return { label: options.label || 'original', dataUrl: sourceDataUrl }
-
-  context.imageSmoothingEnabled = false
-  context.fillStyle = '#fff'
-  context.fillRect(0, 0, canvas.width, canvas.height)
-  context.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
-
-  if (options.threshold) {
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
-    const data = imageData.data
-    for (let index = 0; index < data.length; index += 4) {
-      const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114
-      const value = gray > 180 ? 255 : 0
-      data[index] = value
-      data[index + 1] = value
-      data[index + 2] = value
-      data[index + 3] = 255
-    }
-    context.putImageData(imageData, 0, 0)
-  }
-
-  return {
-    label: options.label || 'crop',
-    dataUrl: canvas.toDataURL('image/png'),
-  }
-}
-
-function extractYoutubeKeywordsFromText(text) {
-  const ignoredExact = new Set([
-    'youtube',
-    'share',
-    'save',
-    'subscribe',
-    'subscribed',
-    'like',
-    'comments',
-    'replay',
-    'play',
-    'pause',
-    'settings',
-    'keyword',
-    'keywords',
-    'etsy',
-    'searches',
-    'competition',
-    'rank',
-    'volume',
-  ])
-  const ignoredPattern = /\b(?:youtube|subscribe|subscribed|comments?|views?|likes?|share|save|playlist|autoplay|settings|caption|transcript|sponsor|affiliate|download|template|search volume|competition|keyword tool|erank|everbee)\b/i
-  const seen = new Set()
-  const results = []
-
-  String(text ?? '')
-    .split(/\n|\r|•|·|;|\t/)
-    .map((line) => cleanYoutubeOcrLine(line))
-    .filter(Boolean)
-    .forEach((keyword) => {
-      const key = keyword.toLowerCase()
-      if (seen.has(key)) return
-      if (ignoredExact.has(key) || ignoredPattern.test(keyword)) return
-      if (!/[a-z]/i.test(keyword)) return
-      if (/^[\d\s,.$%+-]+$/.test(keyword)) return
-      if (/https?:|www\.|@/.test(keyword)) return
-      const words = keyword.split(/\s+/).filter(Boolean)
-      if (words.length < 1 || words.length > 7) return
-      if (keyword.length < 3 || keyword.length > 70) return
-      if (words.some((word) => word.length > 24)) return
-      seen.add(key)
-      results.push(keyword)
-    })
-
-  return results
-}
-
-function cleanYoutubeOcrLine(value) {
-  return String(value ?? '')
-    .replace(/\u00a0/g, ' ')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[|_]/g, ' ')
-    .replace(/^[#\s]*\d{1,4}[\).\]:\-\s]+/, '')
-    .replace(/^copy\s+/i, '')
-    .replace(/\bcopy\s+/gi, '')
-    .replace(/\b(?:top|rank|score|searches|clicks|competition|volume)\b\s*[:=-]?\s*\d[\d,.$%]*/gi, '')
-    .replace(/\d[\d,.$%]*\s*(?:searches|clicks|views|competition|results)\b/gi, '')
-    .replace(/[^a-z0-9\s'&+/-]/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^[^\w]+|[^\w]+$/g, '')
-    .trim()
-    .toLowerCase()
-}
-
-function mergeYoutubeOcrRows(currentRows, nextRows) {
-  const seen = new Set()
-  return [...currentRows, ...nextRows]
-    .map((row) => ({
-      keyword: normalizePhrase(row.keyword),
-      source: row.source || 'YouTube OCR',
-      timestamp: row.timestamp || '',
-      confidence: row.confidence ?? '',
-      rawText: row.rawText || '',
-      frame: row.frame ?? '',
-      note: row.note || '',
-    }))
-    .filter((row) => row.keyword)
-    .filter((row) => {
-      if (seen.has(row.keyword)) return false
-      seen.add(row.keyword)
-      return true
-    })
-}
-
-function applyYoutubeOcrToTrendScout() {
-  if (state.youtubeOcrRows.length === 0) {
-    setYoutubeOcrStatus('先にYouTubeから文字を拾ってください。', 'warn')
-    return
-  }
-
-  const added = appendTrendScoutCandidates(state.youtubeOcrRows.map((row) => ({
-    keyword: row.keyword,
-    source: 'YouTube OCR',
-  })))
-  if (added === 0) {
-    setYoutubeOcrStatus('追加できる新しい語句がありませんでした。すでに追加済み、または広すぎる語句です。', 'warn')
-    return
-  }
-
-  generateCandidates()
-  setYoutubeOcrStatus(`${added}件を流行語欄へ追加し、Step 2候補を作りました。`, 'ready')
-  setTrendStatus(`YouTube OCRから${added}件を追加しました。次は「検索されているか見る」です。`, 'ready')
-}
-
-function exportYoutubeOcrCsv() {
-  if (state.youtubeOcrRows.length === 0) {
-    setYoutubeOcrStatus('保存するYouTube OCR結果がありません。', 'warn')
-    return
-  }
-
-  const header = ['Keyword', 'Source', 'Timestamp', 'Confidence', 'Frame', 'Notes', 'Raw Text']
-  const lines = state.youtubeOcrRows.map((row) => [
-    row.keyword,
-    row.source,
-    row.timestamp,
-    row.confidence,
-    row.frame,
-    row.note,
-    row.rawText,
-  ].map(csvCell).join(','))
-  const date = new Date().toISOString().slice(0, 10)
-  downloadTextFile(`market-finder-youtube-ocr-${date}.csv`, `\ufeff${[header.map(csvCell).join(','), ...lines].join('\n')}`, 'text/csv;charset=utf-8')
-  setYoutubeOcrStatus(`${state.youtubeOcrRows.length}件のYouTube OCR結果をCSV保存しました。`, 'ready')
-}
-
 function appendBroadListingRows(rows) {
   const nextLines = []
 
@@ -1440,7 +1067,7 @@ function appendSearchSeedRowsToTrendScout(options = {}) {
   const capturedAt = state.lastTrendRunStartedAt || new Date().toISOString()
   const candidates = rows.map((row) => ({
     keyword: row.keyword,
-    source: `YouTube Search Seed searches ${row.searches}`,
+    source: `Search Volume Seed searches ${row.searches}`,
     capturedAt,
   }))
   return appendTrendScoutCandidates(candidates)
@@ -2168,8 +1795,6 @@ function renderAll() {
   renderCandidates()
   renderErankResults()
   renderResultsTable()
-  renderYoutubeOcrRows()
-  renderYoutubeOcrFrames()
   renderSeoPlan()
   persistMarketFinderState()
 }
@@ -2966,8 +2591,8 @@ function closeAdvancedModal() {
 
 function friendlyExtensionError(error) {
   const message = error instanceof Error ? error.message : String(error ?? '')
-  if (/(?:<all_urls>|activeTab).*permission is required|either the .*activeTab.*permission is required/i.test(message)) {
-    return 'Chrome拡張の画面キャプチャ権限が不足しています。拡張をReloadして、バージョン1.18になっているか確認してからMarket Finderページも再読み込みしてください。'
+  if (/activeTab.*permission is required|either the .*activeTab.*permission is required/i.test(message)) {
+    return 'Chrome拡張の画面キャプチャ権限が不足しています。拡張をReloadして、バージョン1.19になっているか確認してからMarket Finderページも再読み込みしてください。'
   }
   if (/extension context invalidated/i.test(message)) {
     return 'Chrome拡張を更新したあと、ページ側の接続が古くなっています。Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。'
@@ -3438,8 +3063,6 @@ function bindEvents() {
     elements.reachBucketInput,
     elements.bestSellerBucketInput,
     elements.simpleSeoKeywordsInput,
-    elements.youtubeOcrDurationInput,
-    elements.youtubeOcrIntervalInput,
   ].forEach((input) => {
     input.addEventListener('input', persistMarketFinderState)
   })
@@ -3452,9 +3075,6 @@ function bindEvents() {
   elements.trendAutoBtn.addEventListener('click', collectTrendScoutTerms)
   elements.trendApplyBtn.addEventListener('click', applyTrendScoutTerms)
   elements.searchSeedApplyBtn.addEventListener('click', applySearchSeeds)
-  elements.youtubeOcrStartBtn.addEventListener('click', startYoutubeOcrCapture)
-  elements.youtubeOcrApplyBtn.addEventListener('click', applyYoutubeOcrToTrendScout)
-  elements.youtubeOcrDownloadBtn.addEventListener('click', exportYoutubeOcrCsv)
   elements.addResearchBtn.addEventListener('click', addManualResearch)
   elements.importCsvBtn.addEventListener('click', importCsv)
   elements.sampleCsvBtn.addEventListener('click', fillSampleCsv)
