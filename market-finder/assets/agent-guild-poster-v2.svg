@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Market Finder AI Guild Pixel Character Roster</title>
+  <desc id="desc">Retro game pixel character roster for 19 Market Finder AI agents.</desc>
+  <defs>
+    <style>
+      .bg{fill:#111821}.frame{fill:#203040;stroke:#66ffe2;stroke-width:6;shape-rendering:crispEdges}.inner{fill:#233344;stroke:#07101a;stroke-width:4;shape-rendering:crispEdges}
+      .card{fill:#fbf3d8;stroke:#07101a;stroke-width:4;shape-rendering:crispEdges}.mint{fill:#e8faee}.blue{fill:#e8f3ff}.dark{fill:#122032;stroke:#66ffe2;stroke-width:4;shape-rendering:crispEdges}
+      .box{fill:#dfeaf3;stroke:#07101a;stroke-width:4;shape-rendering:crispEdges}.px{shape-rendering:crispEdges}.skin{fill:#f0bd84}.skin2{fill:#ffd39a}.eye{fill:#0c1320}
+      .title{font-family:"MS Gothic","Yu Gothic",Meiryo,monospace;font-size:52px;font-weight:900;fill:#fff0b8;letter-spacing:0}.sub{font-family:"MS Gothic","Yu Gothic",Meiryo,monospace;font-size:24px;font-weight:900;fill:#94ffe8;letter-spacing:0}
+      .name{font-family:"MS Gothic","Yu Gothic",Meiryo,monospace;font-size:30px;font-weight:900;fill:#08111c;letter-spacing:0}.job{font-family:"MS Gothic","Yu Gothic",Meiryo,monospace;font-size:21px;font-weight:900;fill:#007963;letter-spacing:0}.role{font-family:"MS Gothic","Yu Gothic",Meiryo,monospace;font-size:17px;font-weight:800;fill:#26384a;letter-spacing:0}.small{font-family:"MS Gothic","Yu Gothic",Meiryo,monospace;font-size:20px;font-weight:900;fill:#fff0b8;letter-spacing:0}
+    </style>
+    <g id="head">
+      <rect x="22" y="20" width="58" height="50" class="skin"/>
+      <rect x="34" y="36" width="8" height="8" class="eye"/>
+      <rect x="64" y="36" width="8" height="8" class="eye"/>
+    </g>
+  </defs>
+
+  <rect width="1920" height="1080" class="bg"/>
+  <rect x="22" y="22" width="1876" height="1036" class="frame"/>
+  <rect x="42" y="42" width="1836" height="996" class="inner"/>
+  <text x="72" y="98" class="title">MARKET FINDER AI GUILD</text>
+  <text x="72" y="136" class="sub">game pixel character roster / 19人の専門AIエージェント</text>
+  <rect x="1514" y="58" width="318" height="56" class="dark"/>
+  <text x="1548" y="94" class="small">RETRO RPG TEAM</text>
+
+  <g transform="translate(52 164)">
+    <rect width="440" height="164" class="card"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="30" y="4" width="42" height="14" fill="#f7df9d"/><use href="#head"/><rect x="24" y="70" width="54" height="52" fill="#fff"/><rect x="6" y="78" width="24" height="38" fill="#fff"/><rect x="78" y="78" width="24" height="38" fill="#fff"/><rect x="94" y="36" width="10" height="60" fill="#79552e"/><rect x="84" y="30" width="30" height="22" fill="#ffd84d"/></g>
+    <text x="168" y="42" class="name">Epicurus</text><text x="168" y="73" class="job">体験設計士</text><text x="168" y="104" class="role">迷わない導線を作る</text><text x="168" y="129" class="role">ランタン案内人</text>
+  </g>
+
+  <g transform="translate(520 164)">
+    <rect width="440" height="164" class="card mint"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="18" y="2" width="70" height="20" fill="#1f693a"/><rect x="8" y="22" width="90" height="16" fill="#2d9254"/><use href="#head"/><rect x="22" y="70" width="58" height="52" fill="#30b86e"/><rect x="2" y="78" width="22" height="38" fill="#19794b"/><rect x="82" y="22" width="8" height="78" fill="#82592d"/><rect x="90" y="22" width="24" height="8" fill="#58d984"/></g>
+    <text x="168" y="42" class="name">Carson</text><text x="168" y="73" class="job">リスク監視官</text><text x="168" y="104" class="role">危険ワードを発見</text><text x="168" y="129" class="role">緑のレンジャー</text>
+  </g>
+
+  <g transform="translate(988 164)">
+    <rect width="440" height="164" class="card blue"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 18)"><rect x="40" y="0" width="26" height="22" fill="#8b5be8"/><rect x="26" y="22" width="54" height="16" fill="#8b5be8"/><rect x="12" y="38" width="82" height="12" fill="#5736b3"/><use href="#head" transform="translate(0 26)"/><rect x="30" y="96" width="52" height="36" fill="#7751d8"/><rect x="90" y="78" width="30" height="30" fill="#c6b36e"/><rect x="98" y="86" width="14" height="14" fill="#223143"/></g>
+    <text x="168" y="42" class="name">Schrodinger</text><text x="168" y="73" class="job">不確実性調査官</text><text x="168" y="104" class="role">未取得や謎を検証</text><text x="168" y="129" class="role">箱を持つ魔法研究者</text>
+  </g>
+
+  <g transform="translate(1456 164)">
+    <rect width="440" height="164" class="card"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="24" y="2" width="58" height="16" fill="#f2c13d"/><use href="#head"/><rect x="42" y="52" width="24" height="8" fill="#7b3f27"/><rect x="28" y="70" width="58" height="52" fill="#3158bd"/><rect x="84" y="22" width="32" height="64" fill="#fff6b8"/><rect x="90" y="32" width="20" height="6" fill="#3158bd"/><rect x="90" y="48" width="20" height="6" fill="#3158bd"/></g>
+    <text x="168" y="42" class="name">Erdos</text><text x="168" y="73" class="job">数値戦略家</text><text x="168" y="104" class="role">スコアと閾値を設計</text><text x="168" y="129" class="role">数式の魔導書使い</text>
+  </g>
+
+  <g transform="translate(52 352)">
+    <rect width="440" height="164" class="card blue"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="18" y="0" width="70" height="26" fill="#171622"/><use href="#head"/><rect x="12" y="70" width="76" height="52" fill="#11131d"/><rect x="94" y="22" width="8" height="74" fill="#91713c"/><rect x="80" y="40" width="36" height="8" fill="#d8ba58"/><rect x="78" y="50" width="14" height="20" fill="#d8ba58"/><rect x="104" y="50" width="14" height="20" fill="#d8ba58"/></g>
+    <text x="168" y="42" class="name">Parfit</text><text x="168" y="73" class="job">権利審査官</text><text x="168" y="104" class="role">商標・著作権を防ぐ</text><text x="168" y="129" class="role">天秤の裁定者</text>
+  </g>
+
+  <g transform="translate(520 352)">
+    <rect width="440" height="164" class="card mint"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="22" y="0" width="64" height="18" fill="#c9a046"/><use href="#head"/><rect x="26" y="70" width="56" height="52" fill="#42a56e"/><rect x="88" y="18" width="32" height="74" fill="#fff6b8"/><rect x="94" y="28" width="14" height="12" fill="#76d98b"/><rect x="94" y="58" width="20" height="6" fill="#142132"/></g>
+    <text x="168" y="42" class="name">Linnaeus</text><text x="168" y="73" class="job">分類博士</text><text x="168" y="104" class="role">語句をカテゴリ化</text><text x="168" y="129" class="role">図鑑を持つ整理役</text>
+  </g>
+
+  <g transform="translate(988 352)">
+    <rect width="440" height="164" class="card"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="24" y="0" width="58" height="18" fill="#587be2"/><use href="#head"/><rect x="18" y="70" width="72" height="52" fill="#5277d8"/><rect x="92" y="24" width="28" height="28" fill="#8effff"/><rect x="86" y="64" width="36" height="34" fill="#243454"/></g>
+    <text x="168" y="42" class="name">Plato</text><text x="168" y="73" class="job">構想設計者</text><text x="168" y="104" class="role">全体像を描く</text><text x="168" y="129" class="role">青マントの思想家</text>
+  </g>
+
+  <g transform="translate(1456 352)">
+    <rect width="440" height="164" class="card mint"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="24" y="0" width="58" height="18" fill="#c7522d"/><use href="#head"/><rect x="28" y="70" width="56" height="52" fill="#f17833"/><rect x="92" y="20" width="12" height="66" fill="#7a5036"/><rect x="76" y="22" width="42" height="18" fill="#7a5036"/><rect x="102" y="82" width="28" height="12" fill="#999"/></g>
+    <text x="168" y="42" class="name">Kuhn</text><text x="168" y="73" class="job">戦略改革者</text><text x="168" y="104" class="role">前提を壊して見直す</text><text x="168" y="129" class="role">ハンマーの革新者</text>
+  </g>
+
+  <g transform="translate(52 540)">
+    <rect width="440" height="164" class="card"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="20" y="0" width="66" height="18" fill="#70431f"/><use href="#head"/><rect x="24" y="70" width="60" height="52" fill="#be4d50"/><rect x="88" y="24" width="32" height="72" fill="#fff6b8"/><rect x="94" y="34" width="20" height="6" fill="#be4d50"/><rect x="94" y="50" width="20" height="6" fill="#42a56e"/></g>
+    <text x="168" y="42" class="name">Aristotle</text><text x="168" y="73" class="job">仕様整理官</text><text x="168" y="104" class="role">流れと根拠を整理</text><text x="168" y="129" class="role">巻物を持つ先生</text>
+  </g>
+
+  <g transform="translate(520 540)">
+    <rect width="440" height="164" class="card blue"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="20" y="0" width="66" height="18" fill="#7b55d8"/><use href="#head"/><rect x="28" y="70" width="56" height="52" fill="#2d5797"/><rect x="86" y="42" width="40" height="34" fill="#142235"/><rect x="94" y="50" width="24" height="14" fill="#66ffe2"/><rect x="88" y="0" width="16" height="10" fill="#d8b65f"/></g>
+    <text x="168" y="42" class="name">Lovelace</text><text x="168" y="73" class="job">自動化技師</text><text x="168" y="104" class="role">Chrome連携を実装</text><text x="168" y="129" class="role">ゴーグル発明家</text>
+  </g>
+
+  <g transform="translate(988 540)">
+    <rect width="440" height="164" class="card"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="22" y="0" width="64" height="18" fill="#2b4c88"/><use href="#head"/><rect x="18" y="70" width="72" height="52" fill="#293f86"/><rect x="98" y="8" width="10" height="88" fill="#ffe769"/><rect x="84" y="20" width="38" height="10" fill="#ffe769"/></g>
+    <text x="168" y="42" class="name">Sagan</text><text x="168" y="73" class="job">初心者ナビ</text><text x="168" y="104" class="role">難しい操作を説明</text><text x="168" y="129" class="role">星の杖の語り部</text>
+  </g>
+
+  <g transform="translate(1456 540)">
+    <rect width="440" height="164" class="card mint"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="22" y="0" width="64" height="18" fill="#9a263b"/><use href="#head"/><rect x="26" y="70" width="58" height="52" fill="#bc3349"/><rect x="100" y="8" width="12" height="88" fill="#e42446"/><rect x="84" y="26" width="42" height="12" fill="#e42446"/><rect x="88" y="62" width="28" height="26" fill="#fff6b8"/></g>
+    <text x="168" y="42" class="name">Popper</text><text x="168" y="73" class="job">反証テスター</text><text x="168" y="104" class="role">本当に正しいか検証</text><text x="168" y="129" class="role">赤い検証騎士</text>
+  </g>
+
+  <g transform="translate(52 728)">
+    <rect width="440" height="164" class="card blue"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="22" y="0" width="64" height="18" fill="#7b51ba"/><use href="#head"/><rect x="24" y="70" width="64" height="52" fill="#7550c8"/><rect x="88" y="28" width="34" height="34" fill="#d6f6ff"/><rect x="96" y="36" width="18" height="18" fill="#436bd2"/></g>
+    <text x="168" y="42" class="name">Anscombe</text><text x="168" y="73" class="job">意図確認係</text><text x="168" y="104" class="role">目的と操作意味を確認</text><text x="168" y="129" class="role">羅針盤の聞き役</text>
+  </g>
+
+  <g transform="translate(520 728)">
+    <rect width="440" height="164" class="card"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="22" y="0" width="64" height="18" fill="#2e73d8"/><use href="#head"/><rect x="24" y="70" width="64" height="52" fill="#2f94e8"/><rect x="98" y="8" width="10" height="88" fill="#5ff3ff"/><rect x="84" y="28" width="42" height="10" fill="#5ff3ff"/><rect x="82" y="56" width="40" height="8" fill="#fff36d"/></g>
+    <text x="168" y="42" class="name">Ampere</text><text x="168" y="73" class="job">接続技師</text><text x="168" y="104" class="role">通信・速度を監視</text><text x="168" y="129" class="role">電気マントの技師</text>
+  </g>
+
+  <g transform="translate(988 728)">
+    <rect width="440" height="164" class="card mint"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="22" y="0" width="64" height="18" fill="#6541a0"/><use href="#head"/><rect x="18" y="70" width="72" height="52" fill="#7155a9"/><rect x="92" y="12" width="10" height="84" fill="#63d8ff"/><rect x="112" y="12" width="10" height="84" fill="#ffb65f"/></g>
+    <text x="168" y="42" class="name">Hegel</text><text x="168" y="73" class="job">方針統合者</text><text x="168" y="104" class="role">対立案をまとめる</text><text x="168" y="129" class="role">双剣の調停者</text>
+  </g>
+
+  <g transform="translate(1456 728)">
+    <rect width="440" height="164" class="card"/><rect x="18" y="20" width="122" height="124" class="box"/>
+    <g class="px" transform="translate(28 26)"><rect x="22" y="0" width="64" height="18" fill="#765437"/><use href="#head"/><rect x="24" y="70" width="64" height="52" fill="#8b6a3c"/><rect x="90" y="24" width="34" height="66" fill="#fff6b8"/><rect x="96" y="34" width="20" height="6" fill="#007c68"/><rect x="96" y="52" width="20" height="6" fill="#007c68"/></g>
+    <text x="168" y="42" class="name">James</text><text x="168" y="73" class="job">実用レビュー</text><text x="168" y="104" class="role">現場で使えるか判定</text><text x="168" y="129" class="role">作業エプロン監督</text>
+  </g>
+
+  <g transform="translate(52 916)">
+    <rect width="440" height="124" class="card mint"/><rect x="18" y="14" width="96" height="96" class="box"/>
+    <g class="px" transform="translate(30 22) scale(.75)"><rect x="22" y="0" width="64" height="18" fill="#d6a824"/><use href="#head"/><rect x="24" y="70" width="64" height="52" fill="#ddb12c"/><rect x="92" y="20" width="8" height="76" fill="#91713c"/><rect x="80" y="38" width="32" height="8" fill="#d8ba58"/></g>
+    <text x="138" y="38" class="name">Mill</text><text x="138" y="68" class="job">優先順位参謀</text><text x="138" y="98" class="role">効果とコストで並べる</text>
+  </g>
+
+  <g transform="translate(520 916)">
+    <rect width="440" height="124" class="card"/><rect x="18" y="14" width="96" height="96" class="box"/>
+    <g class="px" transform="translate(30 22) scale(.75)"><rect x="22" y="0" width="64" height="18" fill="#df374e"/><use href="#head"/><rect x="24" y="70" width="64" height="52" fill="#e13d54"/><rect x="98" y="14" width="12" height="84" fill="#df1f3e"/><rect x="112" y="38" width="28" height="40" fill="#3158bd"/></g>
+    <text x="138" y="38" class="name">Pauli</text><text x="138" y="68" class="job">厳格レビュー</text><text x="138" y="98" class="role">甘い根拠を止める</text>
+  </g>
+
+  <g transform="translate(988 916)">
+    <rect width="440" height="124" class="card blue"/><rect x="18" y="14" width="96" height="96" class="box"/>
+    <g class="px" transform="translate(30 22) scale(.75)"><rect x="22" y="0" width="64" height="18" fill="#4a3aa0"/><use href="#head"/><rect x="24" y="70" width="64" height="52" fill="#4e62bd"/><rect x="86" y="26" width="54" height="10" fill="#172132"/><rect x="130" y="16" width="18" height="28" fill="#9ff5df"/></g>
+    <text x="138" y="38" class="name">Galileo</text><text x="138" y="68" class="job">画面観測者</text><text x="138" y="98" class="role">実画面でズレを確認</text>
+  </g>
+
+  <g transform="translate(1456 916)">
+    <rect width="440" height="124" class="dark"/>
+    <text x="30" y="42" class="small">TEAM FLOW</text>
+    <text x="30" y="75" class="sub" font-size="20">調査 → 反証 → 実装 → UI</text>
+    <text x="30" y="104" class="sub" font-size="20">19 agents, one research guild.</text>
+  </g>
+</svg>
