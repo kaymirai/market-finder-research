@@ -1,0 +1,331 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Market Finder AI Guild - 19 Agents</title>
+  <desc id="desc">A retro pixel-art style 16:9 team poster introducing 19 AI agents with names, jobs, and roles.</desc>
+  <defs>
+    <style>
+      .bg { fill: #17202a; }
+      .panel { fill: #243243; stroke: #5ef2c7; stroke-width: 4; shape-rendering: crispEdges; }
+      .card { fill: #f7f1da; stroke: #131a24; stroke-width: 4; shape-rendering: crispEdges; }
+      .card-alt { fill: #eaf8ee; }
+      .card-blue { fill: #e8f2ff; }
+      .shadow { fill: #0b1018; opacity: .45; }
+      .pixel { shape-rendering: crispEdges; }
+      .title { font-family: "MS Gothic", "Yu Gothic", Meiryo, monospace; font-size: 52px; font-weight: 900; fill: #fff4c2; letter-spacing: 0; }
+      .subtitle { font-family: "MS Gothic", "Yu Gothic", Meiryo, monospace; font-size: 25px; font-weight: 700; fill: #9ff5df; letter-spacing: 0; }
+      .name { font-family: "MS Gothic", "Yu Gothic", Meiryo, monospace; font-size: 31px; font-weight: 900; fill: #122033; letter-spacing: 0; }
+      .job { font-family: "MS Gothic", "Yu Gothic", Meiryo, monospace; font-size: 22px; font-weight: 900; fill: #007d68; letter-spacing: 0; }
+      .role { font-family: "MS Gothic", "Yu Gothic", Meiryo, monospace; font-size: 19px; font-weight: 700; fill: #314255; letter-spacing: 0; }
+      .chip { fill: #122033; }
+      .chip-text { font-family: "MS Gothic", "Yu Gothic", Meiryo, monospace; font-size: 18px; font-weight: 900; fill: #fff4c2; letter-spacing: 0; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1920" height="1080"/>
+  <rect x="28" y="26" width="1864" height="1028" class="panel"/>
+  <rect x="44" y="42" width="1832" height="996" fill="#1d2a39" stroke="#0b1018" stroke-width="4" class="pixel"/>
+
+  <text x="74" y="98" class="title">MARKET FINDER AI GUILD</text>
+  <text x="74" y="136" class="subtitle">19人の専門AIエージェントが、Etsyリサーチを数字・UI・自動化・リスクの視点で強化する</text>
+  <rect x="1538" y="62" width="282" height="52" class="chip pixel"/>
+  <text x="1570" y="96" class="chip-text">RETRO RPG TEAM</text>
+
+  <!-- row 1 -->
+  <g transform="translate(52 166)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card pixel"/>
+    <g class="pixel" transform="translate(24 30)">
+      <rect x="16" y="0" width="48" height="16" fill="#f3d8a0"/>
+      <rect x="8" y="16" width="64" height="48" fill="#ffd9a6"/>
+      <rect x="20" y="28" width="8" height="8" fill="#122033"/><rect x="52" y="28" width="8" height="8" fill="#122033"/>
+      <rect x="16" y="64" width="48" height="48" fill="#ffffff"/>
+      <rect x="0" y="70" width="16" height="34" fill="#ffffff"/><rect x="64" y="70" width="16" height="34" fill="#ffffff"/>
+      <rect x="86" y="20" width="10" height="56" fill="#755c32"/><rect x="78" y="14" width="26" height="18" fill="#ffd85c"/>
+    </g>
+    <text x="126" y="46" class="name">Epicurus</text>
+    <text x="126" y="80" class="job">体験設計士</text>
+    <text x="126" y="113" class="role">迷わず進める導線を作る</text>
+    <text x="126" y="140" class="role">白いケープの案内人</text>
+  </g>
+
+  <g transform="translate(520 166)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-alt pixel"/>
+    <g class="pixel" transform="translate(24 26)">
+      <rect x="16" y="0" width="48" height="18" fill="#245c38"/>
+      <rect x="8" y="18" width="64" height="48" fill="#f4c696"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="12" y="66" width="56" height="50" fill="#2fb36d"/>
+      <rect x="0" y="72" width="16" height="42" fill="#1b7f4c"/><rect x="64" y="72" width="16" height="42" fill="#1b7f4c"/>
+      <rect x="88" y="16" width="10" height="74" fill="#7d5a2e"/><rect x="80" y="16" width="26" height="10" fill="#2fb36d"/>
+    </g>
+    <text x="126" y="46" class="name">Carson</text>
+    <text x="126" y="80" class="job">リスク監視官</text>
+    <text x="126" y="113" class="role">危険ワードと市場の違和感を発見</text>
+    <text x="126" y="140" class="role">緑のレンジャー</text>
+  </g>
+
+  <g transform="translate(988 166)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-blue pixel"/>
+    <g class="pixel" transform="translate(24 24)">
+      <rect x="24" y="0" width="32" height="16" fill="#7a55d6"/><rect x="16" y="16" width="48" height="16" fill="#7a55d6"/><rect x="8" y="32" width="64" height="10" fill="#4e35a6"/>
+      <rect x="8" y="42" width="64" height="44" fill="#f0c59a"/>
+      <rect x="20" y="54" width="8" height="8" fill="#122033"/><rect x="52" y="54" width="8" height="8" fill="#122033"/>
+      <rect x="16" y="86" width="48" height="34" fill="#7a55d6"/>
+      <rect x="84" y="72" width="34" height="34" fill="#d8c89b"/><rect x="92" y="80" width="18" height="18" fill="#1d2a39"/>
+    </g>
+    <text x="126" y="46" class="name">Schrodinger</text>
+    <text x="126" y="80" class="job">不確実性調査官</text>
+    <text x="126" y="113" class="role">未取得・謎エラーを検証</text>
+    <text x="126" y="140" class="role">箱を持つ魔法研究者</text>
+  </g>
+
+  <g transform="translate(1456 166)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="14" y="0" width="52" height="18" fill="#f2c34d"/><rect x="8" y="18" width="64" height="46" fill="#f2c49c"/>
+      <rect x="18" y="30" width="10" height="8" fill="#122033"/><rect x="52" y="30" width="10" height="8" fill="#122033"/><rect x="30" y="46" width="20" height="8" fill="#6b3d28"/>
+      <rect x="14" y="64" width="54" height="48" fill="#3156b7"/>
+      <rect x="84" y="20" width="44" height="58" fill="#fff4c2"/><rect x="90" y="30" width="32" height="6" fill="#3156b7"/><rect x="90" y="44" width="32" height="6" fill="#3156b7"/>
+    </g>
+    <text x="126" y="46" class="name">Erdos</text>
+    <text x="126" y="80" class="job">数値戦略家</text>
+    <text x="126" y="113" class="role">スコアと閾値を設計する</text>
+    <text x="126" y="140" class="role">数式の魔導書を持つ数学者</text>
+  </g>
+
+  <!-- row 2 -->
+  <g transform="translate(52 354)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-blue pixel"/>
+    <g class="pixel" transform="translate(24 26)">
+      <rect x="10" y="0" width="60" height="24" fill="#1b1722"/><rect x="8" y="24" width="64" height="44" fill="#d8ae8a"/>
+      <rect x="20" y="36" width="8" height="8" fill="#122033"/><rect x="52" y="36" width="8" height="8" fill="#122033"/>
+      <rect x="8" y="68" width="64" height="48" fill="#14151d"/>
+      <rect x="84" y="18" width="8" height="74" fill="#9c8145"/><rect x="72" y="32" width="32" height="8" fill="#dcbf62"/><rect x="70" y="42" width="12" height="18" fill="#dcbf62"/><rect x="96" y="42" width="12" height="18" fill="#dcbf62"/>
+    </g>
+    <text x="126" y="46" class="name">Parfit</text>
+    <text x="126" y="80" class="job">権利審査官</text>
+    <text x="126" y="113" class="role">商標・著作権リスクを防ぐ</text>
+    <text x="126" y="140" class="role">黒ローブの裁定者</text>
+  </g>
+
+  <g transform="translate(520 354)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-alt pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="12" y="0" width="56" height="18" fill="#c5a04d"/><rect x="8" y="18" width="64" height="46" fill="#f0c59a"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="12" y="64" width="56" height="48" fill="#3b9f6d"/>
+      <rect x="84" y="14" width="52" height="74" fill="#fff4c2"/><rect x="92" y="24" width="14" height="10" fill="#7bcf8f"/><rect x="112" y="42" width="14" height="10" fill="#5aaee8"/><rect x="92" y="60" width="34" height="6" fill="#122033"/>
+    </g>
+    <text x="126" y="46" class="name">Linnaeus</text>
+    <text x="126" y="80" class="job">分類博士</text>
+    <text x="126" y="113" class="role">キーワードをカテゴリ化する</text>
+    <text x="126" y="140" class="role">図鑑を持つ整理役</text>
+  </g>
+
+  <g transform="translate(988 354)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card pixel"/>
+    <g class="pixel" transform="translate(24 26)">
+      <rect x="14" y="0" width="52" height="20" fill="#5277d8"/><rect x="8" y="20" width="64" height="46" fill="#ecc29a"/>
+      <rect x="20" y="32" width="8" height="8" fill="#122033"/><rect x="52" y="32" width="8" height="8" fill="#122033"/>
+      <rect x="6" y="66" width="68" height="50" fill="#5277d8"/>
+      <rect x="88" y="18" width="32" height="32" fill="#7ef5ff"/><rect x="96" y="26" width="16" height="16" fill="#ffffff"/><rect x="86" y="54" width="38" height="44" fill="#28395c"/>
+    </g>
+    <text x="126" y="46" class="name">Plato</text>
+    <text x="126" y="80" class="job">構想設計者</text>
+    <text x="126" y="113" class="role">全体コンセプトを描く</text>
+    <text x="126" y="140" class="role">青いマントの思想家</text>
+  </g>
+
+  <g transform="translate(1456 354)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-alt pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="12" y="0" width="56" height="18" fill="#c5512c"/><rect x="8" y="18" width="64" height="46" fill="#f0c49a"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="14" y="64" width="52" height="48" fill="#f07a35"/>
+      <rect x="86" y="14" width="12" height="66" fill="#7d5238"/><rect x="70" y="16" width="40" height="16" fill="#7d5238"/><rect x="98" y="72" width="30" height="12" fill="#9a9a9a"/>
+    </g>
+    <text x="126" y="46" class="name">Kuhn</text>
+    <text x="126" y="80" class="job">戦略改革者</text>
+    <text x="126" y="113" class="role">前提を壊して新ルートを探す</text>
+    <text x="126" y="140" class="role">小さなハンマーの革新者</text>
+  </g>
+
+  <!-- row 3 -->
+  <g transform="translate(52 542)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="12" y="0" width="56" height="18" fill="#8a5a2c"/><rect x="8" y="18" width="64" height="46" fill="#efc39b"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="12" y="64" width="56" height="48" fill="#b94d4d"/>
+      <rect x="84" y="16" width="52" height="68" fill="#fff4c2"/><rect x="92" y="26" width="36" height="6" fill="#b94d4d"/><rect x="92" y="42" width="36" height="6" fill="#b94d4d"/><rect x="92" y="58" width="24" height="6" fill="#b94d4d"/>
+    </g>
+    <text x="126" y="46" class="name">Aristotle</text>
+    <text x="126" y="80" class="job">仕様整理官</text>
+    <text x="126" y="113" class="role">流れと根拠を筋道化する</text>
+    <text x="126" y="140" class="role">巻物を持つ先生</text>
+  </g>
+
+  <g transform="translate(520 542)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-blue pixel"/>
+    <g class="pixel" transform="translate(24 26)">
+      <rect x="12" y="0" width="56" height="18" fill="#784ed6"/><rect x="8" y="18" width="64" height="46" fill="#f2c499"/>
+      <rect x="18" y="30" width="10" height="8" fill="#122033"/><rect x="52" y="30" width="10" height="8" fill="#122033"/>
+      <rect x="14" y="64" width="52" height="48" fill="#274e8e"/>
+      <rect x="84" y="26" width="54" height="38" fill="#1b2533"/><rect x="90" y="32" width="42" height="22" fill="#5ef2c7"/>
+      <rect x="74" y="10" width="10" height="10" fill="#d8b75f"/><rect x="82" y="0" width="14" height="10" fill="#d8b75f"/>
+    </g>
+    <text x="126" y="46" class="name">Lovelace</text>
+    <text x="126" y="80" class="job">自動化技師</text>
+    <text x="126" y="113" class="role">Chrome連携と取得処理を実装</text>
+    <text x="126" y="140" class="role">ゴーグルの発明家</text>
+  </g>
+
+  <g transform="translate(988 542)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card pixel"/>
+    <g class="pixel" transform="translate(24 26)">
+      <rect x="12" y="0" width="56" height="18" fill="#2b4c82"/><rect x="8" y="18" width="64" height="46" fill="#f0c49a"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="8" y="64" width="64" height="50" fill="#273f83"/>
+      <rect x="94" y="6" width="10" height="82" fill="#ffe767"/><rect x="80" y="16" width="38" height="10" fill="#ffe767"/><rect x="88" y="8" width="22" height="26" fill="#fff4c2"/>
+    </g>
+    <text x="126" y="46" class="name">Sagan</text>
+    <text x="126" y="80" class="job">初心者ナビ</text>
+    <text x="126" y="113" class="role">難しい操作をやさしく翻訳</text>
+    <text x="126" y="140" class="role">星の杖を持つ語り部</text>
+  </g>
+
+  <g transform="translate(1456 542)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-alt pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="12" y="0" width="56" height="18" fill="#8c2536"/><rect x="8" y="18" width="64" height="46" fill="#edc09a"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="14" y="64" width="52" height="48" fill="#b53245"/>
+      <rect x="92" y="10" width="10" height="86" fill="#d92745"/><rect x="80" y="24" width="34" height="10" fill="#d92745"/><rect x="82" y="50" width="30" height="24" fill="#fff4c2"/>
+    </g>
+    <text x="126" y="46" class="name">Popper</text>
+    <text x="126" y="80" class="job">反証テスター</text>
+    <text x="126" y="113" class="role">「本当に正しいか」を突く</text>
+    <text x="126" y="140" class="role">赤いチェック槍の検証者</text>
+  </g>
+
+  <!-- row 4 -->
+  <g transform="translate(52 730)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-blue pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="12" y="0" width="56" height="18" fill="#7a4fac"/><rect x="8" y="18" width="64" height="46" fill="#efc39b"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="12" y="64" width="56" height="48" fill="#6e50c9"/>
+      <rect x="84" y="16" width="52" height="52" fill="#d6f4ff"/><rect x="92" y="24" width="36" height="36" fill="#426ac8"/><rect x="104" y="34" width="12" height="12" fill="#fff4c2"/>
+    </g>
+    <text x="126" y="46" class="name">Anscombe</text>
+    <text x="126" y="80" class="job">意図確認係</text>
+    <text x="126" y="113" class="role">目的と操作の意味を確認</text>
+    <text x="126" y="140" class="role">羅針盤を持つ聞き役</text>
+  </g>
+
+  <g transform="translate(520 730)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="12" y="0" width="56" height="18" fill="#286fc9"/><rect x="8" y="18" width="64" height="46" fill="#efc39b"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="12" y="64" width="56" height="48" fill="#2a8ee8"/>
+      <rect x="92" y="8" width="10" height="86" fill="#5ef2ff"/><rect x="80" y="24" width="34" height="10" fill="#5ef2ff"/><rect x="78" y="48" width="38" height="8" fill="#fff96b"/>
+    </g>
+    <text x="126" y="46" class="name">Ampere</text>
+    <text x="126" y="80" class="job">接続技師</text>
+    <text x="126" y="113" class="role">通信・速度・待機処理を見る</text>
+    <text x="126" y="140" class="role">電気マントの技師</text>
+  </g>
+
+  <g transform="translate(988 730)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card card-alt pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="12" y="0" width="56" height="18" fill="#5d3f90"/><rect x="8" y="18" width="64" height="46" fill="#efc39b"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="8" y="64" width="64" height="48" fill="#6f55a8"/>
+      <rect x="84" y="16" width="10" height="76" fill="#63d8ff"/><rect x="108" y="16" width="10" height="76" fill="#ffb75e"/><rect x="88" y="86" width="28" height="10" fill="#fff4c2"/>
+    </g>
+    <text x="126" y="46" class="name">Hegel</text>
+    <text x="126" y="80" class="job">方針統合者</text>
+    <text x="126" y="113" class="role">対立案をまとめて決める</text>
+    <text x="126" y="140" class="role">双剣の調停者</text>
+  </g>
+
+  <g transform="translate(1456 730)">
+    <rect x="8" y="8" width="440" height="164" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="164" class="card pixel"/>
+    <g class="pixel" transform="translate(24 28)">
+      <rect x="12" y="0" width="56" height="18" fill="#6d4a2d"/><rect x="8" y="18" width="64" height="46" fill="#efc39b"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="10" y="64" width="60" height="48" fill="#8a6a3d"/>
+      <rect x="84" y="20" width="46" height="64" fill="#fff4c2"/><rect x="92" y="30" width="30" height="6" fill="#007d68"/><rect x="92" y="46" width="30" height="6" fill="#007d68"/><rect x="92" y="62" width="20" height="6" fill="#007d68"/>
+    </g>
+    <text x="126" y="46" class="name">James</text>
+    <text x="126" y="80" class="job">実用レビュー</text>
+    <text x="126" y="113" class="role">現場で使えるか判定する</text>
+    <text x="126" y="140" class="role">作業エプロンの現場監督</text>
+  </g>
+
+  <!-- row 5 -->
+  <g transform="translate(52 918)">
+    <rect x="8" y="8" width="440" height="124" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="124" class="card card-alt pixel"/>
+    <g class="pixel" transform="translate(24 16) scale(.76)">
+      <rect x="12" y="0" width="56" height="18" fill="#d69f21"/><rect x="8" y="18" width="64" height="46" fill="#efc39b"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="12" y="64" width="56" height="48" fill="#d6a72c"/>
+      <rect x="84" y="14" width="8" height="70" fill="#9c8145"/><rect x="72" y="30" width="32" height="8" fill="#dcbf62"/><rect x="70" y="40" width="12" height="18" fill="#dcbf62"/><rect x="96" y="40" width="12" height="18" fill="#dcbf62"/>
+    </g>
+    <text x="104" y="38" class="name" font-size="27">Mill</text>
+    <text x="104" y="68" class="job" font-size="20">優先順位参謀</text>
+    <text x="104" y="98" class="role" font-size="18">効果とコストで並べる</text>
+  </g>
+
+  <g transform="translate(520 918)">
+    <rect x="8" y="8" width="440" height="124" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="124" class="card pixel"/>
+    <g class="pixel" transform="translate(24 16) scale(.76)">
+      <rect x="12" y="0" width="56" height="18" fill="#dc384e"/><rect x="8" y="18" width="64" height="46" fill="#efc39b"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="12" y="64" width="56" height="48" fill="#d93d51"/>
+      <rect x="86" y="16" width="12" height="76" fill="#df1f3e"/><rect x="106" y="30" width="34" height="42" fill="#3156b7"/>
+    </g>
+    <text x="104" y="38" class="name" font-size="27">Pauli</text>
+    <text x="104" y="68" class="job" font-size="20">厳格レビュー</text>
+    <text x="104" y="98" class="role" font-size="18">甘い根拠を止める</text>
+  </g>
+
+  <g transform="translate(988 918)">
+    <rect x="8" y="8" width="440" height="124" class="shadow pixel"/>
+    <rect x="0" y="0" width="440" height="124" class="card card-blue pixel"/>
+    <g class="pixel" transform="translate(24 16) scale(.76)">
+      <rect x="12" y="0" width="56" height="18" fill="#4b3d9c"/><rect x="8" y="18" width="64" height="46" fill="#efc39b"/>
+      <rect x="20" y="30" width="8" height="8" fill="#122033"/><rect x="52" y="30" width="8" height="8" fill="#122033"/>
+      <rect x="12" y="64" width="56" height="48" fill="#4b5fb4"/>
+      <rect x="84" y="22" width="52" height="12" fill="#1d2a39"/><rect x="128" y="14" width="20" height="28" fill="#9ff5df"/><rect x="92" y="34" width="10" height="50" fill="#1d2a39"/>
+    </g>
+    <text x="104" y="38" class="name" font-size="27">Galileo</text>
+    <text x="104" y="68" class="job" font-size="20">画面観測者</text>
+    <text x="104" y="98" class="role" font-size="18">実画面でズレを確認</text>
+  </g>
+
+  <g transform="translate(1456 918)">
+    <rect x="0" y="0" width="440" height="124" fill="#122033" stroke="#5ef2c7" stroke-width="4" class="pixel"/>
+    <text x="28" y="42" class="chip-text" font-size="24">TEAM FLOW</text>
+    <text x="28" y="74" class="subtitle" font-size="18">調査 → 反証 → 実装 → UI → 評価</text>
+    <text x="28" y="104" class="subtitle" font-size="20">19 agents, one research guild.</text>
+  </g>
+</svg>
