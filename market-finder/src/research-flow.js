@@ -86,6 +86,14 @@ export function buildEtsyCandidatesFromErank(erankRows = [], candidates = []) {
     }
     if (Array.isArray(source.axisTerms) && source.axisTerms.length > 0) candidate.axisTerms = [...source.axisTerms]
     if (source.sourceQuery) candidate.sourceQuery = source.sourceQuery
+    if (source.intentTrack) candidate.intentTrack = source.intentTrack
+    if (source.historyClusterKey) candidate.historyClusterKey = source.historyClusterKey
+    if (Object.prototype.hasOwnProperty.call(source, 'previouslyResearchedElsewhere')) {
+      candidate.previouslyResearchedElsewhere = Boolean(source.previouslyResearchedElsewhere)
+    }
+    if (Array.isArray(source.priorEventIds) && source.priorEventIds.length > 0) {
+      candidate.priorEventIds = [...source.priorEventIds]
+    }
     if (officialProbe) candidate.officialProbe = true
     qualifiedByKeyword.set(keyword, { candidate, metrics })
   })
@@ -118,7 +126,8 @@ export function buildEtsyCandidatesFromErank(erankRows = [], candidates = []) {
       }
     })
     .sort((left, right) => (
-      (right.priorityIndex ?? right.opportunityIndex) - (left.priorityIndex ?? left.opportunityIndex)
+      Number(left.previouslyResearchedElsewhere) - Number(right.previouslyResearchedElsewhere)
+      || (right.priorityIndex ?? right.opportunityIndex) - (left.priorityIndex ?? left.opportunityIndex)
       || right.opportunityIndex - left.opportunityIndex
       || left.keyword.localeCompare(right.keyword, 'en')
     ))

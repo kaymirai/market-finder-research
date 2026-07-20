@@ -2039,6 +2039,64 @@ button.research-table-row {
   align-items: start;
 }
 
+.result-track-list {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.result-track-list > .table-caption {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.result-track-group {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.result-track-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-left: 4px solid #0f766e;
+  padding: 4px 0 4px 12px;
+}
+
+.result-track-group.is-evergreen .result-track-heading {
+  border-left-color: #2563eb;
+}
+
+.result-track-heading h3,
+.result-track-heading p {
+  margin: 0;
+}
+
+.result-track-heading h3 {
+  font-size: 16px;
+}
+
+.result-track-heading p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.market-track-pill.is-event-specific {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.market-track-pill.is-evergreen-adjacent {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
 .selected-result-panel {
   min-width: 0;
   position: sticky;

@@ -145,6 +145,20 @@ test('explains when a safe eRank hold candidate is being rechecked on Etsy', () 
   assert.match(app, /officialProbe/)
 })
 
+test('separates event-specific results from evergreen markets and shows cross-event history', () => {
+  assert.match(app, /researchedMarketHistory/)
+  assert.match(app, /classifyEventMarketTrack/)
+  assert.match(app, /prioritizeEventCandidates/)
+  assert.match(app, /splitResearchRowsByEventTrack/)
+  assert.match(app, /イベント固有候補/)
+  assert.match(app, /通年クロスニッチ候補/)
+  assert.match(app, /別イベントで調査済み/)
+  assert.match(app, /'Market Track'/)
+  assert.match(app, /'Research Event'/)
+  assert.match(app, /'History Cluster'/)
+  assert.match(styles, /\.result-track-group/)
+})
+
 test('persists extension results and restores completed results explicitly', () => {
   assert.match(app, /extensionResultsImportMode/)
   assert.match(app, /const importMode = extensionResultsImportMode/)

@@ -189,6 +189,18 @@ test('round-trips cross-niche lineage through the research CSV parser', () => {
   assert.equal(rows[0].crossNicheDepth, '1')
 })
 
+test('round-trips event market track metadata through the research CSV parser', () => {
+  const rows = parseEverbeeRows([
+    'Keyword,Market Track,Research Event,Research Category,History Cluster',
+    'teacher shirt,evergreen-adjacent,halloween,shirt,teacher',
+  ].join('\n'))
+
+  assert.equal(rows[0].intentTrack, 'evergreen-adjacent')
+  assert.equal(rows[0].researchEventId, 'halloween')
+  assert.equal(rows[0].researchCategoryId, 'shirt')
+  assert.equal(rows[0].historyClusterKey, 'teacher')
+})
+
 test('keeps a saturated multi-seller market as a cross-niche exploration parent', () => {
   const parents = selectCrossNicheParentMarkets([{
     keyword: 'cat shirt',
@@ -387,6 +399,24 @@ test('keeps at least 40 percent adjacent candidates when many observed terms are
 
   assert.ok(adjacent.length / rows.length >= 0.4)
   assert.ok(observed.length / rows.length <= 0.25)
+})
+
+test('builds a balanced Christmas shortlist with seasonal signals and evergreen lanes', () => {
+  const profile = getBroadEventDiscoveryProfile({ eventId: 'christmas' })
+  const rows = generateBroadEventCandidates({
+    eventId: 'christmas',
+    categoryId: 'shirt',
+    limit: 40,
+  })
+  const direct = rows.filter((row) => row.queryStrategy === 'direct')
+  const adjacent = rows.filter((row) => row.queryStrategy === 'adjacent')
+
+  assert.equal(profile.enabled, true)
+  assert.ok(profile.lanes.motif.includes('candy cane'))
+  assert.equal(rows.length, 40)
+  assert.equal(new Set(rows.map((row) => row.discoveryLane)).size, 5)
+  assert.ok(direct.length / rows.length <= 0.3)
+  assert.ok(adjacent.length / rows.length >= 0.4)
 })
 
 test('creates a unique 15-query Etsy plan split 5 discovery, 7 validation, 3 reserve', () => {

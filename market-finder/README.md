@@ -5,7 +5,7 @@ EtsyMiraiProducerへ組み込む前に、イベント別の低競合キーワー
 ## できること
 
 - 父の日、母の日、ハロウィン、クリスマスなどのイベントからロングテール候補を生成
-- ハロウィンのような大型イベントを、モチーフ・場面・相手・テイスト・周辺需要の5レーンに分解
+- ハロウィンやクリスマスのような大型イベントを、モチーフ・場面・相手・テイスト・周辺需要の5レーンに分解
 - Etsy Marketplace Insightsを無料15語、またはEtsy Plusの入口20語＋有望な関連語を最大40語まで段階式で確認
 - 広めの市場で売れた商品のタイトル・タグから種ワードを抽出
 - `event + target + product + year` を軸に候補を増やす
@@ -17,6 +17,7 @@ EtsyMiraiProducerへ組み込む前に、イベント別の低競合キーワー
 - 良い候補を商品テーマ、ターゲット、デザイン方向性、SEOタイトル、タグ案へ変換
 - 売れている候補から次ラウンドの派生キーワードを作成
 - 高競合でも複数商品が売れている市場から、需要を残しながら競合が下がるクロスニッチを最大2階層まで探索
+- 最終結果をイベント固有候補と通年クロスニッチ候補へ分け、別イベントで調査済みの通年市場は後順位へ送る
 
 ## 起動
 
@@ -48,7 +49,9 @@ http://127.0.0.1:4173/market-finder/
 
 ## 大型イベント分解 / Etsy公式段階式プラン
 
-ハロウィンを選んで候補を作ると、40候補を5レーンへ8件ずつ配分します。イベント名を含む `Direct` は30%以下、イベント名から離れた `Adjacent` は40%以上を維持し、外部サイトで実際に見つけた語句は `Observed` として表示します。
+ハロウィンまたはクリスマスを選んで候補を作ると、40候補を5レーンへ8件ずつ配分します。イベント名を含む `Direct` は30%以下、イベント名から離れた `Adjacent` は40%以上を維持し、外部サイトで実際に見つけた語句は `Observed` として表示します。
+
+候補と最終結果は、イベント名・固有モチーフ・固有場面を含む「イベント固有」と、`teacher`、`nurse`、`book lover`などの「通年隣接」に分けます。Opportunity点数は変えず、同じ順位表へ混ぜません。調査済みの通年クラスターはイベントIDと一緒にローカル保存し、別イベントで再登場した場合は削除せず後順位へ送ります。これにより、ハロウィンとクリスマスの両方で同じ一般市場を最初から繰り返し調べる量を減らします。
 
 同時にMarketplace Insightsの調査プランを作ります。無料モードは入口5件・検証7件・予備3件の15語です。Etsy Plusモードは入口20語から始め、最大200語の関連候補プールから5語ずつ、最大40語を追加する段階式の60検索構成です。検索数・掲載数・コンバージョン表示・商品一致・語句の具体性・複数入口からの再発見を評価し、同じ意味の語は1バッチ2語までに制限します。
 
@@ -95,7 +98,7 @@ EverBee競合10,000件以上、Etsy掲載20,000件以上、またはeRank競合5
 対応している列:
 
 ```csv
-Keyword,Listings Analyzed,Top Monthly Sales,Top Revenue,Average Price,Listing Age,eRank Search Volume,eRank Clicks,eRank CTR,eRank Competition,eRank KD,eRank Trend,Etsy Searches 30d,Etsy Listings,Etsy Related Terms,Notes,Visible Listing Count,Selling Listing Count,Recent Selling Listing Count,Median Monthly Sales,Median Monthly Revenue,Total Visible Monthly Sales,Top Sales Share,Median Listing Age Months,eRank Checked At,Etsy Checked At,EverBee Checked At,EverBee Product Rows JSON,Cross Niche Parent,Cross Niche Depth
+Keyword,Listings Analyzed,Top Monthly Sales,Top Revenue,Average Price,Listing Age,eRank Search Volume,eRank Clicks,eRank CTR,eRank Competition,eRank KD,eRank Trend,Etsy Searches 30d,Etsy Listings,Etsy Related Terms,Notes,Visible Listing Count,Selling Listing Count,Recent Selling Listing Count,Median Monthly Sales,Median Monthly Revenue,Total Visible Monthly Sales,Top Sales Share,Median Listing Age Months,eRank Checked At,Etsy Checked At,EverBee Checked At,EverBee Product Rows JSON,Cross Niche Parent,Cross Niche Depth,Market Track,Research Event,Research Category,History Cluster
 ```
 
 `Listings Analyzed` はEverBee側の補助競合指標として段階評価します。500件以下を20点、1,000件以下を18点、2,500件以下を15点、5,000件以下を12点とし、30,000件以上は過密としてA/Bへ昇格させません。ただし、Etsy公式やeRankの競合数の代替、または販売密度の分母には使いません。

@@ -2,6 +2,7 @@ import {
   MARKET_EVENTS,
   PRODUCT_CATEGORIES,
   advanceMarketplaceInsightResearch,
+  buildKeywordClusterKey,
   buildCrossNicheDrilldown,
   buildMarketplaceInsightPlan,
   generateBroadMarketQueries,
@@ -28,7 +29,7 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260720-11'
+} from '../../shared/market-keyword-engine/index.js?v=20260720-12'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
@@ -38,12 +39,20 @@ import {
   extensionResultsImportMode,
   marketplaceCompletedKeywords,
   shouldDiscardMarketplacePlan,
-} from './research-flow.js?v=20260720-6'
+} from './research-flow.js?v=20260720-7'
 import {
   advanceCrossNicheWorkflow,
   createCrossNicheWorkflowState,
   isCrossNicheWorkflowPending,
 } from './cross-niche-workflow.js?v=20260720-1'
+import {
+  EVENT_MARKET_TRACKS,
+  buildResearchMarketHistory,
+  classifyEventMarketTrack,
+  normalizeResearchMarketHistory,
+  prioritizeEventCandidates,
+  splitResearchRowsByEventTrack,
+} from './event-market-tracks.js?v=20260720-1'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -96,6 +105,7 @@ const state = {
   marketplaceInsightMessage: '',
   crossNicheWorkflow: createCrossNicheWorkflowState(),
   researchRows: [],
+  researchedMarketHistory: [],
   broadHints: [],
   broadAutoImport: false,
   broadSnippetKeys: new Set(),
@@ -430,6 +440,7 @@ function persistMarketFinderState() {
       marketplaceInsightPlan: state.marketplaceInsightPlan,
       marketplaceInsightMessage: state.marketplaceInsightMessage,
       crossNicheWorkflow: state.crossNicheWorkflow,
+      researchedMarketHistory: state.researchedMarketHistory,
       selectedResultKey: state.selectedResultKey,
       seoPlan: state.seoPlan,
     },
@@ -481,6 +492,7 @@ function restorePersistedState() {
   state.marketplaceInsightPlan = savedState.marketplaceInsightPlan ?? null
   state.marketplaceInsightMessage = String(savedState.marketplaceInsightMessage ?? '')
   state.crossNicheWorkflow = createCrossNicheWorkflowState(savedState.crossNicheWorkflow)
+  state.researchedMarketHistory = normalizeResearchMarketHistory(savedState.researchedMarketHistory)
   state.selectedResultKey = String(savedState.selectedResultKey ?? '')
   state.seoPlan = savedState.seoPlan ?? null
 
@@ -803,6 +815,45 @@ function currentOptions() {
     customRiskTerms: elements.riskInput.value,
     discoveryMode: isBroadEventDiscovery() ? 'broad-event' : 'standard',
   }
+}
+
+function marketTrackOptionsForRow(row = {}) {
+  return {
+    ...currentOptions(),
+    eventId: row.researchEventId || elements.eventSelect.value,
+    categoryId: row.researchCategoryId || elements.categorySelect.value,
+  }
+}
+
+function marketTrackLabel(track) {
+  return track === EVENT_MARKET_TRACKS.eventSpecific ? 'イベント固有' : '通年隣接'
+}
+
+function eventLabelFromId(eventId) {
+  return MARKET_EVENTS.find((event) => event.id === eventId)?.jpLabel || eventId
+}
+
+function marketTrackMetadataForRow(row = {}) {
+  const options = marketTrackOptionsForRow(row)
+  const decorated = prioritizeEventCandidates([{
+    ...row,
+    keyword: row.score?.normalized?.keyword ?? row.keyword,
+  }], state.researchedMarketHistory, options)[0]
+  return {
+    intentTrack: decorated.intentTrack,
+    historyClusterKey: decorated.historyClusterKey,
+    previouslyResearchedElsewhere: decorated.previouslyResearchedElsewhere,
+    priorEventIds: decorated.priorEventIds,
+    researchEventId: row.researchEventId || options.eventId,
+  }
+}
+
+function syncResearchMarketHistory() {
+  state.researchedMarketHistory = buildResearchMarketHistory(
+    state.researchedMarketHistory,
+    state.researchRows,
+    currentOptions(),
+  )
 }
 
 const analyzeResearchRows = createMemoizedAnalysis((rows, options) => {
@@ -1752,6 +1803,8 @@ function renderCandidates() {
     const statusTitle = candidate.status === 'ready'
       ? '次のeRank確認に入れてよい候補です。人気確定ではありません。'
       : '商標・著作権などの確認が必要な候補です。'
+    const trackLabel = marketTrackLabel(candidate.intentTrack)
+    const priorEventLabels = (candidate.priorEventIds ?? []).map(eventLabelFromId).join('、')
 
     return `
       <article class="candidate-row">
@@ -1763,6 +1816,8 @@ function renderCandidates() {
             <span class="pill" title="${escapeHtml(categoryTitle)}">${escapeHtml(categoryLabel)}</span>
             ${candidate.discoveryLane ? `<span class="pill">${escapeHtml(DISCOVERY_LANE_LABELS[candidate.discoveryLane] ?? candidate.discoveryLane)}</span>` : ''}
             ${candidate.queryStrategy ? `<span class="pill">${escapeHtml(QUERY_STRATEGY_LABELS[candidate.queryStrategy] ?? candidate.queryStrategy)}</span>` : ''}
+            <span class="pill market-track-pill is-${escapeHtml(candidate.intentTrack)}">${escapeHtml(trackLabel)}</span>
+            ${candidate.previouslyResearchedElsewhere ? `<span class="pill review">別イベントで調査済み${priorEventLabels ? `: ${escapeHtml(priorEventLabels)}` : ''}</span>` : ''}
             ${candidate.clusterSize > 1 ? `<span class="pill">同系統 ${candidate.clusterSize}語</span>` : ''}
             ${candidate.timing?.label && candidate.timing.label !== 'evergreen' ? `<span class="pill">時期 ${escapeHtml(candidate.timing.label)} / ${escapeHtml(candidate.timing.weeksUntil)}週</span>` : ''}
             ${candidate.sourceFreshness?.freshnessLabel === 'inspiration' || candidate.sourceFreshness?.freshnessLabel === 'expired' ? '<span class="pill review">古いデータ・発想用</span>' : ''}
@@ -2177,6 +2232,8 @@ function renderEverbeeTableRow(item, selectedKey) {
   const age = normalized.listingAgeMonths === null || normalized.listingAgeMonths === undefined
     ? '-'
     : `${normalized.listingAgeMonths} mo`
+  const track = marketTrackMetadataForRow(row)
+  const priorEventLabels = track.priorEventIds.map(eventLabelFromId).join('、')
 
   return `
     <button type="button" class="research-table-row everbee-table-row${selectedClass}" data-result-key="${escapeHtml(key)}" aria-pressed="${key === selectedKey ? 'true' : 'false'}">
@@ -2186,6 +2243,10 @@ function renderEverbeeTableRow(item, selectedKey) {
       <span class="table-cell keyword-cell" data-label="キーワード">
         <strong>${escapeHtml(normalized.keyword)}</strong>
         <span class="table-subline">${escapeHtml(sourceLine)}</span>
+        <span class="table-reasons">
+          <span class="reason-chip market-track-pill is-${escapeHtml(track.intentTrack)}">${escapeHtml(marketTrackLabel(track.intentTrack))}</span>
+          ${track.previouslyResearchedElsewhere ? `<span class="reason-chip">別イベントで調査済み${priorEventLabels ? `: ${escapeHtml(priorEventLabels)}` : ''}</span>` : ''}
+        </span>
         ${scoreReasons ? `<span class="table-reasons">${scoreReasons}</span>` : ''}
       </span>
       <span class="table-cell number-cell" data-label="EverBee競合">${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</span>
@@ -2208,6 +2269,8 @@ function renderEverbeeDetail(row) {
   const reasons = row.score.exclusionReasons.length
     ? `<div><span>注意</span><p>${escapeHtml(row.score.exclusionReasons.join(' / '))}</p></div>`
     : ''
+  const track = marketTrackMetadataForRow(row)
+  const priorEventLabels = track.priorEventIds.map(eventLabelFromId).join('、')
 
   return `
     <article class="result-detail-card">
@@ -2220,6 +2283,8 @@ function renderEverbeeDetail(row) {
             <span class="pill">Confidence ${escapeHtml(row.score.confidenceLabel)}</span>
             <span class="pill">Stage ${escapeHtml(row.score.candidateStage)}</span>
             <span class="pill">${escapeHtml(row.idea.theme)}</span>
+            <span class="pill market-track-pill is-${escapeHtml(track.intentTrack)}">${escapeHtml(marketTrackLabel(track.intentTrack))}</span>
+            ${track.previouslyResearchedElsewhere ? `<span class="pill review">別イベントで調査済み${priorEventLabels ? `: ${escapeHtml(priorEventLabels)}` : ''}</span>` : ''}
           </div>
           ${sourceKeyword ? `<div class="candidate-source-line">eRank派生元: ${escapeHtml(sourceKeyword)}</div>` : ''}
           ${scoreReasons ? `<div class="reason-line">${scoreReasons}</div>` : ''}
@@ -2304,6 +2369,34 @@ function everbeeResultRows() {
   return currentResearchAnalysis().everbeeRows
 }
 
+function renderResultTrackGroup({ title, description, items, emptyMessage, className }) {
+  const rows = items.length > 0
+    ? items.map((item) => renderEverbeeTableRow(item, state.selectedResultKey)).join('')
+    : `<div class="empty-state small">${escapeHtml(emptyMessage)}</div>`
+  return `
+    <section class="result-track-group ${escapeHtml(className)}">
+      <div class="result-track-heading">
+        <div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p></div>
+        <span class="count-badge"><strong>${items.length}</strong><small>候補</small></span>
+      </div>
+      <div class="research-table-shell everbee-table-shell">
+        <div class="research-table everbee-table">
+          <div class="research-table-head everbee-table-head">
+            <span>狙い目</span>
+            <span>キーワード</span>
+            <span>EverBee競合</span>
+            <span>販売商品</span>
+            <span>最近販売</span>
+            <span>中央値</span>
+            <span>集中率</span>
+          </div>
+          ${rows}
+        </div>
+      </div>
+    </section>
+  `
+}
+
 function renderResultsTable() {
   const ranked = everbeeResultRows()
   elements.downloadStep4CsvBtn.disabled = ranked.length === 0 || isCrossNicheWorkflowPending(state.crossNicheWorkflow)
@@ -2331,24 +2424,44 @@ function renderResultsTable() {
   }
 
   const selectedItem = keyedRows.find((item) => item.key === state.selectedResultKey) ?? keyedRows[0]
-  const tableRows = keyedRows.map((item) => renderEverbeeTableRow(item, state.selectedResultKey)).join('')
+  const groups = splitResearchRowsByEventTrack(ranked, currentOptions())
+  const itemsByKey = new Map(keyedRows.map((item) => [item.key, item]))
+  const groupItems = (rows) => rows
+    .map((row) => itemsByKey.get(resultRowKey(row)))
+    .filter(Boolean)
+  const eventItems = groupItems(groups.eventSpecific)
+  const evergreenItems = groupItems(groups.evergreenAdjacent)
+  const event = selectedEvent()
+  const trackGroups = event.id === 'auto-discovery'
+    ? renderResultTrackGroup({
+      title: '通年候補',
+      description: '特定イベントに依存せず、年間を通じて確認する市場です。',
+      items: evergreenItems,
+      emptyMessage: '通年候補はありません。',
+      className: 'is-evergreen',
+    })
+    : [
+      renderResultTrackGroup({
+        title: 'イベント固有候補',
+        description: `${event.jpLabel}固有の語句・モチーフ・場面を含む候補です。`,
+        items: eventItems,
+        emptyMessage: `今回は${event.jpLabel}固有の有望候補を確認できませんでした。`,
+        className: 'is-event-specific',
+      }),
+      renderResultTrackGroup({
+        title: '通年クロスニッチ候補',
+        description: `${event.jpLabel}調査から見つかりましたが、イベントに依存しない別市場です。`,
+        items: evergreenItems,
+        emptyMessage: '通年へ分離する候補はありません。',
+        className: 'is-evergreen',
+      }),
+    ].join('')
 
   elements.resultsList.innerHTML = `
     <div class="results-comparison-layout">
-      <div class="research-table-shell everbee-table-shell">
+      <div class="result-track-list">
         <div class="table-caption">候補を押すと、右に商品案・SEO案・タグ案が出ます。</div>
-        <div class="research-table everbee-table">
-          <div class="research-table-head everbee-table-head">
-            <span>狙い目</span>
-            <span>キーワード</span>
-            <span>EverBee競合</span>
-            <span>販売商品</span>
-            <span>最近販売</span>
-            <span>中央値</span>
-            <span>集中率</span>
-          </div>
-          ${tableRows}
-        </div>
+        ${trackGroups}
       </div>
       <div class="selected-result-panel">
         ${renderEverbeeDetail(selectedItem.row)}
@@ -2825,10 +2938,14 @@ function generateCandidates({ preserveMarketplacePlan = false } = {}) {
       timing: getMarketTiming(selectedEvent()),
       candidateStage: 'idea',
     }))
-  state.candidates = broadEventMode
-    ? candidates.slice(0, 40)
+  const candidatePool = broadEventMode
+    ? candidates
     : clusterKeywordCandidates(candidates, options)
-      .slice(0, Number(elements.limitInput.value) || 80)
+  state.candidates = prioritizeEventCandidates(
+    candidatePool,
+    state.researchedMarketHistory,
+    options,
+  ).slice(0, broadEventMode ? 40 : Number(elements.limitInput.value) || 80)
   state.activeDiscoveryLane = 'all'
   if (preserveMarketplacePlan && state.marketplaceInsightPlan?.items?.length > 0) {
     rebuildMarketplaceInsightPlan({ preserveExisting: true })
@@ -2857,7 +2974,7 @@ function crossNicheCandidateForResearch(candidate) {
   const riskTerms = detectRiskTerms(candidate.keyword, elements.riskInput.value.split(/\r?\n|,/))
   const parentRow = findResearchRow(candidate.parentKeyword)
   const sourceAt = parentRow?.everbeeCheckedAt || parentRow?.etsyCheckedAt || parentRow?.erankCheckedAt || ''
-  return {
+  const researchCandidate = {
     keyword: candidate.keyword,
     eventId: event.id,
     eventLabel: event.jpLabel,
@@ -2880,6 +2997,11 @@ function crossNicheCandidateForResearch(candidate) {
     timing: getMarketTiming(event),
     candidateStage: 'idea',
   }
+  return prioritizeEventCandidates(
+    [researchCandidate],
+    state.researchedMarketHistory,
+    currentOptions(),
+  )[0]
 }
 
 function limitNextResearchCandidates(candidates, limit = 12) {
@@ -2908,10 +3030,29 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     || existingRow?.sourceKeyword
     || erankSourceKeyword(existingRow ?? {})
   const candidate = state.candidates.find((item) => normalizePhrase(item.keyword) === keyword)
+  const researchEvent = selectedEvent()
+  const researchEventId = String(row.researchEventId ?? existingRow?.researchEventId ?? candidate?.eventId ?? researchEvent.id)
+  const researchCategoryId = String(row.researchCategoryId ?? existingRow?.researchCategoryId ?? candidate?.categoryId ?? elements.categorySelect.value)
+  const intentTrack = classifyEventMarketTrack(keyword, {
+    ...currentOptions(),
+    eventId: researchEventId,
+    categoryId: researchCategoryId,
+  }, {
+    intentTrack: row.intentTrack ?? existingRow?.intentTrack ?? candidate?.intentTrack,
+  })
+  const historyClusterKey = String(row.historyClusterKey ?? existingRow?.historyClusterKey ?? candidate?.historyClusterKey ?? '').trim()
+    || buildKeywordClusterKey(keyword, { categoryId: researchCategoryId })
 
   return {
     keyword,
     sourceKeyword,
+    researchEventId,
+    researchEventLabel: String(row.researchEventLabel ?? existingRow?.researchEventLabel ?? candidate?.eventLabel ?? researchEvent.jpLabel),
+    researchCategoryId,
+    discoveryLane: String(row.discoveryLane ?? existingRow?.discoveryLane ?? candidate?.discoveryLane ?? ''),
+    queryStrategy: String(row.queryStrategy ?? existingRow?.queryStrategy ?? candidate?.queryStrategy ?? ''),
+    intentTrack,
+    historyClusterKey,
     listingsAnalyzed: keepExistingWhenBlank('listingsAnalyzed'),
     topMonthlySales: keepExistingWhenBlank('topMonthlySales'),
     topRevenue: keepExistingWhenBlank('topRevenue'),
@@ -2961,6 +3102,7 @@ function addResearchRows(rows) {
     keyOf: (row) => normalizePhrase(row.keyword),
     merge: buildMergedResearchRow,
   })
+  syncResearchMarketHistory()
 }
 
 function addResearchRow(row) {
@@ -3199,6 +3341,10 @@ function exportErankCsv() {
     'Source Type',
     'Source Keyword',
     'Keyword',
+    'Market Track',
+    'Research Event',
+    'Research Category',
+    'History Cluster',
     'Action',
     'Opportunity Score',
     'Search',
@@ -3215,10 +3361,15 @@ function exportErankCsv() {
   const lines = rows.map((row) => {
     const normalized = row.erankOpportunity.normalized
     const sourceKeyword = erankSourceKeyword(row)
+    const track = marketTrackMetadataForRow(row)
     return [
       sourceKeyword ? 'eRank related keyword' : 'eRank searched keyword',
       sourceKeyword,
       normalized.keyword,
+      track.intentTrack,
+      track.researchEventId,
+      row.researchCategoryId || elements.categorySelect.value,
+      track.historyClusterKey,
       row.erankOpportunity.label,
       row.erankOpportunity.score,
       normalized.erankSearchVolume ?? '',
@@ -3245,6 +3396,10 @@ function exportStep4Csv() {
     'Rank',
     'Keyword',
     'eRank Source Keyword',
+    'Market Track',
+    'Research Event',
+    'Research Category',
+    'History Cluster',
     'Opportunity Score',
     'Grade',
     'Decision Summary',
@@ -3303,10 +3458,15 @@ function exportStep4Csv() {
     const brief = row.idea.nounBrief ?? {}
     const route = row.productRoute ?? {}
     const blockedForProduct = route.decision === 'Do not use'
+    const track = marketTrackMetadataForRow(row)
     return [
       index + 1,
       normalized.keyword,
       erankSourceKeyword(row),
+      track.intentTrack,
+      track.researchEventId,
+      row.researchCategoryId || elements.categorySelect.value,
+      track.historyClusterKey,
       row.score.score,
       row.score.label,
       explainEverbeeScore(row.score).summary,
@@ -4533,6 +4693,7 @@ function init() {
   renderTargets({ selectedTargets: persisted?.form?.targets })
   bindEvents()
   setFlowMode(persisted?.flowMode ?? 'auto', { persist: false })
+  syncResearchMarketHistory()
   state.candidates = isCrossNicheWorkflowPending(state.crossNicheWorkflow)
     ? state.crossNicheWorkflow.batch.map(crossNicheCandidateForResearch)
     : []

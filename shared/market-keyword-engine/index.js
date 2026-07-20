@@ -116,6 +116,17 @@ const HALLOWEEN_DISCOVERY_PROFILE = {
   },
 }
 
+const CHRISTMAS_DISCOVERY_PROFILE = {
+  enabled: true,
+  lanes: {
+    motif: ['santa', 'candy cane', 'gingerbread', 'reindeer', 'nutcracker', 'christmas tree', 'snowman', 'ornament'],
+    moment: ['christmas morning', 'ugly sweater party', 'cookie exchange', 'family christmas', 'office christmas party', 'secret santa', 'christmas vacation', 'first christmas'],
+    audience: ['teacher', 'nurse', 'book lover', 'dog mom', 'cat mom', 'family', 'coworker', 'grandma'],
+    aesthetic: ['retro', 'vintage', 'cozy', 'minimalist', 'coquette', 'western', 'embroidered', 'preppy'],
+    adjacent: ['holiday reading', 'cozy christmas', 'christmas book club', 'winter wonderland', 'festive teacher', 'merry nurse', 'holiday baking', 'north pole crew'],
+  },
+}
+
 const VISUAL_SIGNAL_LIBRARY = [
   {
     phrases: ['dog', 'dog dad', 'dog mom', 'pet owner', 'pet lover', 'rescue'],
@@ -740,6 +751,8 @@ export const MARKET_EVENTS = [
     targets: ['mom', 'dad', 'grandma', 'teacher', 'nurse', 'book lover', 'family matching', 'coworker', 'pet owner'],
     intents: ['christmas gift', 'family christmas', 'christmas party', 'holiday season', 'matching christmas'],
     designAngles: ['cozy retro type', 'giftable phrase layout', 'classic holiday colors', 'simple icon cluster'],
+    seasonalSignals: ['santa', 'candy cane', 'gingerbread', 'reindeer', 'nutcracker', 'christmas tree', 'snowman', 'ornament', 'secret santa', 'winter wonderland', 'north pole'],
+    discoveryProfile: CHRISTMAS_DISCOVERY_PROFILE,
   }),
   marketEvent({
     id: 'hanukkah',
@@ -1088,6 +1101,10 @@ const FIELD_ALIASES = {
   productRows: ['everbee product rows json', 'product rows json', 'everbee product rows'],
   crossNicheParent: ['cross niche parent', 'cross-niche parent', 'parent keyword'],
   crossNicheDepth: ['cross niche depth', 'cross-niche depth', 'drilldown depth'],
+  intentTrack: ['market track', 'intent track', 'event market track'],
+  researchEventId: ['research event', 'research event id', 'event id'],
+  researchCategoryId: ['research category', 'research category id', 'category id'],
+  historyClusterKey: ['history cluster', 'history cluster key', 'market cluster'],
   erankCheckedAt: ['erank checked at', 'erank captured at'],
   etsyCheckedAt: ['etsy checked at', 'etsy captured at', 'marketplace checked at'],
   everbeeCheckedAt: ['everbee checked at', 'everbee captured at'],
@@ -1843,7 +1860,7 @@ export function generateBroadEventCandidates(options = {}) {
       const core = broadEventCoreTerm(lane, axisTerm, index, profile)
       const queryStrategy = index < 2 ? 'direct' : 'adjacent'
       const keyword = queryStrategy === 'direct'
-        ? `${eventTerm} ${core} ${product}`
+        ? `${phraseHasTerm(core, eventTerm) ? core : `${eventTerm} ${core}`} ${product}`
         : `${core} ${product}`
       const candidate = buildBroadEventCandidate(keyword, {
         discoveryLane: lane,

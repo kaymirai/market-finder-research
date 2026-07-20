@@ -77,6 +77,59 @@ test('deduplicates normalized eRank keywords and keeps the stronger row', () => 
   }])
 })
 
+test('carries event track and cross-event history into the Etsy queue', () => {
+  const rows = [{
+    keyword: 'teacher shirt',
+    erankOpportunity: { action: 'everbee', score: 82 },
+    score: { riskTerms: [], exclusionReasons: [] },
+  }]
+  const candidates = [{
+    keyword: 'teacher shirt',
+    discoveryLane: 'audience',
+    queryStrategy: 'adjacent',
+    intentTrack: 'evergreen-adjacent',
+    historyClusterKey: 'teacher',
+    previouslyResearchedElsewhere: true,
+    priorEventIds: ['halloween'],
+  }]
+
+  assert.deepEqual(buildEtsyCandidatesFromErank(rows, candidates), [{
+    keyword: 'teacher shirt',
+    query: 'teacher shirt',
+    discoveryLane: 'audience',
+    queryStrategy: 'adjacent',
+    intentTrack: 'evergreen-adjacent',
+    historyClusterKey: 'teacher',
+    previouslyResearchedElsewhere: true,
+    priorEventIds: ['halloween'],
+    opportunityIndex: 82,
+  }])
+})
+
+test('keeps a new market ahead of a stronger evergreen cluster already checked in another event', () => {
+  const rows = [
+    {
+      keyword: 'teacher shirt',
+      erankOpportunity: { action: 'everbee', score: 90 },
+      score: { riskTerms: [], exclusionReasons: [] },
+    },
+    {
+      keyword: 'candy cane shirt',
+      erankOpportunity: { action: 'everbee', score: 80 },
+      score: { riskTerms: [], exclusionReasons: [] },
+    },
+  ]
+  const candidates = [
+    { keyword: 'teacher shirt', previouslyResearchedElsewhere: true },
+    { keyword: 'candy cane shirt', previouslyResearchedElsewhere: false },
+  ]
+
+  assert.deepEqual(
+    buildEtsyCandidatesFromErank(rows, candidates).map((candidate) => candidate.keyword),
+    ['candy cane shirt', 'teacher shirt'],
+  )
+})
+
 test('uses within-research demand and competition only to reprioritize qualified candidates', () => {
   const rows = [
     {
