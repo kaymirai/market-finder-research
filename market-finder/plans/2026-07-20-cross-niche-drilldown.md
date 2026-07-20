@@ -170,29 +170,29 @@ Expected: 全コマンド終了コード0、既存回帰条件PASS。
 - Produces: `advanceCrossNicheWorkflow({ workflow, candidates, stageForKeyword, hasParents, limit })`
 - Consumes: `buildCrossNicheDrilldown(state.researchRows, currentOptions())`
 
-- [ ] **Step 1: 自動キューと段階遷移の失敗テストを書く**
+- [x] **Step 1: 自動キューと段階遷移の失敗テストを書く**
 
 未検証候補を最大12件キューへ入れること、eRank・Etsy・EverBeeの順に待機段階が進むこと、同じ候補を再追加しないこと、深度2の新候補だけを次ラウンドへ送ることを純粋関数で検証する。
 
-- [ ] **Step 2: REDを確認する**
+- [x] **Step 2: REDを確認する**
 
 Run: `node market-finder/scripts/test-cross-niche-workflow.mjs`
 
 Expected: ワークフローモジュールが存在しないためFAIL。
 
-- [ ] **Step 3: 状態管理モジュールを実装する**
+- [x] **Step 3: 状態管理モジュールを実装する**
 
 `status`、`round`、`batch`、`consideredKeywords`、`queuedKeywords`、`completedAt`を正規化して保存する。現在バッチに未完了段階があればその段階を維持し、完了後に未検討候補だけを最大12件キューへ追加する。
 
-- [ ] **Step 4: UIを自動フローへ接続する**
+- [x] **Step 4: UIを自動フローへ接続する**
 
 手動の`buildNextRoundBtn`と`applyCrossNicheCandidates()`を廃止する。自動追加時は候補一覧を現在バッチへ切り替え、Etsy計画を初期化し、クロスニッチ再調査では`researchRows`を消去せずにeRank・EverBee結果をマージする。
 
-- [ ] **Step 5: 最終おすすめを再調査完了まで保留する**
+- [x] **Step 5: 最終おすすめを再調査完了まで保留する**
 
 `pending-erank`、`pending-etsy`、`pending-everbee`では結果一覧とCSV保存を無効化し、次に必要な操作を表示する。`complete`または探索対象なしの時だけ全EverBee結果を再採点して表示する。
 
-- [ ] **Step 6: GREENと回帰を確認する**
+- [x] **Step 6: GREENと回帰を確認する**
 
 Run:
 

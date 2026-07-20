@@ -1627,6 +1627,32 @@ button[data-optional]::before {
   margin-top: 14px;
 }
 
+.cross-niche-status {
+  margin-top: 12px;
+}
+
+.final-results-gate {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #93c5fd;
+  border-left: 4px solid #2563eb;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 16px;
+  color: #1e3a8a;
+}
+
+.final-results-gate strong {
+  color: #172554;
+  font-size: 16px;
+}
+
+.final-results-gate span {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
 .cross-niche-parent {
   min-width: 0;
   overflow: hidden;
@@ -1746,10 +1772,6 @@ button[data-optional]::before {
 .cross-niche-row.is-weak-competition .cross-niche-verdict strong,
 .cross-niche-row.is-weak-sales .cross-niche-verdict strong {
   color: var(--amber);
-}
-
-.cross-niche-action {
-  margin-top: 14px;
 }
 
 .erank-group {

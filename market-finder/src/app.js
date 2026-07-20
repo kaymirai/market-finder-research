@@ -7,7 +7,6 @@ import {
   generateBroadMarketQueries,
   generateBroadEventCandidates,
   generateKeywordCandidates,
-  generateFollowUpKeywords,
   parseBroadMarketListings,
   everbeeResultsToBroadListings,
   extractNicheHintsFromListings,
@@ -40,6 +39,11 @@ import {
   marketplaceCompletedKeywords,
   shouldDiscardMarketplacePlan,
 } from './research-flow.js?v=20260720-6'
+import {
+  advanceCrossNicheWorkflow,
+  createCrossNicheWorkflowState,
+  isCrossNicheWorkflowPending,
+} from './cross-niche-workflow.js?v=20260720-1'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -90,6 +94,7 @@ const state = {
   marketplaceInsightBusy: false,
   marketplaceInsightAutoRunning: false,
   marketplaceInsightMessage: '',
+  crossNicheWorkflow: createCrossNicheWorkflowState(),
   researchRows: [],
   broadHints: [],
   broadAutoImport: false,
@@ -230,7 +235,6 @@ const elements = {
   copyKeywordsBtn: document.querySelector('#copyKeywordsBtn'),
   copyReadyBtn: document.querySelector('#copyReadyBtn'),
   downloadJobBtn: document.querySelector('#downloadJobBtn'),
-  buildNextRoundBtn: document.querySelector('#buildNextRoundBtn'),
   candidateErankBtn: document.querySelector('#candidateErankBtn'),
   erankToEverbeeBtn: document.querySelector('#erankToEverbeeBtn'),
   everbeeUrlInput: document.querySelector('#everbeeUrlInput'),
@@ -425,6 +429,7 @@ function persistMarketFinderState() {
       marketplaceInsightMode: state.marketplaceInsightMode,
       marketplaceInsightPlan: state.marketplaceInsightPlan,
       marketplaceInsightMessage: state.marketplaceInsightMessage,
+      crossNicheWorkflow: state.crossNicheWorkflow,
       selectedResultKey: state.selectedResultKey,
       seoPlan: state.seoPlan,
     },
@@ -475,6 +480,7 @@ function restorePersistedState() {
   state.marketplaceInsightMode = savedState.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
   state.marketplaceInsightPlan = savedState.marketplaceInsightPlan ?? null
   state.marketplaceInsightMessage = String(savedState.marketplaceInsightMessage ?? '')
+  state.crossNicheWorkflow = createCrossNicheWorkflowState(savedState.crossNicheWorkflow)
   state.selectedResultKey = String(savedState.selectedResultKey ?? '')
   state.seoPlan = savedState.seoPlan ?? null
 
@@ -875,6 +881,22 @@ function readyKeywords() {
     .map((candidate) => candidate.keyword)
 }
 
+function activeCrossNicheBatchKeywords() {
+  if (!isCrossNicheWorkflowPending(state.crossNicheWorkflow)) return new Set()
+  return new Set(
+    state.crossNicheWorkflow.batch
+      .map((candidate) => normalizePhrase(candidate.keyword))
+      .filter(Boolean)
+  )
+}
+
+function preserveCrossNicheResearch(scope) {
+  if (!isCrossNicheWorkflowPending(state.crossNicheWorkflow)) return false
+  if (scope === 'erank') return state.crossNicheWorkflow.status === 'pending-erank'
+  if (scope === 'everbee') return ['pending-etsy', 'pending-everbee'].includes(state.crossNicheWorkflow.status)
+  return false
+}
+
 function removePhraseFromTokens(tokens, phrase) {
   const phraseTokens = normalizePhrase(phrase).split(' ').filter(Boolean)
   if (phraseTokens.length === 0) return tokens
@@ -935,7 +957,10 @@ function erankExploreRows() {
 }
 
 function erankRowsWithOpportunity() {
-  return currentResearchAnalysis().erankRows
+  const rows = currentResearchAnalysis().erankRows
+  const batchKeywords = activeCrossNicheBatchKeywords()
+  if (batchKeywords.size === 0) return rows
+  return rows.filter((row) => batchKeywords.has(normalizePhrase(row.keyword)))
 }
 
 function etsyValidationCandidates() {
@@ -1061,7 +1086,13 @@ function salesCheckKeywords() {
 }
 
 function erankResearchKeywords() {
-  return cleanKeywordList(readyKeywords().map(erankProbeKeyword)).slice(0, ERANK_RESEARCH_LIMIT)
+  return cleanKeywordList(
+    state.candidates
+      .filter((candidate) => candidate.status === 'ready')
+      .map((candidate) => candidate.queryStrategy === 'cross-niche'
+        ? candidate.keyword
+        : erankProbeKeyword(candidate.keyword))
+  ).slice(0, ERANK_RESEARCH_LIMIT)
 }
 
 function parseResearchJob(value) {
@@ -2275,7 +2306,18 @@ function everbeeResultRows() {
 
 function renderResultsTable() {
   const ranked = everbeeResultRows()
-  elements.downloadStep4CsvBtn.disabled = ranked.length === 0
+  elements.downloadStep4CsvBtn.disabled = ranked.length === 0 || isCrossNicheWorkflowPending(state.crossNicheWorkflow)
+
+  if (isCrossNicheWorkflowPending(state.crossNicheWorkflow)) {
+    state.selectedResultKey = ''
+    elements.resultsList.innerHTML = `
+      <div class="final-results-gate">
+        <strong>クロスニッチ候補を再調査しています。</strong>
+        <span>再調査が終わるまで最終おすすめを確定しません。${escapeHtml(crossNicheWorkflowMessage())}</span>
+      </div>
+    `
+    return
+  }
 
   if (ranked.length === 0) {
     state.selectedResultKey = ''
@@ -2343,21 +2385,106 @@ function currentCrossNicheDrilldown() {
   return buildCrossNicheDrilldown(state.researchRows, currentOptions())
 }
 
-function actionableCrossNicheCandidates(drilldown) {
-  return drilldown.researchCandidates.filter((candidate) => {
-    const researched = findResearchRow(candidate.keyword)
-    if (!researched) return true
-    return !rowHasErankInput(researched) && !rowHasEtsyMarketplaceInput(researched)
+function crossNicheStageResolver() {
+  const batch = state.crossNicheWorkflow.batch
+  const batchKeywords = new Set(batch.map((candidate) => normalizePhrase(candidate.keyword)))
+  const erankRows = currentResearchAnalysis().erankRows
+    .filter((row) => batchKeywords.has(normalizePhrase(row.keyword)))
+  const qualifiedForEtsy = new Set(
+    buildEtsyCandidatesFromErank(erankRows, batch)
+      .map((candidate) => normalizePhrase(candidate.keyword ?? candidate.query))
+  )
+  const planItems = new Map(
+    (state.marketplaceInsightPlan?.items ?? [])
+      .map((item) => [normalizePhrase(item.query), item])
+      .filter(([keyword]) => keyword)
+  )
+
+  return (keyword) => {
+    const normalized = normalizePhrase(keyword)
+    const row = findResearchRow(normalized)
+    const erankAttempted = Boolean(row && (rowHasErankInput(row) || row.erankCheckedAt))
+    if (!erankAttempted) return 'pending-erank'
+
+    const everbeeAttempted = Boolean(row && (rowHasEverbeeInput(row) || row.everbeeCheckedAt))
+    if (everbeeAttempted) return 'done'
+    if (!qualifiedForEtsy.has(normalized)) return 'done'
+
+    const planItem = planItems.get(normalized)
+    if (planItem?.status === 'skipped') return 'done'
+    const etsyAttempted = Boolean(row && (rowHasEtsyMarketplaceInput(row) || row.etsyCheckedAt))
+      || planItem?.status === 'completed'
+    if (!etsyAttempted) return 'pending-etsy'
+
+    const etsyHasData = Boolean(row && rowHasEtsyMarketplaceInput(row))
+      || [planItem?.result?.etsySearches30d, planItem?.result?.etsyListings]
+        .some((value) => value !== null && value !== undefined && value !== '')
+    return etsyHasData ? 'pending-everbee' : 'done'
+  }
+}
+
+function crossNicheWorkflowMessage() {
+  const count = state.crossNicheWorkflow.batch.length
+  if (state.crossNicheWorkflow.status === 'pending-erank') {
+    return `上位${count}件を調査候補へ自動追加しました。次は2段目の「eRankで検索数を見る」を押してください。`
+  }
+  if (state.crossNicheWorkflow.status === 'pending-etsy') {
+    return `eRank確認が終わりました。次は4段目の「Etsy公式確認を自動実行」を押してください。`
+  }
+  if (state.crossNicheWorkflow.status === 'pending-everbee') {
+    return `Etsy公式確認が終わりました。次は4段目の「EverBeeで売上を確認する」を押してください。`
+  }
+  if (state.crossNicheWorkflow.status === 'complete') {
+    return `クロスニッチ再調査は完了しました。初回結果と実測済みの子キーワードを合わせて最終順位を確定しました。`
+  }
+  return '高競合で複数商品が売れている市場が見つかると、上位候補を通常調査へ自動追加します。'
+}
+
+function syncCrossNicheWorkflow({ announce = false, scroll = false } = {}) {
+  if (restoredResultsAwaitingConfirmation()) return { didQueue: false, queuedCandidates: [] }
+
+  const drilldown = currentCrossNicheDrilldown()
+  const result = advanceCrossNicheWorkflow({
+    workflow: state.crossNicheWorkflow,
+    candidates: drilldown.candidates,
+    hasParents: drilldown.parents.length > 0,
+    stageForKeyword: crossNicheStageResolver(),
+    limit: 12,
   })
+  const previousStatus = state.crossNicheWorkflow.status
+  state.crossNicheWorkflow = result.workflow
+
+  if (result.didQueue) {
+    state.candidates = limitNextResearchCandidates(
+      result.queuedCandidates.map(crossNicheCandidateForResearch),
+      12
+    )
+    state.activeDiscoveryLane = 'all'
+    state.marketplaceInsightPlan = null
+    state.marketplaceInsightMessage = ''
+    state.selectedResultKey = ''
+    state.seoPlan = null
+    elements.researchJobInput.value = ''
+    state.candidateMessage = crossNicheWorkflowMessage()
+    setFlowMode('auto', { persist: false })
+    if (scroll) {
+      window.setTimeout(() => {
+        document.querySelector('.candidates-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 0)
+    }
+  }
+
+  if (announce && (result.didQueue || previousStatus !== state.crossNicheWorkflow.status)) {
+    setSimpleStatus(crossNicheWorkflowMessage())
+  }
+  return result
 }
 
 function renderCrossNicheDrilldown() {
   const drilldown = currentCrossNicheDrilldown()
-  const actionable = actionableCrossNicheCandidates(drilldown)
   const hasParents = drilldown.parents.length > 0
   elements.crossNicheSection.hidden = !hasParents
   elements.crossNicheCount.innerHTML = `<strong>${drilldown.candidates.length}</strong><small>候補</small>`
-  elements.buildNextRoundBtn.disabled = actionable.length === 0
 
   if (!hasParents) {
     elements.crossNicheList.innerHTML = ''
@@ -2414,9 +2541,7 @@ function renderCrossNicheDrilldown() {
     `
   }).join('')
 
-  elements.crossNicheStatus.textContent = actionable.length > 0
-    ? `未検証の上位${actionable.length}件を通常のeRank調査へ追加できます。最終Opportunity点数とは別の探索候補です。`
-    : '表示中の交差候補はすでに確認済みです。高競合の有望な子市場があれば、次の深度を自動計算します。'
+  elements.crossNicheStatus.textContent = crossNicheWorkflowMessage()
 }
 
 async function copySelectedNounBrief(button) {
@@ -2726,18 +2851,6 @@ function resetCandidatesForInputChange(message = '条件を変更しました。
   renderAll()
 }
 
-function mergeCandidates(nextCandidates) {
-  const seen = new Set()
-  state.candidates = [...nextCandidates, ...state.candidates]
-    .filter((candidate) => {
-      const key = normalizePhrase(candidate.keyword)
-      if (!key || seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    .slice(0, Number(elements.limitInput.value) || 80)
-}
-
 function crossNicheCandidateForResearch(candidate) {
   const event = selectedEvent()
   const category = selectedCategory()
@@ -2777,32 +2890,6 @@ function limitNextResearchCandidates(candidates, limit = 12) {
     seen.add(keyword)
     return true
   }).slice(0, Math.max(1, limit))
-}
-
-function applyCrossNicheCandidates() {
-  const drilldown = currentCrossNicheDrilldown()
-  const crossNicheCandidates = actionableCrossNicheCandidates(drilldown)
-    .map(crossNicheCandidateForResearch)
-  const legacyFollowUps = generateFollowUpKeywords(state.researchRows, currentOptions())
-  const nextCandidates = limitNextResearchCandidates([...crossNicheCandidates, ...legacyFollowUps], 12)
-  if (nextCandidates.length === 0) {
-    elements.crossNicheStatus.textContent = '追加できる交差候補はありません。需要が落ちた候補や深度2の候補は自動で止めています。'
-    return
-  }
-
-  const before = new Set(state.candidates.map((candidate) => normalizePhrase(candidate.keyword)))
-  mergeCandidates(nextCandidates)
-  state.activeDiscoveryLane = 'all'
-  const added = state.candidates.filter((candidate) => !before.has(normalizePhrase(candidate.keyword))).length
-  state.candidateMessage = ''
-  setFlowMode('auto')
-  renderAll()
-  const message = added > 0
-    ? `${added}件を調査候補へ追加しました。2段目の候補を確認して「eRankで検索数を見る」へ進みます。`
-    : '上位候補はすでに調査候補へ入っています。'
-  elements.crossNicheStatus.textContent = message
-  setSimpleStatus(message)
-  document.querySelector('.candidates-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function buildMergedResearchRow(existingRow, row, keyword) {
@@ -2917,6 +3004,7 @@ function addManualResearch() {
   elements.etsyListingsInput.value = ''
   elements.etsyRelatedTermsInput.value = ''
   elements.notesInput.value = ''
+  syncCrossNicheWorkflow({ announce: true, scroll: true })
   renderAll()
 }
 
@@ -2929,6 +3017,7 @@ function importCsv() {
     const count = fillEverbeeJobFromErank()
     setSimpleStatus(`検索結果を読み込みました。関連語も使って、売上確認する候補を${count}件作りました。`)
   }
+  syncCrossNicheWorkflow({ announce: true, scroll: true })
   renderAll()
 }
 
@@ -3031,6 +3120,9 @@ function importExtensionResults(extensionState) {
         ? `eRank確認中です。強い語句は少なめですが、追加探索に使える語句${exploreCount}件からEtsy公式確認候補${keywords.length}件を作っています。`
         : `eRank確認中です。関連キーワード${relatedCount}件を見ていますが、今はまだ強い候補が少なめです。`
     setSimpleStatus(nextMessage)
+  }
+  if (!extensionState.active) {
+    syncCrossNicheWorkflow({ announce: true, scroll: state.progress.mode === 'keyword' })
   }
   persistMarketFinderState()
   renderAll()
@@ -3320,6 +3412,7 @@ function clearResearchResults(scope = 'all') {
     state.researchRows = state.researchRows.filter((row) => !scoreEverbeeResult(row, currentOptions()).validation.hasEverbeeData)
   } else {
     state.researchRows = []
+    state.crossNicheWorkflow = createCrossNicheWorkflowState()
     state.restoredResearchSavedAt = ''
     state.restoredResultsAccepted = false
     state.acceptExtensionResults = false
@@ -3508,7 +3601,10 @@ async function collectTrendScoutTerms() {
 function acceptRestoredResearchResults() {
   if (!state.restoredResearchSavedAt || state.researchRows.length === 0) return
   state.restoredResultsAccepted = true
-  setSimpleStatus('前回の保存結果を今回の続きとして使います。次は「Etsy公式確認を自動実行」です。')
+  const result = syncCrossNicheWorkflow({ announce: true, scroll: true })
+  if (!result.didQueue) {
+    setSimpleStatus('前回の保存結果を今回の続きとして使います。現在の調査段階から再開します。')
+  }
   renderAll()
 }
 
@@ -3806,7 +3902,9 @@ function renderProgressModal(extensionState = state.extensionState) {
           : `eRank確認が完了しました。今回は弱めなので、イベント・商品・手入力イベントを変えてもう一度広く見るのがおすすめです。`
       setSimpleStatus(message)
     } else if (state.progress.mode === 'keyword') {
-      setSimpleStatus(`${done}件の売上確認が完了しました。最終結果で候補と名詞候補を確認してください。必要ならCSV保存できます。`)
+      setSimpleStatus(isCrossNicheWorkflowPending(state.crossNicheWorkflow)
+        ? `${done}件の売上確認が完了しました。${crossNicheWorkflowMessage()}`
+        : `${done}件の売上確認が完了しました。最終結果で候補と名詞候補を確認してください。必要ならCSV保存できます。`)
     } else if (state.progress.mode === 'trend') {
       setSimpleStatus(state.progress.message || `候補の自動探索が完了しました。候補一覧に${state.candidates.length}件を追加しました。`)
     }
@@ -3816,7 +3914,9 @@ function renderProgressModal(extensionState = state.extensionState) {
         ? `eRank確認が完了しました。弱い語句で止めず、関連語も見てEtsy公式確認候補を作りました。`
         : state.progress.mode === 'trend'
           ? state.progress.message || `候補の自動探索が完了しました。候補一覧に${state.candidates.length}件を追加しました。`
-          : `${done}件のEverBee調査が完了しました。`
+          : isCrossNicheWorkflowPending(state.crossNicheWorkflow)
+            ? `${done}件のEverBee調査が完了しました。${crossNicheWorkflowMessage()}`
+            : `${done}件のEverBee調査が完了しました。`
     elements.progressHideBtn.textContent = '閉じる'
     return
   }
@@ -3959,8 +4059,9 @@ async function startExtensionResearch() {
     elements.extensionStatus.textContent = '調査キーワード / JSON欄に、調査したいキーワードを入れてください。'
     return
   }
-  if (!confirmExportBeforeClearingResults({ scope: 'everbee', label: '前回のEverBee売上結果' })) return
-  clearResearchResults('everbee')
+  const preserveExisting = preserveCrossNicheResearch('everbee')
+  if (!preserveExisting && !confirmExportBeforeClearingResults({ scope: 'everbee', label: '前回のEverBee売上結果' })) return
+  if (!preserveExisting) clearResearchResults('everbee')
   state.acceptExtensionResults = true
 
   try {
@@ -3995,8 +4096,9 @@ async function startErankResearch() {
     renderCandidates()
     return
   }
-  if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回の調査結果' })) return
-  clearResearchResults('all')
+  const preserveExisting = preserveCrossNicheResearch('erank')
+  if (!preserveExisting && !confirmExportBeforeClearingResults({ scope: 'all', label: '前回の調査結果' })) return
+  if (!preserveExisting) clearResearchResults('all')
   state.acceptExtensionResults = true
 
   try {
@@ -4158,6 +4260,7 @@ async function runMarketplaceInsightAutomation() {
       const completed = state.marketplaceInsightPlan?.items?.filter((item) => item.status === 'completed').length ?? 0
       state.marketplaceInsightMessage = `Etsy公式の自動確認が完了しました。${completed}件を取得しました。`
     }
+    syncCrossNicheWorkflow({ announce: true })
     renderAll()
     persistMarketFinderState()
   }
@@ -4260,9 +4363,11 @@ async function captureMarketplaceInsight(options = {}) {
       source: `Etsy Marketplace Insights related to ${item.query}`,
       capturedAt: checkedAt,
     })))
-    if (added > 0) generateCandidates({ preserveMarketplacePlan: true })
-    else if (state.marketplaceInsightMode === 'plus' && relatedMetrics.length > 0) {
-      rebuildMarketplaceInsightPlan({ preserveExisting: true })
+    if (!isCrossNicheWorkflowPending(state.crossNicheWorkflow)) {
+      if (added > 0) generateCandidates({ preserveMarketplacePlan: true })
+      else if (state.marketplaceInsightMode === 'plus' && relatedMetrics.length > 0) {
+        rebuildMarketplaceInsightPlan({ preserveExisting: true })
+      }
     }
     const followUpMessage = state.marketplaceInsightMode === 'plus'
       ? ` / 候補プール ${state.marketplaceInsightPlan?.candidatePool?.length ?? 0}件${marketplaceNextBatchState().ready ? ' / 次の5語を追加できます' : ''}`
@@ -4278,6 +4383,7 @@ async function captureMarketplaceInsight(options = {}) {
     return false
   } finally {
     if (manageBusy) state.marketplaceInsightBusy = false
+    if (manageBusy) syncCrossNicheWorkflow({ announce: true })
     renderAll()
   }
 }
@@ -4291,7 +4397,8 @@ function skipMarketplaceInsight() {
   state.marketplaceInsightMessage = wasOpened
     ? `「${item.query}」をスキップしました。Etsy側で検索済みの場合、無料枠は戻りません。`
     : `「${item.query}」をスキップしました。無料検索は実行していません。`
-  renderMarketplaceInsightPlan()
+  syncCrossNicheWorkflow({ announce: true })
+  renderAll()
   persistMarketFinderState()
 }
 
@@ -4380,7 +4487,6 @@ function bindEvents() {
   elements.downloadJobBtn.addEventListener('click', downloadJob)
   elements.downloadErankCsvBtn.addEventListener('click', exportErankCsv)
   elements.downloadStep4CsvBtn.addEventListener('click', exportStep4Csv)
-  elements.buildNextRoundBtn.addEventListener('click', applyCrossNicheCandidates)
   elements.candidateErankBtn.addEventListener('click', simpleStartErankResearch)
   elements.erankToEverbeeBtn.addEventListener('click', simpleStartResearch)
   elements.autoBucketBtn.addEventListener('click', () => autoBucketKeywords(true))
@@ -4427,13 +4533,18 @@ function init() {
   renderTargets({ selectedTargets: persisted?.form?.targets })
   bindEvents()
   setFlowMode(persisted?.flowMode ?? 'auto', { persist: false })
-  state.candidates = []
-  state.candidateMessage = 'まだ候補はありません。商品と条件を選んで「候補を自動で探す」を押してください。'
+  state.candidates = isCrossNicheWorkflowPending(state.crossNicheWorkflow)
+    ? state.crossNicheWorkflow.batch.map(crossNicheCandidateForResearch)
+    : []
+  state.candidateMessage = state.candidates.length > 0
+    ? crossNicheWorkflowMessage()
+    : 'まだ候補はありません。商品と条件を選んで「候補を自動で探す」を押してください。'
   if (shouldDiscardMarketplacePlan(state.marketplaceInsightPlan, erankResultRows())) {
     state.marketplaceInsightPlan = null
     state.marketplaceInsightMessage = ''
   }
-  const needsAdaptiveMigration = state.marketplaceInsightMode === 'plus'
+  const needsAdaptiveMigration = !isCrossNicheWorkflowPending(state.crossNicheWorkflow)
+    && state.marketplaceInsightMode === 'plus'
     && state.marketplaceInsightPlan?.items?.length > 0
     && (state.marketplaceInsightPlan.seedQuota !== 20
       || !Array.isArray(state.marketplaceInsightPlan.candidatePool))

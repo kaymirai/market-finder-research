@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260720-10">
+    <link rel="stylesheet" href="./styles.css?v=20260720-11">
   </head>
   <body>
     <main class="app-shell">
@@ -512,13 +512,12 @@
           <span><strong>Top Share</strong> 70%以上は単一ヒットへの集中としてAから除外</span>
           <span><strong>Freshness</strong> eRankとEverBeeが45日以内の時だけA/B候補</span>
         </div>
-        <div id="resultsList" class="results-list"></div>
         <section id="crossNicheSection" class="cross-niche-section" hidden>
           <div class="cross-niche-heading">
             <div>
-              <p class="section-kicker">追加探索</p>
-              <h3>高競合の売れ筋から掘り下げる</h3>
-              <p>競合が多くても複数商品が売れている市場から、需要を残しながら競合が下がる交差キーワードを探します。</p>
+              <p class="section-kicker">自動再探索</p>
+              <h3>高競合の売れ筋を自動で掘り下げる</h3>
+              <p>複数商品が売れている高競合市場から交差キーワードを作り、通常のeRank・Etsy公式・EverBee確認へ自動で戻します。</p>
             </div>
             <span id="crossNicheCount" class="count-badge"><strong>0</strong><small>候補</small></span>
           </div>
@@ -527,12 +526,10 @@
             <span><strong>需要維持率</strong> 親市場の検索需要をどれだけ残したか</span>
             <span><strong>効率改善</strong> 検索数 ÷ 競合数が親の何倍になったか</span>
           </div>
+          <div id="crossNicheStatus" class="inline-status cross-niche-status">候補が見つかると通常調査へ自動追加し、再検証後に最終順位を確定します。</div>
           <div id="crossNicheList" class="cross-niche-list"></div>
-          <div class="step-primary-action cross-niche-action">
-            <button id="buildNextRoundBtn" type="button" class="primary-btn full-width">上位候補を次の調査へ追加</button>
-            <div id="crossNicheStatus" class="inline-status">比較できる親市場が見つかると、ここから通常のeRank調査へ戻せます。</div>
-          </div>
         </section>
+        <div id="resultsList" class="results-list"></div>
       </section>
 
       <section class="seo-section advanced-only">
@@ -652,6 +649,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260720-32"></script>
+    <script type="module" src="./src/app.js?v=20260720-33"></script>
   </body>
 </html>
