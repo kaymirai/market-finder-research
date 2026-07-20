@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260720-9">
+    <link rel="stylesheet" href="./styles.css?v=20260720-10">
   </head>
   <body>
     <main class="app-shell">
@@ -235,7 +235,6 @@
           </dl>
 
           <div class="button-row candidate-actions advanced-only">
-            <button id="buildNextRoundBtn" type="button" class="ghost-btn" data-optional="任意">売れた語句から追加候補</button>
             <button id="copyReadyBtn" type="button" class="ghost-btn" data-optional="任意">調査欄へ候補を入れる</button>
           </div>
           <div class="step-primary-action">
@@ -514,6 +513,26 @@
           <span><strong>Freshness</strong> eRankとEverBeeが45日以内の時だけA/B候補</span>
         </div>
         <div id="resultsList" class="results-list"></div>
+        <section id="crossNicheSection" class="cross-niche-section" hidden>
+          <div class="cross-niche-heading">
+            <div>
+              <p class="section-kicker">追加探索</p>
+              <h3>高競合の売れ筋から掘り下げる</h3>
+              <p>競合が多くても複数商品が売れている市場から、需要を残しながら競合が下がる交差キーワードを探します。</p>
+            </div>
+            <span id="crossNicheCount" class="count-badge"><strong>0</strong><small>候補</small></span>
+          </div>
+          <div class="cross-niche-guide">
+            <span><strong>競合減少率</strong> 親市場から競合がどれだけ減ったか</span>
+            <span><strong>需要維持率</strong> 親市場の検索需要をどれだけ残したか</span>
+            <span><strong>効率改善</strong> 検索数 ÷ 競合数が親の何倍になったか</span>
+          </div>
+          <div id="crossNicheList" class="cross-niche-list"></div>
+          <div class="step-primary-action cross-niche-action">
+            <button id="buildNextRoundBtn" type="button" class="primary-btn full-width">上位候補を次の調査へ追加</button>
+            <div id="crossNicheStatus" class="inline-status">比較できる親市場が見つかると、ここから通常のeRank調査へ戻せます。</div>
+          </div>
+        </section>
       </section>
 
       <section class="seo-section advanced-only">
@@ -633,6 +652,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260720-31"></script>
+    <script type="module" src="./src/app.js?v=20260720-32"></script>
   </body>
 </html>

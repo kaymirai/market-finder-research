@@ -1572,6 +1572,186 @@ button[data-optional]::before {
   margin-top: 16px;
 }
 
+.cross-niche-section {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.cross-niche-heading,
+.cross-niche-parent-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.cross-niche-heading h3,
+.cross-niche-parent-heading h4 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.cross-niche-heading p {
+  max-width: 850px;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.cross-niche-guide {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cross-niche-guide span {
+  border-radius: 999px;
+  background: #f8fafc;
+  color: var(--muted);
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cross-niche-guide strong {
+  color: var(--slate);
+}
+
+.cross-niche-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.cross-niche-parent {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.cross-niche-parent-heading {
+  padding: 13px;
+  background: #f0fdfa;
+}
+
+.cross-niche-parent-heading h4 {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.cross-niche-parent-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(76px, auto));
+  gap: 7px;
+}
+
+.cross-niche-parent-metrics span {
+  display: grid;
+  gap: 3px;
+  min-width: 76px;
+  border-radius: 7px;
+  background: #fff;
+  padding: 7px 9px;
+  text-align: right;
+}
+
+.cross-niche-parent-metrics small,
+.cross-niche-row small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.cross-niche-table-head,
+.cross-niche-row {
+  display: grid;
+  grid-template-columns: 76px minmax(280px, 1.5fr) repeat(4, minmax(88px, .45fr));
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.cross-niche-table-head {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.cross-niche-row {
+  border-bottom: 1px solid var(--line);
+}
+
+.cross-niche-row:last-child {
+  border-bottom: 0;
+}
+
+.cross-niche-row > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cross-niche-priority {
+  width: 68px;
+  border-radius: 7px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  padding: 7px;
+  text-align: center;
+}
+
+.cross-niche-priority strong {
+  font-size: 20px;
+}
+
+.cross-niche-keyword > strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.cross-niche-keyword > small {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.cross-niche-verdict strong {
+  color: var(--blue);
+}
+
+.cross-niche-row.is-promising {
+  background: #f0fdf4;
+}
+
+.cross-niche-row.is-promising .cross-niche-verdict strong {
+  color: #166534;
+}
+
+.cross-niche-row.is-weak-demand,
+.cross-niche-row.is-weak-competition,
+.cross-niche-row.is-weak-sales {
+  background: #fff7ed;
+}
+
+.cross-niche-row.is-weak-demand .cross-niche-verdict strong,
+.cross-niche-row.is-weak-competition .cross-niche-verdict strong,
+.cross-niche-row.is-weak-sales .cross-niche-verdict strong {
+  color: var(--amber);
+}
+
+.cross-niche-action {
+  margin-top: 14px;
+}
+
 .erank-group {
   grid-column: 1 / -1;
   min-width: 0;

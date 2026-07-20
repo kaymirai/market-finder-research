@@ -3,6 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   aggregateEverbeeListings,
+  buildCrossNicheDrilldown,
   everbeeResultsToBroadListings,
   extractNicheHintsFromListings,
   advanceMarketplaceInsightResearch,
@@ -26,6 +27,8 @@ import {
   evaluateMarketplaceInsightResearchStop,
   parseBroadMarketListings,
   parseEverbeeRows,
+  compareCrossNicheRows,
+  selectCrossNicheParentMarkets,
 } from '../../shared/market-keyword-engine/index.js'
 
 const SCORE_OPTIONS = { categoryId: 'shirt', now: '2026-07-19T00:00:00Z' }
@@ -174,6 +177,158 @@ test('round-trips EverBee product rows through the research CSV parser', () => {
   ].join('\n'))
 
   assert.deepEqual(rows[0].productRows, productRows)
+})
+
+test('round-trips cross-niche lineage through the research CSV parser', () => {
+  const rows = parseEverbeeRows([
+    'Keyword,Cross Niche Parent,Cross Niche Depth',
+    'book club cat shirt,cat shirt,1',
+  ].join('\n'))
+
+  assert.equal(rows[0].crossNicheParent, 'cat shirt')
+  assert.equal(rows[0].crossNicheDepth, '1')
+})
+
+test('keeps a saturated multi-seller market as a cross-niche exploration parent', () => {
+  const parents = selectCrossNicheParentMarkets([{
+    keyword: 'cat shirt',
+    listingsAnalyzed: 43906,
+    productRows: [
+      { title: 'Book Club Cat Shirt', monthlySales: 40, listingAgeMonths: 6 },
+      { title: 'Retro Book Club Cat Shirt', monthlySales: 25, listingAgeMonths: 10 },
+    ],
+  }], SCORE_OPTIONS)
+
+  assert.equal(parents.length, 1)
+  assert.equal(parents[0].keyword, 'cat shirt')
+  assert.equal(parents[0].competition.source, 'everbee')
+  assert.equal(parents[0].competition.value, 43906)
+  assert.equal(parents[0].sales.sellingListingCount, 2)
+  assert.equal(parents[0].sales.totalMonthlySales, 65)
+  assert.equal(parents[0].depth, 0)
+})
+
+test('does not use one old bestseller as a cross-niche exploration parent', () => {
+  const parents = selectCrossNicheParentMarkets([{
+    keyword: 'cat shirt',
+    listingsAnalyzed: 43906,
+    productRows: [
+      { title: 'Vintage Cat Shirt', monthlySales: 300, listingAgeMonths: 48 },
+    ],
+  }], SCORE_OPTIONS)
+
+  assert.equal(parents.length, 0)
+})
+
+test('compares parent and child using one demand and supply source', () => {
+  const comparison = compareCrossNicheRows({
+    keyword: 'cat shirt',
+    etsySearches30d: 1000,
+    etsyListings: 50000,
+    medianMonthlySales: 10,
+    sellingListingCount: 5,
+    recentSellingListingCount: 3,
+  }, {
+    keyword: 'book club cat shirt',
+    etsySearches30d: 200,
+    etsyListings: 5000,
+    medianMonthlySales: 5,
+    sellingListingCount: 3,
+    recentSellingListingCount: 2,
+  })
+
+  assert.equal(comparison.source, 'etsy')
+  assert.equal(comparison.competitionReduction, 0.9)
+  assert.equal(comparison.demandRetention, 0.2)
+  assert.equal(comparison.efficiencyLift, 2)
+  assert.equal(comparison.salesRetention, 0.5)
+  assert.equal(comparison.verdict, 'promising')
+})
+
+test('does not reward a child whose demand collapses after drilldown', () => {
+  const comparison = compareCrossNicheRows({
+    keyword: 'cat shirt',
+    erankSearchVolume: 1000,
+    erankCompetition: 50000,
+  }, {
+    keyword: 'book club cat shirt',
+    erankSearchVolume: 20,
+    erankCompetition: 5000,
+  })
+
+  assert.equal(comparison.competitionReduction, 0.9)
+  assert.equal(comparison.demandRetention, 0.02)
+  assert.equal(comparison.verdict, 'weak-demand')
+})
+
+test('keeps a demand-efficient child on watch until EverBee sales is checked', () => {
+  const comparison = compareCrossNicheRows({
+    keyword: 'cat shirt',
+    erankSearchVolume: 1000,
+    erankCompetition: 50000,
+  }, {
+    keyword: 'book club cat shirt',
+    erankSearchVolume: 200,
+    erankCompetition: 5000,
+  })
+
+  assert.equal(comparison.efficiencyLift, 2)
+  assert.equal(comparison.verdict, 'watch')
+})
+
+test('rejects a child whose median sales collapses despite better demand efficiency', () => {
+  const comparison = compareCrossNicheRows({
+    keyword: 'cat shirt',
+    etsySearches30d: 1000,
+    etsyListings: 50000,
+    medianMonthlySales: 100,
+    sellingListingCount: 5,
+  }, {
+    keyword: 'book club cat shirt',
+    etsySearches30d: 200,
+    etsyListings: 5000,
+    medianMonthlySales: 5,
+    sellingListingCount: 3,
+  })
+
+  assert.equal(comparison.salesRetention, 0.05)
+  assert.equal(comparison.verdict, 'weak-sales')
+})
+
+test('builds cross-niche candidates from repeated recent selling-title phrases', () => {
+  const drilldown = buildCrossNicheDrilldown([{
+    keyword: 'cat shirt',
+    listingsAnalyzed: 43906,
+    productRows: [
+      { title: 'Book Club Cat Shirt', monthlySales: 40, listingAgeMonths: 6 },
+      { title: 'Retro Book Club Cat Shirt', monthlySales: 25, listingAgeMonths: 10 },
+      { title: 'Teacher Cat Shirt', monthlySales: 12, listingAgeMonths: 8 },
+    ],
+  }], SCORE_OPTIONS)
+
+  const candidate = drilldown.parents[0].candidates.find((row) => row.keyword === 'book club cat shirt')
+  assert.ok(candidate)
+  assert.equal(candidate.parentKeyword, 'cat shirt')
+  assert.equal(candidate.modifier, 'book club')
+  assert.equal(candidate.depth, 1)
+  assert.ok(candidate.sources.includes('everbee-title'))
+  assert.equal(candidate.verdict, 'needs-research')
+})
+
+test('stops cross-niche expansion at depth two', () => {
+  const drilldown = buildCrossNicheDrilldown([{
+    keyword: 'book club cat shirt',
+    crossNicheParent: 'cat shirt',
+    crossNicheDepth: 2,
+    listingsAnalyzed: 20000,
+    productRows: [
+      { title: 'Teacher Book Club Cat Shirt', monthlySales: 25, listingAgeMonths: 5 },
+      { title: 'Funny Teacher Book Club Cat Shirt', monthlySales: 18, listingAgeMonths: 7 },
+    ],
+  }], SCORE_OPTIONS)
+
+  assert.equal(drilldown.parents.length, 0)
+  assert.equal(drilldown.candidates.length, 0)
 })
 
 test('returns evergreen timing for auto discovery', () => {

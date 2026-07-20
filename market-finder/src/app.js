@@ -2,6 +2,7 @@ import {
   MARKET_EVENTS,
   PRODUCT_CATEGORIES,
   advanceMarketplaceInsightResearch,
+  buildCrossNicheDrilldown,
   buildMarketplaceInsightPlan,
   generateBroadMarketQueries,
   generateBroadEventCandidates,
@@ -28,7 +29,7 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260720-10'
+} from '../../shared/market-keyword-engine/index.js?v=20260720-11'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
@@ -59,6 +60,7 @@ const QUERY_STRATEGY_LABELS = {
   direct: 'Direct',
   adjacent: 'Adjacent',
   observed: 'Observed',
+  'cross-niche': 'Cross niche',
 }
 const MARKETPLACE_STAGE_LABELS = {
   discovery: '入口',
@@ -221,6 +223,10 @@ const elements = {
   downloadErankCsvBtn: document.querySelector('#downloadErankCsvBtn'),
   downloadStep4CsvBtn: document.querySelector('#downloadStep4CsvBtn'),
   resultsList: document.querySelector('#resultsList'),
+  crossNicheSection: document.querySelector('#crossNicheSection'),
+  crossNicheCount: document.querySelector('#crossNicheCount'),
+  crossNicheList: document.querySelector('#crossNicheList'),
+  crossNicheStatus: document.querySelector('#crossNicheStatus'),
   copyKeywordsBtn: document.querySelector('#copyKeywordsBtn'),
   copyReadyBtn: document.querySelector('#copyReadyBtn'),
   downloadJobBtn: document.querySelector('#downloadJobBtn'),
@@ -1686,7 +1692,6 @@ function renderCandidates() {
   elements.copyReadyBtn.disabled = readyKeywords().length === 0
   elements.downloadJobBtn.disabled = readyKeywords().length === 0
   elements.candidateErankBtn.disabled = readyKeywords().length === 0
-  elements.buildNextRoundBtn.disabled = state.researchRows.length === 0
   elements.keywordSelect.innerHTML = state.candidates.map((candidate) => (
     `<option value="${escapeHtml(candidate.keyword)}">${escapeHtml(candidate.keyword)}</option>`
   )).join('')
@@ -2047,7 +2052,6 @@ function renderErankResults() {
 
 function renderResults() {
   const ranked = currentResearchAnalysis().everbeeRows
-  elements.buildNextRoundBtn.disabled = state.researchRows.length === 0
 
   if (ranked.length === 0) {
     elements.resultsList.innerHTML = '<div class="empty-state">「EverBeeで売上を確認する」が終わると、ここにおすすめキーワードが表示されます。</div>'
@@ -2271,7 +2275,6 @@ function everbeeResultRows() {
 
 function renderResultsTable() {
   const ranked = everbeeResultRows()
-  elements.buildNextRoundBtn.disabled = state.researchRows.length === 0
   elements.downloadStep4CsvBtn.disabled = ranked.length === 0
 
   if (ranked.length === 0) {
@@ -2310,6 +2313,110 @@ function renderResultsTable() {
       </div>
     </div>
   `
+}
+
+function formatCrossNichePercent(value) {
+  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-'
+}
+
+function formatCrossNicheLift(value) {
+  return Number.isFinite(value) ? `${Math.round(value * 10) / 10}x` : '-'
+}
+
+function crossNicheVerdictLabel(verdict) {
+  if (verdict === 'promising') return '有望'
+  if (verdict === 'watch') return '追加確認'
+  if (verdict === 'weak-demand') return '需要減少'
+  if (verdict === 'weak-competition') return '競合減少不足'
+  if (verdict === 'weak-sales') return '販売不足'
+  return '未検証'
+}
+
+function crossNicheSourceLabel(source) {
+  if (source === 'everbee-title') return 'EverBee売れ筋タイトル'
+  if (source === 'etsy-related') return 'Etsy関連語'
+  if (source === 'measured-child') return '調査済みの子市場'
+  return source
+}
+
+function currentCrossNicheDrilldown() {
+  return buildCrossNicheDrilldown(state.researchRows, currentOptions())
+}
+
+function actionableCrossNicheCandidates(drilldown) {
+  return drilldown.researchCandidates.filter((candidate) => {
+    const researched = findResearchRow(candidate.keyword)
+    if (!researched) return true
+    return !rowHasErankInput(researched) && !rowHasEtsyMarketplaceInput(researched)
+  })
+}
+
+function renderCrossNicheDrilldown() {
+  const drilldown = currentCrossNicheDrilldown()
+  const actionable = actionableCrossNicheCandidates(drilldown)
+  const hasParents = drilldown.parents.length > 0
+  elements.crossNicheSection.hidden = !hasParents
+  elements.crossNicheCount.innerHTML = `<strong>${drilldown.candidates.length}</strong><small>候補</small>`
+  elements.buildNextRoundBtn.disabled = actionable.length === 0
+
+  if (!hasParents) {
+    elements.crossNicheList.innerHTML = ''
+    elements.crossNicheStatus.textContent = '高競合で複数商品が売れている探索用親市場は、今回の結果にはありません。'
+    return
+  }
+
+  elements.crossNicheList.innerHTML = drilldown.parents.map((parent) => {
+    const sourceLabel = parent.competition.source === 'everbee'
+      ? 'EverBee競合'
+      : parent.competition.source === 'etsy'
+        ? 'Etsy掲載数'
+        : 'eRank競合'
+    const rows = parent.candidates.length > 0
+      ? parent.candidates.map((candidate) => {
+        const comparison = candidate.comparison ?? {}
+        const sourceLabels = candidate.sources.map(crossNicheSourceLabel).join(' + ')
+        const verdict = crossNicheVerdictLabel(candidate.verdict)
+        return `
+          <div class="cross-niche-row is-${escapeHtml(candidate.verdict)}">
+            <span class="cross-niche-priority"><small>探索優先</small><strong>${candidate.priorityScore}</strong></span>
+            <span class="cross-niche-keyword">
+              <strong>${escapeHtml(candidate.keyword)}</strong>
+              <small>追加軸: ${escapeHtml(candidate.modifier)} / 深度 ${candidate.depth} / ${escapeHtml(sourceLabels)}</small>
+            </span>
+            <span data-label="競合減少率"><small>競合減少率</small><strong>${escapeHtml(formatCrossNichePercent(comparison.competitionReduction))}</strong></span>
+            <span data-label="需要維持率"><small>需要維持率</small><strong>${escapeHtml(formatCrossNichePercent(comparison.demandRetention))}</strong></span>
+            <span data-label="効率改善"><small>効率改善</small><strong>${escapeHtml(formatCrossNicheLift(comparison.efficiencyLift))}</strong></span>
+            <span class="cross-niche-verdict"><small>判定</small><strong>${escapeHtml(verdict)}</strong></span>
+          </div>
+        `
+      }).join('')
+      : '<div class="empty-state small">売れ筋商品から新しい交差軸を作れませんでした。</div>'
+
+    return `
+      <article class="cross-niche-parent">
+        <div class="cross-niche-parent-heading">
+          <div>
+            <span class="soft-pill">探索用親市場 / 深度 ${parent.depth}</span>
+            <h4>${escapeHtml(parent.keyword)}</h4>
+          </div>
+          <div class="cross-niche-parent-metrics">
+            <span><small>${escapeHtml(sourceLabel)}</small><strong>${escapeHtml(formatCompactNumber(parent.competition.value))}</strong></span>
+            <span><small>販売商品</small><strong>${escapeHtml(formatCompactNumber(parent.sales.sellingListingCount))}</strong></span>
+            <span><small>最近販売</small><strong>${escapeHtml(formatCompactNumber(parent.sales.recentSellingListingCount))}</strong></span>
+            <span><small>合計月販</small><strong>${escapeHtml(formatCompactNumber(parent.sales.totalMonthlySales))}</strong></span>
+          </div>
+        </div>
+        <div class="cross-niche-table-head">
+          <span>探索</span><span>子キーワード</span><span>競合減少</span><span>需要維持</span><span>効率</span><span>判定</span>
+        </div>
+        <div class="cross-niche-rows">${rows}</div>
+      </article>
+    `
+  }).join('')
+
+  elements.crossNicheStatus.textContent = actionable.length > 0
+    ? `未検証の上位${actionable.length}件を通常のeRank調査へ追加できます。最終Opportunity点数とは別の探索候補です。`
+    : '表示中の交差候補はすでに確認済みです。高競合の有望な子市場があれば、次の深度を自動計算します。'
 }
 
 async function copySelectedNounBrief(button) {
@@ -2460,6 +2567,7 @@ function renderAll() {
   renderErankResults()
   renderMarketplaceInsightPlan()
   renderResultsTable()
+  renderCrossNicheDrilldown()
   renderSeoPlan()
   persistMarketFinderState()
 }
@@ -2630,15 +2738,71 @@ function mergeCandidates(nextCandidates) {
     .slice(0, Number(elements.limitInput.value) || 80)
 }
 
-function buildNextRound() {
-  const followUps = generateFollowUpKeywords(state.researchRows, currentOptions())
-  if (followUps.length === 0) {
-    elements.extensionStatus.textContent = '売上ありの候補がまだありません。EverBee結果を入れてから派生できます。'
+function crossNicheCandidateForResearch(candidate) {
+  const event = selectedEvent()
+  const category = selectedCategory()
+  const riskTerms = detectRiskTerms(candidate.keyword, elements.riskInput.value.split(/\r?\n|,/))
+  const parentRow = findResearchRow(candidate.parentKeyword)
+  const sourceAt = parentRow?.everbeeCheckedAt || parentRow?.etsyCheckedAt || parentRow?.erankCheckedAt || ''
+  return {
+    keyword: candidate.keyword,
+    eventId: event.id,
+    eventLabel: event.jpLabel,
+    categoryId: category.id,
+    categoryLabel: category.label,
+    score: candidate.priorityScore,
+    wordCount: candidate.keyword.split(' ').filter(Boolean).length,
+    riskTerms,
+    status: riskTerms.length > 0 ? 'review' : 'ready',
+    discoveryLane: 'adjacent',
+    queryStrategy: 'cross-niche',
+    axisTerms: [candidate.modifier],
+    crossNicheParent: candidate.parentKeyword,
+    crossNicheDepth: candidate.depth,
+    sourceLabel: '高競合の売れ筋からクロスニッチ探索',
+    sourceDetail: `${candidate.parentKeyword} + ${candidate.modifier}`,
+    sourceAt,
+    sourceBaseKeyword: candidate.parentKeyword,
+    sourceFreshness: getSourceFreshness(sourceAt),
+    timing: getMarketTiming(event),
+    candidateStage: 'idea',
+  }
+}
+
+function limitNextResearchCandidates(candidates, limit = 12) {
+  const seen = new Set()
+  return candidates.filter((candidate) => {
+    const keyword = normalizePhrase(candidate?.keyword)
+    if (!keyword || seen.has(keyword)) return false
+    seen.add(keyword)
+    return true
+  }).slice(0, Math.max(1, limit))
+}
+
+function applyCrossNicheCandidates() {
+  const drilldown = currentCrossNicheDrilldown()
+  const crossNicheCandidates = actionableCrossNicheCandidates(drilldown)
+    .map(crossNicheCandidateForResearch)
+  const legacyFollowUps = generateFollowUpKeywords(state.researchRows, currentOptions())
+  const nextCandidates = limitNextResearchCandidates([...crossNicheCandidates, ...legacyFollowUps], 12)
+  if (nextCandidates.length === 0) {
+    elements.crossNicheStatus.textContent = '追加できる交差候補はありません。需要が落ちた候補や深度2の候補は自動で止めています。'
     return
   }
-  mergeCandidates(followUps)
+
+  const before = new Set(state.candidates.map((candidate) => normalizePhrase(candidate.keyword)))
+  mergeCandidates(nextCandidates)
+  state.activeDiscoveryLane = 'all'
+  const added = state.candidates.filter((candidate) => !before.has(normalizePhrase(candidate.keyword))).length
+  state.candidateMessage = ''
+  setFlowMode('auto')
   renderAll()
-  elements.extensionStatus.textContent = `${followUps.length}件の派生候補を追加しました。`
+  const message = added > 0
+    ? `${added}件を調査候補へ追加しました。2段目の候補を確認して「eRankで検索数を見る」へ進みます。`
+    : '上位候補はすでに調査候補へ入っています。'
+  elements.crossNicheStatus.textContent = message
+  setSimpleStatus(message)
+  document.querySelector('.candidates-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function buildMergedResearchRow(existingRow, row, keyword) {
@@ -2656,6 +2820,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     || erankSourceKeyword(row)
     || existingRow?.sourceKeyword
     || erankSourceKeyword(existingRow ?? {})
+  const candidate = state.candidates.find((item) => normalizePhrase(item.keyword) === keyword)
 
   return {
     keyword,
@@ -2674,6 +2839,14 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     topSalesShare: keepExistingWhenBlank('topSalesShare'),
     medianListingAgeMonths: keepExistingWhenBlank('medianListingAgeMonths'),
     productRows: Array.isArray(row.productRows) ? row.productRows : (existingRow?.productRows ?? []),
+    crossNicheParent: String(row.crossNicheParent ?? '').trim()
+      || String(existingRow?.crossNicheParent ?? '').trim()
+      || String(candidate?.crossNicheParent ?? '').trim(),
+    crossNicheDepth: String(row.crossNicheDepth ?? '').trim() !== ''
+      ? row.crossNicheDepth
+      : String(existingRow?.crossNicheDepth ?? '').trim() !== ''
+        ? existingRow.crossNicheDepth
+        : candidate?.crossNicheDepth ?? '',
     erankSearchVolume: keepExistingWhenBlank('erankSearchVolume'),
     erankClicks: keepExistingWhenBlank('erankClicks'),
     erankCtr: keepExistingWhenBlank('erankCtr'),
@@ -2942,6 +3115,8 @@ function exportErankCsv() {
     'Competition',
     'KD',
     'Trend',
+    'Cross Niche Parent',
+    'Cross Niche Depth',
     'Notes',
   ]
 
@@ -2960,6 +3135,8 @@ function exportErankCsv() {
       normalized.erankCompetition ?? '',
       normalized.erankKeywordDifficulty ?? '',
       normalized.erankTrend ?? '',
+      row.crossNicheParent ?? '',
+      row.crossNicheDepth ?? '',
       row.notes ?? '',
     ].map(csvCell).join(',')
   })
@@ -2999,6 +3176,8 @@ function exportStep4Csv() {
     'Etsy Checked At',
     'EverBee Checked At',
     'EverBee Product Rows JSON',
+    'Cross Niche Parent',
+    'Cross Niche Depth',
     'Top Monthly Sales',
     'Top Revenue',
     'Average Price',
@@ -3059,6 +3238,8 @@ function exportStep4Csv() {
       normalized.etsyCheckedAt ?? '',
       normalized.everbeeCheckedAt ?? '',
       JSON.stringify(Array.isArray(row.productRows) ? row.productRows : []),
+      row.crossNicheParent ?? '',
+      row.crossNicheDepth ?? '',
       normalized.topMonthlySales ?? '',
       normalized.topRevenue ?? '',
       normalized.averagePrice ?? '',
@@ -4199,7 +4380,7 @@ function bindEvents() {
   elements.downloadJobBtn.addEventListener('click', downloadJob)
   elements.downloadErankCsvBtn.addEventListener('click', exportErankCsv)
   elements.downloadStep4CsvBtn.addEventListener('click', exportStep4Csv)
-  elements.buildNextRoundBtn.addEventListener('click', buildNextRound)
+  elements.buildNextRoundBtn.addEventListener('click', applyCrossNicheCandidates)
   elements.candidateErankBtn.addEventListener('click', simpleStartErankResearch)
   elements.erankToEverbeeBtn.addEventListener('click', simpleStartResearch)
   elements.autoBucketBtn.addEventListener('click', () => autoBucketKeywords(true))

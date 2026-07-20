@@ -16,6 +16,7 @@ EtsyMiraiProducerへ組み込む前に、イベント別の低競合キーワー
 - 古い検索種や一般トレンドは発想用に留め、45日以内のeRank/EverBeeまたは7日以内のEtsy公式データだけをA/B判定に使用
 - 良い候補を商品テーマ、ターゲット、デザイン方向性、SEOタイトル、タグ案へ変換
 - 売れている候補から次ラウンドの派生キーワードを作成
+- 高競合でも複数商品が売れている市場から、需要を残しながら競合が下がるクロスニッチを最大2階層まで探索
 
 ## 起動
 
@@ -65,6 +66,24 @@ Etsy公式値は取得後7日以内だけOpportunity A/Bの判定に使い、Eve
 `広め検索語を作る` を押すと、イベントと商品から `fathers day shirt` などの広め検索語を作ります。
 Chrome拡張が接続済みなら、`EverBeeで広め調査` でその検索語を順番に調査し、EverBee画面から商品名と商品別の月間販売数・累計販売数・売上・公開後月数を共通IDで取得します。月間販売数順に並べ、公開12か月以内に複数商品で現れる語句を種ワード抽出で優先します。商品別の結合に失敗した場合は、検索結果全体の最大販売数を各商品へ流用しません。
 
+## 高競合市場からのクロスニッチ探索
+
+EverBee競合10,000件以上、Etsy掲載20,000件以上、またはeRank競合50,000件以上でも、複数の商品が売れている場合は直接狙う候補から捨てず、「探索用親市場」として残します。単一の古いベストセラーだけでは親市場にしません。
+
+5段目の最終結果の下で、EverBeeの商品別タイトル、Etsy関連語、すでに調査済みの子市場から交差軸を抽出します。親市場は上位3件、1親8候補、次の調査へ送る候補は12件、深度は最大2です。総当たりではなく、売れ筋証拠が強い上位だけを通常のeRank確認へ戻します。
+
+「上位候補を次の調査へ追加」を押すと自動調査表示の2段目へ戻ります。`Cross Niche Parent`と`Cross Niche Depth`も結果CSVへ保存するため、CSVを読み戻しても親子関係と深度上限を維持できます。
+
+親子の同じ情報源がそろった場合は、次を表示します。
+
+```text
+競合減少率 = 1 - 子の競合数 / 親の競合数
+需要維持率 = 子の検索数 / 親の検索数
+効率改善倍率 = 子の需要競合比 / 親の需要競合比
+```
+
+初期の有望条件は、競合50%以上減、需要10%以上維持、効率1.5倍以上、販売商品2件以上です。親子の月販売中央値を比較できる場合は販売維持率15%以上も必要です。EverBee未確認の子は有望確定にせず、需要維持率3%未満または販売維持率15%未満なら次へ進めません。この「探索優先度」は最終の`Opportunity A-D`点数とは別です。
+
 ## eRank連携
 
 かんたんモードでは、Chrome拡張がeRank Keyword Toolを開き、まず広めの検索語を順番に検索します。
@@ -76,7 +95,7 @@ Chrome拡張が接続済みなら、`EverBeeで広め調査` でその検索語�
 対応している列:
 
 ```csv
-Keyword,Listings Analyzed,Top Monthly Sales,Top Revenue,Average Price,Listing Age,eRank Search Volume,eRank Clicks,eRank CTR,eRank Competition,eRank KD,eRank Trend,Etsy Searches 30d,Etsy Listings,Etsy Related Terms,Notes,Visible Listing Count,Selling Listing Count,Recent Selling Listing Count,Median Monthly Sales,Median Monthly Revenue,Total Visible Monthly Sales,Top Sales Share,Median Listing Age Months,eRank Checked At,Etsy Checked At,EverBee Checked At,EverBee Product Rows JSON
+Keyword,Listings Analyzed,Top Monthly Sales,Top Revenue,Average Price,Listing Age,eRank Search Volume,eRank Clicks,eRank CTR,eRank Competition,eRank KD,eRank Trend,Etsy Searches 30d,Etsy Listings,Etsy Related Terms,Notes,Visible Listing Count,Selling Listing Count,Recent Selling Listing Count,Median Monthly Sales,Median Monthly Revenue,Total Visible Monthly Sales,Top Sales Share,Median Listing Age Months,eRank Checked At,Etsy Checked At,EverBee Checked At,EverBee Product Rows JSON,Cross Niche Parent,Cross Niche Depth
 ```
 
 `Listings Analyzed` はEverBee側の補助競合指標として段階評価します。500件以下を20点、1,000件以下を18点、2,500件以下を15点、5,000件以下を12点とし、30,000件以上は過密としてA/Bへ昇格させません。ただし、Etsy公式やeRankの競合数の代替、または販売密度の分母には使いません。

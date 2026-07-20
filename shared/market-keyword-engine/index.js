@@ -1086,6 +1086,8 @@ const FIELD_ALIASES = {
   topSalesShare: ['top sales share', 'top listing sales share'],
   medianListingAgeMonths: ['median listing age months', 'median listing age'],
   productRows: ['everbee product rows json', 'product rows json', 'everbee product rows'],
+  crossNicheParent: ['cross niche parent', 'cross-niche parent', 'parent keyword'],
+  crossNicheDepth: ['cross niche depth', 'cross-niche depth', 'drilldown depth'],
   erankCheckedAt: ['erank checked at', 'erank captured at'],
   etsyCheckedAt: ['etsy checked at', 'etsy captured at', 'marketplace checked at'],
   everbeeCheckedAt: ['everbee checked at', 'everbee captured at'],
@@ -2570,6 +2572,412 @@ export function extractNicheHintsFromListings(listings = [], limit = 20, options
       || b.listingCount - a.listingCount
       || a.keyword.localeCompare(b.keyword, 'en'))
     .slice(0, limit)
+}
+
+function roundedCrossNicheMetric(value) {
+  if (!Number.isFinite(value)) return null
+  return Math.round(value * 1000) / 1000
+}
+
+function medianNumber(values = []) {
+  const sorted = values.filter(Number.isFinite).sort((left, right) => left - right)
+  if (sorted.length === 0) return null
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle]
+}
+
+function crossNicheSalesEvidence(row = {}) {
+  const productRows = Array.isArray(row.productRows) ? row.productRows : []
+  const products = productRows
+    .map((product) => ({
+      monthlySales: parseNumber(product?.monthlySales ?? product?.sales) ?? 0,
+      listingAgeMonths: parseListingAgeMonths(product?.listingAgeMonths ?? product?.listingAge),
+    }))
+    .filter((product) => product.monthlySales >= 0)
+  const sellingProducts = products.filter((product) => product.monthlySales > 0)
+
+  if (products.length > 0) {
+    const monthlySales = sellingProducts.map((product) => product.monthlySales)
+    return {
+      hasEverbeeData: true,
+      hasProductRows: true,
+      sellingListingCount: sellingProducts.length,
+      recentSellingListingCount: sellingProducts.filter((product) => (
+        product.listingAgeMonths !== null && product.listingAgeMonths > 0 && product.listingAgeMonths <= 12
+      )).length,
+      totalMonthlySales: monthlySales.reduce((sum, value) => sum + value, 0),
+      medianMonthlySales: medianNumber(monthlySales),
+    }
+  }
+
+  const sellingListingCount = parseNumber(row.sellingListingCount)
+  const recentSellingListingCount = parseNumber(row.recentSellingListingCount)
+  const totalMonthlySales = parseNumber(row.totalVisibleMonthlySales)
+  const medianMonthlySales = parseNumber(row.medianMonthlySales)
+  const hasEverbeeData = [
+    sellingListingCount,
+    recentSellingListingCount,
+    totalMonthlySales,
+    medianMonthlySales,
+  ].some((value) => value !== null)
+
+  return {
+    hasEverbeeData,
+    hasProductRows: false,
+    sellingListingCount: sellingListingCount ?? 0,
+    recentSellingListingCount: recentSellingListingCount ?? 0,
+    totalMonthlySales: totalMonthlySales ?? 0,
+    medianMonthlySales,
+  }
+}
+
+function crossNicheCompetitionEvidence(row = {}, options = {}) {
+  const signals = [
+    {
+      source: 'everbee',
+      value: parseNumber(row.listingsAnalyzed),
+      threshold: Math.max(1, Number(options.crossNicheEverbeeCompetitionMin) || 10000),
+    },
+    {
+      source: 'etsy',
+      value: parseNumber(row.etsyListings),
+      threshold: Math.max(1, Number(options.crossNicheEtsyCompetitionMin) || 20000),
+    },
+    {
+      source: 'erank',
+      value: parseNumber(row.erankCompetition),
+      threshold: Math.max(1, Number(options.crossNicheErankCompetitionMin) || 50000),
+    },
+  ].filter((signal) => signal.value !== null && signal.value >= signal.threshold)
+
+  return signals
+    .map((signal) => ({ ...signal, saturationRatio: signal.value / signal.threshold }))
+    .sort((left, right) => right.saturationRatio - left.saturationRatio
+      || ['everbee', 'etsy', 'erank'].indexOf(left.source) - ['everbee', 'etsy', 'erank'].indexOf(right.source))[0] ?? null
+}
+
+function crossNicheDepth(row = {}) {
+  const depth = Number(row.crossNicheDepth)
+  return Number.isFinite(depth) && depth >= 0 ? Math.floor(depth) : 0
+}
+
+export function selectCrossNicheParentMarkets(rows = [], options = {}) {
+  const maxDepth = Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 2, 3))
+  const maxParents = Math.max(1, Math.min(Number(options.crossNicheParentLimit) || 3, 10))
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+
+  return rows
+    .map((row) => {
+      const keyword = normalizePhrase(row?.keyword)
+      const depth = crossNicheDepth(row)
+      const competition = crossNicheCompetitionEvidence(row, options)
+      const sales = crossNicheSalesEvidence(row)
+      const safe = keyword
+        && depth < maxDepth
+        && classifyCandidateKeyword(keyword, options).action !== 'reject'
+        && detectRiskTerms(`${keyword} ${row?.notes ?? ''}`, customRiskTerms).length === 0
+      const broadSales = sales.hasProductRows
+        ? sales.sellingListingCount >= 2 && sales.totalMonthlySales >= 10
+        : sales.sellingListingCount >= 3 && sales.totalMonthlySales >= 20
+
+      if (!safe || !competition || !broadSales) return null
+
+      const competitionPoints = Math.min(35, Math.log10(competition.value + 1) * 7)
+      const salesPoints = Math.min(40, Math.log10(sales.totalMonthlySales + 1) * 18)
+      const breadthPoints = Math.min(25, sales.sellingListingCount * 5 + sales.recentSellingListingCount * 2)
+      return {
+        keyword,
+        depth,
+        competition,
+        sales,
+        priorityScore: Math.round(Math.min(100, competitionPoints + salesPoints + breadthPoints)),
+        row,
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.priorityScore - left.priorityScore
+      || right.sales.totalMonthlySales - left.sales.totalMonthlySales
+      || left.keyword.localeCompare(right.keyword, 'en'))
+    .slice(0, maxParents)
+}
+
+function sameSourceDemandSupply(parent = {}, child = {}) {
+  const sources = [
+    {
+      source: 'etsy',
+      parentDemand: parseNumber(parent.etsySearches30d),
+      childDemand: parseNumber(child.etsySearches30d),
+      parentCompetition: parseNumber(parent.etsyListings),
+      childCompetition: parseNumber(child.etsyListings),
+    },
+    {
+      source: 'erank',
+      parentDemand: parseNumber(parent.erankSearchVolume),
+      childDemand: parseNumber(child.erankSearchVolume),
+      parentCompetition: parseNumber(parent.erankCompetition),
+      childCompetition: parseNumber(child.erankCompetition),
+    },
+  ]
+
+  return sources.find((source) => (
+    source.parentDemand !== null
+    && source.parentDemand > 0
+    && source.childDemand !== null
+    && source.childDemand >= 0
+    && source.parentCompetition !== null
+    && source.parentCompetition > 0
+    && source.childCompetition !== null
+    && source.childCompetition > 0
+  )) ?? null
+}
+
+function sameSourceCompetition(parent = {}, child = {}) {
+  const sources = [
+    ['etsy', parent.etsyListings, child.etsyListings],
+    ['erank', parent.erankCompetition, child.erankCompetition],
+    ['everbee', parent.listingsAnalyzed, child.listingsAnalyzed],
+  ]
+
+  for (const [source, parentValue, childValue] of sources) {
+    const parentCompetition = parseNumber(parentValue)
+    const childCompetition = parseNumber(childValue)
+    if (parentCompetition !== null && parentCompetition > 0 && childCompetition !== null && childCompetition > 0) {
+      return { source, parentCompetition, childCompetition }
+    }
+  }
+  return null
+}
+
+export function compareCrossNicheRows(parent = {}, child = {}) {
+  const demandSupply = sameSourceDemandSupply(parent, child)
+  const competition = demandSupply ?? sameSourceCompetition(parent, child)
+  const parentSales = crossNicheSalesEvidence(parent)
+  const childSales = crossNicheSalesEvidence(child)
+  const competitionReduction = competition
+    ? roundedCrossNicheMetric(1 - (competition.childCompetition / competition.parentCompetition))
+    : null
+  const demandRetention = demandSupply
+    ? roundedCrossNicheMetric(demandSupply.childDemand / demandSupply.parentDemand)
+    : null
+  const parentEfficiency = demandSupply
+    ? demandSupply.parentDemand / demandSupply.parentCompetition
+    : null
+  const childEfficiency = demandSupply
+    ? demandSupply.childDemand / demandSupply.childCompetition
+    : null
+  const efficiencyLift = parentEfficiency && childEfficiency !== null
+    ? roundedCrossNicheMetric(childEfficiency / parentEfficiency)
+    : null
+  const salesRetention = parentSales.medianMonthlySales !== null
+    && parentSales.medianMonthlySales > 0
+    && childSales.medianMonthlySales !== null
+    ? roundedCrossNicheMetric(childSales.medianMonthlySales / parentSales.medianMonthlySales)
+    : null
+
+  let verdict = 'needs-research'
+  if (demandRetention !== null && demandRetention < 0.03) verdict = 'weak-demand'
+  else if (competitionReduction !== null && competitionReduction < 0.25) verdict = 'weak-competition'
+  else if (
+    childSales.hasEverbeeData
+    && (childSales.sellingListingCount === 0 || (salesRetention !== null && salesRetention < 0.15))
+  ) verdict = 'weak-sales'
+  else if (
+    competitionReduction !== null && competitionReduction >= 0.5
+    && demandRetention !== null && demandRetention >= 0.1
+    && efficiencyLift !== null && efficiencyLift >= 1.5
+    && childSales.hasEverbeeData
+    && childSales.sellingListingCount >= 2
+    && (salesRetention === null || salesRetention >= 0.15)
+  ) verdict = 'promising'
+  else if (competitionReduction !== null || demandRetention !== null || childSales.hasEverbeeData) verdict = 'watch'
+
+  return {
+    source: demandSupply?.source ?? null,
+    competitionSource: competition?.source ?? null,
+    competitionReduction,
+    demandRetention,
+    efficiencyLift,
+    salesRetention,
+    sellingListingCount: childSales.sellingListingCount,
+    recentSellingListingCount: childSales.recentSellingListingCount,
+    verdict,
+  }
+}
+
+function crossNicheProductTerms(category) {
+  const family = CATEGORY_PRODUCT_FAMILY[category.id]
+  return unique([
+    category.searchTerm,
+    ...(category.tags ?? []),
+    ...(PRODUCT_FAMILY_TERMS[family] ?? []),
+  ].flatMap((term) => phraseTokens(term)))
+}
+
+function crossNicheModifier(value, parentCoreTokens, productTokens) {
+  const parentSet = new Set(parentCoreTokens)
+  const productSet = new Set(productTokens)
+  const tokens = phraseTokens(value)
+    .filter((token) => !parentSet.has(token))
+    .filter((token) => !productSet.has(token))
+    .filter((token) => !/^(?:19|20)\d{2}$/.test(token))
+    .filter((token) => !GENERIC_WORDS.has(token))
+  if (tokens.length === 0 || tokens.length > 3) return ''
+  if (tokens.every((token) => STYLE_ONLY_WORDS.has(token))) return ''
+  return unique(tokens).join(' ')
+}
+
+function buildCrossNicheKeyword(parentKeyword, modifier, category) {
+  const productTokens = crossNicheProductTerms(category)
+  const productSet = new Set(productTokens)
+  const parentCoreTokens = phraseTokens(parentKeyword).filter((token) => !productSet.has(token))
+  const modifierTokens = phraseTokens(modifier)
+    .filter((token) => !parentCoreTokens.includes(token))
+    .filter((token) => !productSet.has(token))
+  if (parentCoreTokens.length === 0 || modifierTokens.length === 0) return ''
+
+  const parentFirst = parentCoreTokens.some((token) => BROAD_OCCASION_WORDS.has(token))
+  const ordered = parentFirst
+    ? [...parentCoreTokens, ...modifierTokens]
+    : [...modifierTokens, ...parentCoreTokens]
+  return normalizePhrase(`${unique(ordered).join(' ')} ${category.searchTerm}`)
+}
+
+function isCrossNicheCandidateSafe(keyword, parentKeyword, category, options) {
+  if (!keyword || keyword === normalizePhrase(parentKeyword)) return false
+  if (countWords(keyword) > 7 || countWords(keyword) <= countWords(parentKeyword)) return false
+  if (!keywordMatchesCategoryProduct(keyword, category.id)) return false
+  if (classifyCandidateKeyword(keyword, options).action !== 'candidate') return false
+  if (hasDuplicateGarmentProductTerms(keyword)) return false
+  if (hasConflictingRecipientRoles(keyword)) return false
+  return detectRiskTerms(keyword, splitSeedText(options.customRiskTerms)).length === 0
+}
+
+export function buildCrossNicheDrilldown(rows = [], options = {}) {
+  const category = getCategory(options.categoryId)
+  const parents = selectCrossNicheParentMarkets(rows, options)
+  const perParentLimit = Math.max(1, Math.min(Number(options.crossNichePerParentLimit) || 8, 20))
+  const rowByKeyword = new Map(rows.map((row) => [normalizePhrase(row?.keyword), row]))
+  const globalCandidates = new Map()
+
+  const parentResults = parents.map((parent) => {
+    const candidateMap = new Map()
+    const productTokens = crossNicheProductTerms(category)
+    const productSet = new Set(productTokens)
+    const parentCoreTokens = phraseTokens(parent.keyword).filter((token) => !productSet.has(token))
+
+    const addCandidate = ({ keyword, modifier, source, hint = null, row = null }) => {
+      const normalized = normalizePhrase(keyword)
+      if (!isCrossNicheCandidateSafe(normalized, parent.keyword, category, options)) return
+      const existing = candidateMap.get(normalized) ?? {
+        keyword: normalized,
+        parentKeyword: parent.keyword,
+        modifier: normalizePhrase(modifier),
+        depth: parent.depth + 1,
+        sources: [],
+        listingCount: 0,
+        recentListingCount: 0,
+        hintScore: 0,
+        comparison: null,
+        verdict: 'needs-research',
+        priorityScore: 0,
+      }
+      existing.sources = unique([...existing.sources, source])
+      existing.listingCount = Math.max(existing.listingCount, Number(hint?.listingCount) || 0)
+      existing.recentListingCount = Math.max(existing.recentListingCount, Number(hint?.recentListingCount) || 0)
+      existing.hintScore = Math.max(existing.hintScore, Number(hint?.count) || 0)
+      const measuredRow = row ?? rowByKeyword.get(normalized)
+      if (measuredRow) {
+        existing.comparison = compareCrossNicheRows(parent.row, measuredRow, options)
+        existing.verdict = existing.comparison.verdict
+      }
+      candidateMap.set(normalized, existing)
+    }
+
+    const productRows = Array.isArray(parent.row.productRows) ? parent.row.productRows : []
+    const hints = extractNicheHintsFromListings(productRows, 30, {
+      stopWords: [parent.keyword, ...productTokens],
+    })
+    for (const hint of hints) {
+      const modifier = crossNicheModifier(hint.keyword, parentCoreTokens, productTokens)
+      if (!modifier) continue
+      addCandidate({
+        keyword: buildCrossNicheKeyword(parent.keyword, modifier, category),
+        modifier,
+        source: 'everbee-title',
+        hint,
+      })
+    }
+
+    for (const relatedTerm of splitSeedText(parent.row.etsyRelatedTerms)) {
+      const normalized = normalizePhrase(relatedTerm)
+      const modifier = crossNicheModifier(normalized, parentCoreTokens, productTokens)
+      if (!modifier || !parentCoreTokens.every((token) => phraseTokens(normalized).includes(token))) continue
+      const keyword = keywordMatchesCategoryProduct(normalized, category.id)
+        ? normalized
+        : buildCrossNicheKeyword(parent.keyword, modifier, category)
+      addCandidate({ keyword, modifier, source: 'etsy-related' })
+    }
+
+    for (const row of rows) {
+      const keyword = normalizePhrase(row?.keyword)
+      const tokens = phraseTokens(keyword)
+      if (!keyword || keyword === parent.keyword) continue
+      if (!parentCoreTokens.every((token) => tokens.includes(token))) continue
+      const modifier = crossNicheModifier(keyword, parentCoreTokens, productTokens)
+      if (!modifier) continue
+      addCandidate({ keyword, modifier, source: 'measured-child', row })
+    }
+
+    const candidates = Array.from(candidateMap.values())
+      .map((candidate) => {
+        const verdictPoints = candidate.verdict === 'promising'
+          ? 45
+          : candidate.verdict === 'watch'
+            ? 18
+            : candidate.verdict.startsWith('weak-')
+              ? -45
+              : 8
+        const sourcePoints = candidate.sources.includes('measured-child')
+          ? 12
+          : candidate.sources.includes('etsy-related')
+            ? 9
+            : 0
+        const evidencePoints = Math.min(28, candidate.hintScore)
+          + Math.min(12, candidate.listingCount * 3)
+          + Math.min(12, candidate.recentListingCount * 4)
+        return {
+          ...candidate,
+          priorityScore: Math.max(0, Math.min(100, Math.round(20 + verdictPoints + sourcePoints + evidencePoints))),
+        }
+      })
+      .sort((left, right) => right.priorityScore - left.priorityScore
+        || right.recentListingCount - left.recentListingCount
+        || right.listingCount - left.listingCount
+        || left.keyword.localeCompare(right.keyword, 'en'))
+      .slice(0, perParentLimit)
+
+    for (const candidate of candidates) {
+      const current = globalCandidates.get(candidate.keyword)
+      if (!current || candidate.priorityScore > current.priorityScore) globalCandidates.set(candidate.keyword, candidate)
+    }
+
+    return { ...parent, candidates }
+  })
+
+  const candidates = Array.from(globalCandidates.values())
+    .sort((left, right) => right.priorityScore - left.priorityScore
+      || left.keyword.localeCompare(right.keyword, 'en'))
+
+  return {
+    parents: parentResults,
+    candidates,
+    researchCandidates: candidates
+      .filter((candidate) => !candidate.verdict.startsWith('weak-'))
+      .slice(0, Math.max(1, Math.min(Number(options.crossNicheResearchLimit) || 12, 30))),
+    maxDepth: Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 2, 3)),
+  }
 }
 
 export function parseNumber(value) {
