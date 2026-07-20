@@ -4,7 +4,7 @@
 
 **Goal:** 高競合・高売上の市場から、販売実績のある交差軸を使って需要を保ちながら競合が下がるキーワードを最大2階層まで探索する。
 
-**Architecture:** 共有判定エンジンに親市場選択、親子比較、交差候補生成を純粋関数として追加する。Market Finderは最終結果の下に探索結果を表示し、選んだ候補を既存のeRank調査フローへ戻す。既存のChrome拡張データ形式は変更せず、保存済み`productRows`と関連語を利用する。
+**Architecture:** 共有判定エンジンに親市場選択、親子比較、交差候補生成を純粋関数として追加する。Market Finderは自動再調査の状態を専用モジュールで管理し、上位候補を既存のeRank調査フローへ自動で戻す。再検証中は最終結果を保留し、既存の親市場データを保持したまま子キーワードの結果を統合する。Chrome拡張データ形式は変更しない。
 
 **Tech Stack:** JavaScript ES modules、Node.js test runner、静的HTML/CSS、Chrome拡張連携の既存データモデル
 
@@ -90,7 +90,7 @@ Run: `node market-finder/scripts/test-opportunity-model.mjs`
 
 Expected: 新規テストを含めPASS。
 
-### Task 3: 5段目の表示と次調査への追加
+### Task 3: 5段目の表示と次調査への追加（初期実装、Task 5で自動化）
 
 **Files:**
 - Modify: `market-finder/index.html`
@@ -153,4 +153,55 @@ Expected: 全コマンド終了コード0、既存回帰条件PASS。
 
 - [x] **Step 3: デスクトップ画面を確認する**
 
-`http://127.0.0.1:4173/market-finder/`を再読み込みし、Step 5のクロスニッチ欄が結果の下に表示され、表やボタンが重ならないことを確認する。
+`http://127.0.0.1:4173/market-finder/`を再読み込みし、Step 5のクロスニッチ欄と最終結果が重ならないことを確認する。Task 5の実装後は手動追加ボタンが存在しないことも確認する。
+
+### Task 5: クロスニッチ候補の自動再調査と最終結果ゲート
+
+**Files:**
+- Create: `market-finder/src/cross-niche-workflow.js`
+- Modify: `market-finder/src/app.js`
+- Modify: `market-finder/index.html`
+- Modify: `market-finder/styles.css`
+- Test: `market-finder/scripts/test-cross-niche-workflow.mjs`
+- Test: `market-finder/scripts/test-guided-entry-ui.mjs`
+
+**Interfaces:**
+- Produces: `createCrossNicheWorkflowState(savedState)`
+- Produces: `advanceCrossNicheWorkflow({ workflow, candidates, stageForKeyword, hasParents, limit })`
+- Consumes: `buildCrossNicheDrilldown(state.researchRows, currentOptions())`
+
+- [ ] **Step 1: 自動キューと段階遷移の失敗テストを書く**
+
+未検証候補を最大12件キューへ入れること、eRank・Etsy・EverBeeの順に待機段階が進むこと、同じ候補を再追加しないこと、深度2の新候補だけを次ラウンドへ送ることを純粋関数で検証する。
+
+- [ ] **Step 2: REDを確認する**
+
+Run: `node market-finder/scripts/test-cross-niche-workflow.mjs`
+
+Expected: ワークフローモジュールが存在しないためFAIL。
+
+- [ ] **Step 3: 状態管理モジュールを実装する**
+
+`status`、`round`、`batch`、`consideredKeywords`、`queuedKeywords`、`completedAt`を正規化して保存する。現在バッチに未完了段階があればその段階を維持し、完了後に未検討候補だけを最大12件キューへ追加する。
+
+- [ ] **Step 4: UIを自動フローへ接続する**
+
+手動の`buildNextRoundBtn`と`applyCrossNicheCandidates()`を廃止する。自動追加時は候補一覧を現在バッチへ切り替え、Etsy計画を初期化し、クロスニッチ再調査では`researchRows`を消去せずにeRank・EverBee結果をマージする。
+
+- [ ] **Step 5: 最終おすすめを再調査完了まで保留する**
+
+`pending-erank`、`pending-etsy`、`pending-everbee`では結果一覧とCSV保存を無効化し、次に必要な操作を表示する。`complete`または探索対象なしの時だけ全EverBee結果を再採点して表示する。
+
+- [ ] **Step 6: GREENと回帰を確認する**
+
+Run:
+
+```powershell
+node market-finder/scripts/test-cross-niche-workflow.mjs
+node market-finder/scripts/test-guided-entry-ui.mjs
+node market-finder/scripts/test-opportunity-model.mjs
+node market-finder/scripts/test-research-flow.mjs
+node market-finder/scripts/test-research-performance.mjs
+```
+
+Expected: 全テストPASS。
