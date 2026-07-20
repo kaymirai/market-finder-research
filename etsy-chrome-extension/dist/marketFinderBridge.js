@@ -17,7 +17,7 @@
         });
     }
     async function handlePageRequest(request) {
-        var _a, _b, _c;
+        var _a, _b, _c, _d, _e, _f, _g;
         if (request.action === 'PING') {
             postToPage({ action: 'BRIDGE_READY' });
             return;
@@ -65,8 +65,30 @@
                 const response = await sendRuntimeMessage('COLLECT_TRENDS', {
                     sources: (_c = request.sources) !== null && _c !== void 0 ? _c : [],
                     limit: request.limit,
+                    contextQuery: (_d = request.contextQuery) !== null && _d !== void 0 ? _d : '',
                 });
                 postToPage({ action: 'TREND_RESULTS', requestId: request.requestId, ok: true, response });
+                return;
+            }
+            if (request.action === 'RUN_ETSY_MARKETPLACE_INSIGHT') {
+                const response = await sendRuntimeMessage('RUN_ETSY_MARKETPLACE_INSIGHT', {
+                    query: (_e = request.query) !== null && _e !== void 0 ? _e : '',
+                });
+                postToPage({ action: 'ETSY_MARKETPLACE_OPENED', requestId: request.requestId, ok: true, response });
+                return;
+            }
+            if (request.action === 'RUN_AND_CAPTURE_ETSY_MARKETPLACE_INSIGHT') {
+                const response = await sendRuntimeMessage('RUN_AND_CAPTURE_ETSY_MARKETPLACE_INSIGHT', {
+                    query: (_f = request.query) !== null && _f !== void 0 ? _f : '',
+                });
+                postToPage({ action: 'ETSY_MARKETPLACE_RESULT', requestId: request.requestId, ok: true, response });
+                return;
+            }
+            if (request.action === 'CAPTURE_ETSY_MARKETPLACE_INSIGHT') {
+                const response = await sendRuntimeMessage('CAPTURE_ETSY_MARKETPLACE_INSIGHT', {
+                    query: (_g = request.query) !== null && _g !== void 0 ? _g : '',
+                });
+                postToPage({ action: 'ETSY_MARKETPLACE_RESULT', requestId: request.requestId, ok: true, response });
                 return;
             }
         }

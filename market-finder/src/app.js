@@ -1,14 +1,18 @@
 import {
   MARKET_EVENTS,
   PRODUCT_CATEGORIES,
+  advanceMarketplaceInsightResearch,
+  buildMarketplaceInsightPlan,
   generateBroadMarketQueries,
+  generateBroadEventCandidates,
   generateKeywordCandidates,
   generateFollowUpKeywords,
   parseBroadMarketListings,
+  everbeeResultsToBroadListings,
   extractNicheHintsFromListings,
   parseEverbeeRows,
-  rankResearchRows,
   buildProductIdea,
+  recommendProductRoute,
   classifyKeywordBucket,
   buildSeoPlanFromBuckets,
   scoreEverbeeResult,
@@ -16,9 +20,25 @@ import {
   scoreErankOpportunity,
   classifyCandidateKeyword,
   detectRiskTerms,
+  clusterKeywordCandidates,
+  getMarketTiming,
+  getBroadEventDiscoveryProfile,
+  getSourceFreshness,
+  keywordMatchesCategoryProduct,
+  mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260523-1'
+} from '../../shared/market-keyword-engine/index.js?v=20260720-10'
+import {
+  createMemoizedAnalysis,
+  mergeRowsByKey,
+} from './research-performance.js?v=20260720-1'
+import {
+  buildEtsyCandidatesFromErank,
+  extensionResultsImportMode,
+  marketplaceCompletedKeywords,
+  shouldDiscardMarketplacePlan,
+} from './research-flow.js?v=20260720-6'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -26,11 +46,48 @@ const PERSISTENCE_KEY = 'etsy-mirai-market-finder-state-v1'
 const PERSISTENCE_VERSION = 1
 const SEARCH_SEED_METADATA_URL = './data/etsy-search-keyword-metadata-2026-05-23.csv'
 const SEARCH_SEED_PICK_LIMIT = 20
+const ERANK_RESEARCH_LIMIT = 20
 const SEARCH_SEED_PREVIEW_LIMIT = 6
+const DISCOVERY_LANE_LABELS = {
+  motif: 'モチーフ',
+  moment: '場面',
+  audience: '相手',
+  aesthetic: 'テイスト',
+  adjacent: '周辺需要',
+}
+const QUERY_STRATEGY_LABELS = {
+  direct: 'Direct',
+  adjacent: 'Adjacent',
+  observed: 'Observed',
+}
+const MARKETPLACE_STAGE_LABELS = {
+  discovery: '入口',
+  validation: '検証',
+  reserve: '予備',
+  followup: '関連深掘り',
+}
+const MARKETPLACE_STATUS_LABELS = {
+  planned: '未検索',
+  opened: '取得中',
+  completed: '取得済み',
+  skipped: 'スキップ',
+  error: '要確認',
+}
+const MARKETPLACE_STOP_LABELS = {
+  'max-followups': '最大40語を完了',
+  stagnant: '新しい有望群なし',
+  'candidate-pool-depleted': '有効候補が5語未満',
+}
 
 const state = {
   candidates: [],
-  candidateMessage: 'まだ空です。左で商品を選んで「おすすめ自動探索をはじめる」を押してください。',
+  candidateMessage: 'まだ候補はありません。商品と条件を選んで「候補を自動で探す」を押してください。',
+  activeDiscoveryLane: 'all',
+  marketplaceInsightMode: 'free',
+  marketplaceInsightPlan: null,
+  marketplaceInsightBusy: false,
+  marketplaceInsightAutoRunning: false,
+  marketplaceInsightMessage: '',
   researchRows: [],
   broadHints: [],
   broadAutoImport: false,
@@ -51,6 +108,9 @@ const state = {
   },
   extensionConnected: false,
   extensionState: null,
+  restoredResearchSavedAt: '',
+  restoredResultsAccepted: false,
+  acceptExtensionResults: false,
   seoPlan: null,
   selectedResultKey: '',
   recentTrendKeywords: new Set(),
@@ -105,6 +165,36 @@ const elements = {
   riskInput: document.querySelector('#riskInput'),
   candidateList: document.querySelector('#candidateList'),
   candidateCount: document.querySelector('#candidateCount'),
+  broadEventDiscovery: document.querySelector('#broadEventDiscovery'),
+  discoveryLaneTabs: document.querySelector('#discoveryLaneTabs'),
+  discoveryStrategySummary: document.querySelector('#discoveryStrategySummary'),
+  marketplaceInsightPanel: document.querySelector('#marketplaceInsightPanel'),
+  marketplaceModeControl: document.querySelector('#marketplaceModeControl'),
+  marketplaceFreeModeBtn: document.querySelector('#marketplaceFreeModeBtn'),
+  marketplacePlusModeBtn: document.querySelector('#marketplacePlusModeBtn'),
+  marketplaceAccessBadge: document.querySelector('#marketplaceAccessBadge'),
+  marketplacePlanHelp: document.querySelector('#marketplacePlanHelp'),
+  marketplacePlanCount: document.querySelector('#marketplacePlanCount'),
+  marketplacePlanRemaining: document.querySelector('#marketplacePlanRemaining'),
+  marketplaceOfficialRemaining: document.querySelector('#marketplaceOfficialRemaining'),
+  marketplaceAdaptiveStatus: document.querySelector('#marketplaceAdaptiveStatus'),
+  marketplaceCandidatePoolCount: document.querySelector('#marketplaceCandidatePoolCount'),
+  marketplaceFollowUpCount: document.querySelector('#marketplaceFollowUpCount'),
+  marketplaceResearchRound: document.querySelector('#marketplaceResearchRound'),
+  marketplaceStopReason: document.querySelector('#marketplaceStopReason'),
+  marketplaceCurrentQuery: document.querySelector('#marketplaceCurrentQuery'),
+  marketplaceStartBtn: document.querySelector('#marketplaceStartBtn'),
+  marketplaceStartStatus: document.querySelector('#marketplaceStartStatus'),
+  marketplaceBuildPlanBtn: document.querySelector('#marketplaceBuildPlanBtn'),
+  marketplaceNextBtn: document.querySelector('#marketplaceNextBtn'),
+  marketplaceAutoStopBtn: document.querySelector('#marketplaceAutoStopBtn'),
+  marketplaceCaptureBtn: document.querySelector('#marketplaceCaptureBtn'),
+  marketplaceNextBatchBtn: document.querySelector('#marketplaceNextBatchBtn'),
+  marketplaceSkipBtn: document.querySelector('#marketplaceSkipBtn'),
+  marketplaceQueue: document.querySelector('#marketplaceQueue'),
+  marketplaceStatus: document.querySelector('#marketplaceStatus'),
+  marketplaceResultsList: document.querySelector('#marketplaceResultsList'),
+  everbeeQueueStatus: document.querySelector('#everbeeQueueStatus'),
   keywordSelect: document.querySelector('#keywordSelect'),
   listingsInput: document.querySelector('#listingsInput'),
   salesInput: document.querySelector('#salesInput'),
@@ -117,6 +207,9 @@ const elements = {
   erankCompetitionInput: document.querySelector('#erankCompetitionInput'),
   erankKeywordDifficultyInput: document.querySelector('#erankKeywordDifficultyInput'),
   erankTrendInput: document.querySelector('#erankTrendInput'),
+  etsySearchesInput: document.querySelector('#etsySearchesInput'),
+  etsyListingsInput: document.querySelector('#etsyListingsInput'),
+  etsyRelatedTermsInput: document.querySelector('#etsyRelatedTermsInput'),
   notesInput: document.querySelector('#notesInput'),
   addResearchBtn: document.querySelector('#addResearchBtn'),
   csvInput: document.querySelector('#csvInput'),
@@ -171,8 +264,6 @@ const elements = {
   flowAutoBtn: document.querySelector('#flowAutoBtn'),
   flowCsvBtn: document.querySelector('#flowCsvBtn'),
   flowSeoBtn: document.querySelector('#flowSeoBtn'),
-  simpleStartBtn: document.querySelector('#simpleStartBtn'),
-  simpleImportErankBtn: document.querySelector('#simpleImportErankBtn'),
   simpleCsvInput: document.querySelector('#simpleCsvInput'),
   simpleImportCsvBtn: document.querySelector('#simpleImportCsvBtn'),
   simpleSeoKeywordsInput: document.querySelector('#simpleSeoKeywordsInput'),
@@ -203,6 +294,13 @@ function formatDateTime(value) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function latestResearchCheckedAt(rows = []) {
+  return rows
+    .flatMap((row) => [row.erankCheckedAt, row.etsyCheckedAt, row.everbeeCheckedAt])
+    .filter((value) => value && !Number.isNaN(Date.parse(value)))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? ''
 }
 
 function isTimestampLike(value) {
@@ -317,6 +415,10 @@ function persistMarketFinderState() {
       researchRows: state.researchRows,
       broadHints: state.broadHints,
       broadSnippetKeys: Array.from(state.broadSnippetKeys),
+      activeDiscoveryLane: state.activeDiscoveryLane,
+      marketplaceInsightMode: state.marketplaceInsightMode,
+      marketplaceInsightPlan: state.marketplaceInsightPlan,
+      marketplaceInsightMessage: state.marketplaceInsightMessage,
       selectedResultKey: state.selectedResultKey,
       seoPlan: state.seoPlan,
     },
@@ -358,8 +460,15 @@ function restorePersistedState() {
   setInputValue(elements.simpleSeoKeywordsInput, form.simpleSeoKeywords)
 
   state.researchRows = Array.isArray(savedState.researchRows) ? savedState.researchRows : []
+  state.restoredResearchSavedAt = state.researchRows.length > 0
+    ? latestResearchCheckedAt(state.researchRows) || String(persisted.savedAt ?? '')
+    : ''
   state.broadHints = Array.isArray(savedState.broadHints) ? savedState.broadHints : []
   state.broadSnippetKeys = new Set(Array.isArray(savedState.broadSnippetKeys) ? savedState.broadSnippetKeys : [])
+  state.activeDiscoveryLane = String(savedState.activeDiscoveryLane ?? 'all')
+  state.marketplaceInsightMode = savedState.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
+  state.marketplaceInsightPlan = savedState.marketplaceInsightPlan ?? null
+  state.marketplaceInsightMessage = String(savedState.marketplaceInsightMessage ?? '')
   state.selectedResultKey = String(savedState.selectedResultKey ?? '')
   state.seoPlan = savedState.seoPlan ?? null
 
@@ -593,7 +702,7 @@ function trendCandidateEntries() {
     .flatMap((entry) => {
       const keyword = normalizePhrase(entry.keyword)
       if (!keyword) return []
-      const hasProduct = keyword.includes(product)
+      const hasProduct = keywordMatchesCategoryProduct(keyword, category.id)
       const base = hasProduct ? keyword : `${keyword} ${product}`
       return [
         base,
@@ -661,6 +770,14 @@ function keywordClass(keyword) {
   return classifyCandidateKeyword(keyword, keywordClassificationOptions())
 }
 
+function currentBroadEventProfile() {
+  return getBroadEventDiscoveryProfile(keywordClassificationOptions())
+}
+
+function isBroadEventDiscovery() {
+  return currentBroadEventProfile().enabled
+}
+
 function currentOptions() {
   return {
     eventId: elements.eventSelect.value,
@@ -670,8 +787,36 @@ function currentOptions() {
     limit: Number(elements.limitInput.value) || 80,
     targets: selectedTargets(),
     seedKeywords: combinedSeedKeywords(),
+    observedTerms: combinedSeedKeywords(),
     customRiskTerms: elements.riskInput.value,
+    discoveryMode: isBroadEventDiscovery() ? 'broad-event' : 'standard',
   }
+}
+
+const analyzeResearchRows = createMemoizedAnalysis((rows, options) => {
+  const scoredRows = rows
+    .map((row) => ({ ...row, score: scoreEverbeeResult(row, options) }))
+    .sort((a, b) => b.score.score - a.score.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
+  const erankRows = scoredRows
+    .filter((row) => row.score.validation.hasErankData && !row.score.validation.hasEverbeeData)
+    .map((row) => ({
+      ...row,
+      erankOpportunity: scoreErankOpportunity(row, options),
+    }))
+    .sort((a, b) => b.erankOpportunity.score - a.erankOpportunity.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
+  const everbeeRows = scoredRows
+    .filter((row) => row.score.validation.hasEverbeeData)
+    .map((row) => ({
+      ...row,
+      idea: buildProductIdea(row.keyword, options),
+      productRoute: recommendProductRoute(row, row.score, options),
+    }))
+
+  return { scoredRows, erankRows, everbeeRows }
+})
+
+function currentResearchAnalysis() {
+  return analyzeResearchRows(state.researchRows, currentOptions())
 }
 
 function fillSelects() {
@@ -724,8 +869,41 @@ function readyKeywords() {
     .map((candidate) => candidate.keyword)
 }
 
+function removePhraseFromTokens(tokens, phrase) {
+  const phraseTokens = normalizePhrase(phrase).split(' ').filter(Boolean)
+  if (phraseTokens.length === 0) return tokens
+  const next = []
+  for (let index = 0; index < tokens.length; index += 1) {
+    const matches = phraseTokens.every((token, offset) => tokens[index + offset] === token)
+    if (matches) {
+      index += phraseTokens.length - 1
+    } else {
+      next.push(tokens[index])
+    }
+  }
+  return next
+}
+
+function erankProbeKeyword(keyword) {
+  const category = selectedCategory()
+  const eventTerm = normalizePhrase(selectedEvent().searchTerm)
+  let tokens = normalizePhrase(keyword).split(' ').filter(Boolean)
+  if (eventTerm) tokens = removePhraseFromTokens(tokens, eventTerm)
+  tokens = tokens.filter((token) => !/^(?:20\d{2}|\d{2})$/.test(token) || /\b(?:est|class|senior|grad)\b/.test(keyword))
+
+  let probe = normalizePhrase(tokens.join(' '))
+  if (!probe) return ''
+  if (!searchSeedMatchesCategory({ keyword: probe }, category)) {
+    probe = normalizePhrase(`${probe} ${category.searchTerm}`)
+  }
+  if (detectRiskTerms(probe, elements.riskInput.value.split(/\r?\n|,/)).length > 0) return ''
+  if (keywordClass(probe).action !== 'candidate') return ''
+
+  return probe
+}
+
 function erankShortlistKeywords() {
-  const ranked = rankResearchRows(state.researchRows, currentOptions())
+  const ranked = currentResearchAnalysis().scoredRows
     .filter((row) => {
       const validation = row.score.validation
       const normalized = row.score.normalized
@@ -751,14 +929,16 @@ function erankExploreRows() {
 }
 
 function erankRowsWithOpportunity() {
-  const options = currentOptions()
-  return rankResearchRows(state.researchRows, options)
-    .filter((row) => row.score.validation.hasErankData && !row.score.validation.hasEverbeeData)
-    .map((row) => ({
-      ...row,
-      erankOpportunity: scoreErankOpportunity(row, options),
-    }))
-    .sort((a, b) => b.erankOpportunity.score - a.erankOpportunity.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
+  return currentResearchAnalysis().erankRows
+}
+
+function etsyValidationCandidates() {
+  if (restoredResultsAwaitingConfirmation()) return []
+  return buildEtsyCandidatesFromErank(erankResultRows(), state.candidates)
+}
+
+function restoredResultsAwaitingConfirmation() {
+  return Boolean(state.restoredResearchSavedAt && !state.restoredResultsAccepted)
 }
 
 function erankSpecificTokens(keyword) {
@@ -859,7 +1039,7 @@ function buildEverbeeKeywordsFromErankRows(rows) {
       ? keyword.includes(eventTerm)
       || (eventSignals.length > 0 && eventSignals.every((token) => keyword.includes(token)))
       : true
-    const withProduct = keyword.includes(product) ? keyword : `${keyword} ${product}`
+    const withProduct = keywordMatchesCategoryProduct(keyword, category.id) ? keyword : `${keyword} ${product}`
     const withEvent = hasEventSignal || !eventTerm ? withProduct : `${eventTerm} ${withProduct}`
     return [withProduct, withEvent, year ? `${withProduct} ${year}` : '']
   })
@@ -868,12 +1048,14 @@ function buildEverbeeKeywordsFromErankRows(rows) {
 }
 
 function salesCheckKeywords() {
+  const official = marketplaceCompletedKeywords(state.marketplaceInsightPlan)
+  if (official.length > 0) return cleanKeywordList(official).slice(0, 50)
   const narrowed = narrowEverbeeKeywordsFromErank()
   return narrowed.length > 0 ? narrowed : readyKeywords()
 }
 
 function erankResearchKeywords() {
-  return readyKeywords().slice(0, 40)
+  return cleanKeywordList(readyKeywords().map(erankProbeKeyword)).slice(0, ERANK_RESEARCH_LIMIT)
 }
 
 function parseResearchJob(value) {
@@ -923,7 +1105,7 @@ function renderBroadHints() {
     <label class="hint-chip">
       <input type="checkbox" value="${escapeHtml(hint.keyword)}" ${index < 24 && isStrongBroadHint(hint.keyword) ? 'checked' : ''}>
       <span>${escapeHtml(hint.keyword)}</span>
-      <small>${escapeHtml(hint.count)}</small>
+      <small>${escapeHtml(hint.count)} / ${escapeHtml(hint.listingCount ?? 1)}商品${hint.recentListingCount ? ` / 新着${escapeHtml(hint.recentListingCount)}` : ''}</small>
     </label>
   `).join('')
   persistMarketFinderState()
@@ -976,39 +1158,45 @@ function csvCell(value) {
 }
 
 function appendBroadListingRows(rows) {
-  const nextLines = []
+  const existingRows = parseBroadMarketListings(elements.broadMarketInput.value)
+  const rowsByTitle = new Map(existingRows.map((row) => [normalizePhrase(row.title), row]))
+  let changed = 0
 
   for (const row of rows) {
     const title = normalizePhrase(row.title)
-    if (!title || state.broadSnippetKeys.has(title)) continue
-    state.broadSnippetKeys.add(title)
-    nextLines.push([
-      csvCell(row.title),
-      csvCell(row.tags ?? ''),
-      csvCell(row.sales ?? ''),
-    ].join(','))
+    if (!title) continue
+    const existing = rowsByTitle.get(title)
+    const incomingHasMetrics = String(row.sales ?? '').trim() !== '' || String(row.listingAgeMonths ?? '').trim() !== ''
+    if (existing && !incomingHasMetrics) continue
+    const sameMetrics = existing && ['sales', 'totalSales', 'revenue', 'listingAgeMonths', 'price', 'shopName']
+      .every((field) => String(existing[field] ?? '').trim() === String(row[field] ?? '').trim())
+    if (sameMetrics) continue
+    rowsByTitle.set(title, row)
+    changed += 1
   }
 
-  if (nextLines.length === 0) return 0
+  if (changed === 0) return 0
 
-  const current = elements.broadMarketInput.value.trim()
-  const header = 'Product Name,Tags,Sales'
-  elements.broadMarketInput.value = current
-    ? `${current}\n${nextLines.join('\n')}`
-    : `${header}\n${nextLines.join('\n')}`
+  const mergedRows = Array.from(rowsByTitle.values())
+  const header = 'Product Name,Tags,Sales,Total Sales,Revenue,Listing Age Months,Price,Shop Name'
+  const lines = mergedRows.map((row) => [
+    csvCell(row.title),
+    csvCell(row.tags ?? ''),
+    csvCell(row.sales ?? ''),
+    csvCell(row.totalSales ?? ''),
+    csvCell(row.revenue ?? ''),
+    csvCell(row.listingAgeMonths ?? ''),
+    csvCell(row.price ?? ''),
+    csvCell(row.shopName ?? ''),
+  ].join(','))
+  elements.broadMarketInput.value = `${header}\n${lines.join('\n')}`
+  state.broadSnippetKeys = new Set(mergedRows.map((row) => normalizePhrase(row.title)).filter(Boolean))
   extractBroadMarketHints()
-  return nextLines.length
+  return changed
 }
 
 function marketResultsToBroadRows(results = []) {
-  return results.flatMap((result) => {
-    const snippets = Array.isArray(result.listingSnippets) ? result.listingSnippets : []
-    return snippets.map((title) => ({
-      title,
-      tags: result.keyword,
-      sales: result.topMonthlySales,
-    }))
-  })
+  return everbeeResultsToBroadListings(results)
 }
 
 function ingestBroadSnippetsFromExtensionState(extensionState) {
@@ -1040,7 +1228,7 @@ function applyBroadHintsToSeeds() {
 
   elements.seedInput.value = merged.join('\n')
   generateCandidates()
-  elements.broadStatus.textContent = `${selected.length}個を追加ニッチ語句へ入れて、Step 2候補を作りました。`
+  elements.broadStatus.textContent = `${selected.length}個を追加ニッチ語句へ入れて、調査候補を作りました。`
 }
 
 function fillBroadSample() {
@@ -1090,23 +1278,410 @@ function renderSearchSeedRows() {
       </div>
     </div>
   `).join('')
-  elements.searchSeedStatus.textContent = `検索数と率のバランスがよい順に${rows.length}件を表示中。上の「1 ここを押して候補を作る」で自動的に使います。`
+  elements.searchSeedStatus.textContent = `検索数と率のバランスがよい順に${rows.length}件を表示中。上の「候補を自動で探す」で自動的に使います。`
 }
 
 function appendSearchSeedRowsToTrendScout(options = {}) {
   const rows = searchSeedRowsForCurrentCategory(options.limit ?? SEARCH_SEED_PICK_LIMIT)
   if (rows.length === 0) return 0
-  const capturedAt = state.lastTrendRunStartedAt || new Date().toISOString()
   const candidates = rows.map((row) => ({
     keyword: row.keyword,
     source: `Search Opportunity Seed searches ${row.searches} ratio ${row.searchResultRatio ?? '-'}`,
-    capturedAt,
+    capturedAt: row.captured_at ?? '',
   }))
   return appendTrendScoutCandidates(candidates)
 }
 
+function discoveryCandidates() {
+  if (state.activeDiscoveryLane === 'all') return state.candidates
+  return state.candidates.filter((candidate) => candidate.discoveryLane === state.activeDiscoveryLane)
+}
+
+function renderDiscoveryControls() {
+  const enabled = isBroadEventDiscovery() && state.candidates.some((candidate) => candidate.discoveryLane)
+  elements.broadEventDiscovery.hidden = !enabled
+  if (!enabled) {
+    state.activeDiscoveryLane = 'all'
+    elements.discoveryLaneTabs.innerHTML = ''
+    elements.discoveryStrategySummary.innerHTML = ''
+    return
+  }
+
+  if (state.activeDiscoveryLane !== 'all' && !DISCOVERY_LANE_LABELS[state.activeDiscoveryLane]) {
+    state.activeDiscoveryLane = 'all'
+  }
+  const laneButtons = [
+    { id: 'all', label: 'すべて', count: state.candidates.length },
+    ...Object.entries(DISCOVERY_LANE_LABELS).map(([id, label]) => ({
+      id,
+      label,
+      count: state.candidates.filter((candidate) => candidate.discoveryLane === id).length,
+    })),
+  ]
+  elements.discoveryLaneTabs.innerHTML = laneButtons.map((lane) => `
+    <button type="button" role="tab" data-discovery-lane="${escapeHtml(lane.id)}" class="${state.activeDiscoveryLane === lane.id ? 'is-active' : ''}" aria-selected="${state.activeDiscoveryLane === lane.id}">
+      ${escapeHtml(lane.label)} ${lane.count}
+    </button>
+  `).join('')
+
+  elements.discoveryStrategySummary.innerHTML = Object.entries(QUERY_STRATEGY_LABELS).map(([strategy, label]) => {
+    const count = state.candidates.filter((candidate) => candidate.queryStrategy === strategy).length
+    return `<span>${escapeHtml(label)} ${count}</span>`
+  }).join('')
+}
+
+function rebuildMarketplaceInsightPlan({ preserveExisting = false } = {}) {
+  const mode = state.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
+  const quota = mode === 'plus' ? 60 : 15
+  const validationCandidates = etsyValidationCandidates()
+  if (validationCandidates.length === 0) {
+    if (preserveExisting && state.marketplaceInsightPlan?.items?.length > 0) return true
+    state.marketplaceInsightPlan = null
+    state.marketplaceInsightMessage = `eRankで需要を確認すると、${quota}語までEtsy公式確認プランを作成できます。`
+    return false
+  }
+
+  const previous = preserveExisting ? state.marketplaceInsightPlan : null
+  const previousItems = Array.isArray(previous?.items) ? previous.items : []
+  const capturedRelatedMetrics = previousItems.flatMap((item) => {
+    const metrics = Array.isArray(item.result?.etsyRelatedKeywordMetrics)
+      ? item.result.etsyRelatedKeywordMetrics
+      : []
+    return metrics.map((metric) => ({ ...metric, sourceQuery: metric.sourceQuery || item.query }))
+  })
+  const relatedKeywordMetrics = mergeMarketplaceInsightRelatedMetrics(
+    Array.isArray(previous?.relatedKeywordMetrics) ? previous.relatedKeywordMetrics : [],
+    capturedRelatedMetrics,
+  )
+  const built = buildMarketplaceInsightPlan(validationCandidates, {
+    ...currentOptions(),
+    marketplaceInsightMode: mode,
+    relatedKeywordMetrics,
+  })
+  const builtByQuery = new Map(built.items.map((item) => [normalizePhrase(item.query), item]))
+  const mergedItems = []
+  const mergedKeys = new Set()
+  if (preserveExisting) {
+    previousItems.forEach((existing) => {
+      const key = normalizePhrase(existing.query)
+      if (!key || mergedKeys.has(key)) return
+      const rebuilt = builtByQuery.get(key)
+      const keepExisting = Boolean(rebuilt)
+        || existing.stage === 'followup'
+        || existing.status !== 'planned'
+      if (!keepExisting) return
+      mergedItems.push(rebuilt ? { ...rebuilt, ...existing } : existing)
+      mergedKeys.add(key)
+    })
+  }
+  built.items.forEach((item) => {
+    const key = normalizePhrase(item.query)
+    if (!key || mergedKeys.has(key)) return
+    mergedItems.push(item)
+    mergedKeys.add(key)
+  })
+  const items = mergedItems
+    .slice(0, built.quota)
+    .map((item, index) => ({ ...item, id: `etsy-insight-${index + 1}` }))
+  const counts = ['discovery', 'validation', 'reserve', 'followup'].reduce((result, stage) => ({
+    ...result,
+    [stage]: items.filter((item) => item.stage === stage).length,
+  }), {})
+  const followUpItems = items.filter((item) => item.stage === 'followup')
+  state.marketplaceInsightPlan = {
+    ...built,
+    mode,
+    counts,
+    eventId: selectedEvent().id,
+    categoryId: selectedCategory().id,
+    createdAt: new Date().toISOString(),
+    officialRemaining: previous?.officialRemaining ?? null,
+    relatedKeywordMetrics,
+    candidatePool: built.candidatePool,
+    researchRound: previous?.researchRound ?? built.researchRound,
+    releasedFollowUpCount: followUpItems.length,
+    completedFollowUpCount: followUpItems.filter((item) => ['completed', 'skipped'].includes(item.status)).length,
+    stagnantRounds: previous?.stagnantRounds ?? built.stagnantRounds,
+    lastEvaluatedRound: previous?.lastEvaluatedRound ?? built.lastEvaluatedRound,
+    roundBaselineClusterKeys: previous?.roundBaselineClusterKeys ?? built.roundBaselineClusterKeys,
+    stopReason: previous?.stopReason ?? '',
+    followUpRemaining: Math.max(0, built.followUpCapacity - followUpItems.length),
+    items,
+  }
+  state.marketplaceInsightMessage = preserveExisting
+    ? state.marketplaceInsightMessage
+    : mode === 'plus'
+      ? 'Etsy Plus段階式プランを作成しました。入口20語から始め、関連語を5語ずつ最大40語まで深掘りします。'
+      : '無料15語プランを作成しました。「Etsy公式確認を自動実行」で順番に取得します。'
+  return true
+}
+
+function setMarketplaceInsightMode(rawMode) {
+  const mode = rawMode === 'plus' ? 'plus' : 'free'
+  if (state.marketplaceInsightMode === mode) return
+  state.marketplaceInsightMode = mode
+  const rebuilt = rebuildMarketplaceInsightPlan({ preserveExisting: true })
+  if (rebuilt) {
+    state.marketplaceInsightMessage = mode === 'plus'
+      ? 'Etsy Plusモードへ切り替えました。既存の進捗を残して、関連語の深掘り枠を追加しました。'
+      : '無料15語モードへ切り替えました。調査済みデータは調査一覧に残ります。'
+  }
+  renderMarketplaceInsightPlan()
+  persistMarketFinderState()
+}
+
+function marketplaceNextBatchState(plan = state.marketplaceInsightPlan) {
+  if (state.marketplaceInsightMode !== 'plus' || !plan?.items?.length) {
+    return { ready: false, reason: 'Plusモードで利用できます。' }
+  }
+  if (plan.stopReason) {
+    return { ready: false, reason: MARKETPLACE_STOP_LABELS[plan.stopReason] ?? plan.stopReason }
+  }
+  const completedSeedCount = plan.items.filter((item) => item.stage !== 'followup' && item.status === 'completed').length
+  const followUps = plan.items.filter((item) => item.stage === 'followup')
+  const activeFollowUps = followUps.filter((item) => ['planned', 'opened', 'error'].includes(item.status))
+  if (activeFollowUps.length > 0) return { ready: false, reason: '現在の5語を先に確認' }
+  if (completedSeedCount < 10) return { ready: false, reason: `入口をあと${10 - completedSeedCount}語取得` }
+  if (followUps.length > 0 && completedSeedCount < (plan.seedQuota || 20)) {
+    return { ready: false, reason: `残りの入口${(plan.seedQuota || 20) - completedSeedCount}語を取得` }
+  }
+  const existing = new Set(plan.items.map((item) => normalizePhrase(item.query)))
+  const available = (plan.candidatePool ?? []).filter((candidate) => (
+    candidate.eligibleForFollowUp !== false
+    && !existing.has(normalizePhrase(candidate.query ?? candidate.keyword))
+  )).length
+  if (available < 5) return { ready: false, reason: '有効候補が5語未満' }
+  return { ready: true, reason: '上位5語を追加できます。' }
+}
+
+function releaseMarketplaceInsightBatch() {
+  const plan = state.marketplaceInsightPlan
+  if (!plan || state.marketplaceInsightMode !== 'plus') return
+  const result = advanceMarketplaceInsightResearch(plan, currentOptions())
+  const items = (result.plan.items ?? []).map((item, index) => ({ ...item, id: `etsy-insight-${index + 1}` }))
+  const counts = ['discovery', 'validation', 'reserve', 'followup'].reduce((summary, stage) => ({
+    ...summary,
+    [stage]: items.filter((item) => item.stage === stage).length,
+  }), {})
+  state.marketplaceInsightPlan = { ...result.plan, items, counts }
+  const messages = {
+    'batch-added': `関連深掘りラウンド${result.plan.researchRound}として上位${result.addedCount}語を追加しました。`,
+    'need-more-seeds': '入口結果を10語以上取得すると、最初の関連深掘りを追加できます。',
+    'batch-in-progress': '現在の関連深掘り5語を先に確認してください。',
+    'continue-seeds': '最初の深掘り後は、残りの入口語を取得してください。',
+    'max-followups': '関連深掘り40語を完了しました。',
+    stagnant: '2ラウンド連続で新しい有望群が見つからなかったため、深掘りを終了しました。',
+    'candidate-pool-depleted': '未検索の有効候補が5語未満になったため、この枝を終了しました。',
+  }
+  state.marketplaceInsightMessage = messages[result.reason] ?? '関連深掘りの状態を更新しました。'
+  renderAll()
+  persistMarketFinderState()
+}
+
+function openedMarketplaceInsightItem() {
+  return state.marketplaceInsightPlan?.items?.find((item) => item.status === 'opened') ?? null
+}
+
+function lastCompletedMarketplaceInsightItem() {
+  return [...(state.marketplaceInsightPlan?.items ?? [])]
+    .filter((item) => item.status === 'completed' && item.completedAt)
+    .sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt)))[0] ?? null
+}
+
+function capturableMarketplaceInsightItem() {
+  return openedMarketplaceInsightItem() ?? lastCompletedMarketplaceInsightItem()
+}
+
+function nextMarketplaceInsightItem() {
+  return openedMarketplaceInsightItem()
+    ?? state.marketplaceInsightPlan?.items?.find((item) => item.status === 'planned' || item.status === 'error')
+    ?? null
+}
+
+function renderMarketplaceInsightResults() {
+  const completed = (state.marketplaceInsightPlan?.items ?? [])
+    .filter((item) => item.status === 'completed' && item.result)
+
+  if (completed.length === 0) {
+    elements.marketplaceResultsList.innerHTML = '<div class="empty-state">「Etsy公式確認を自動実行」から始めると、取得した公式データがここに表示されます。</div>'
+    return
+  }
+
+  elements.marketplaceResultsList.innerHTML = `
+    <div class="marketplace-results-head">
+      <span>キーワード</span>
+      <span>30日検索</span>
+      <span>掲載数</span>
+      <span>検索変化</span>
+      <span>関連語</span>
+      <span>状態</span>
+    </div>
+    ${completed.map((item) => {
+      const result = item.result ?? {}
+      const trend = Number(result.etsySearchTrendPercent)
+      const trendLabel = Number.isFinite(trend) ? `${trend > 0 ? '+' : ''}${trend}%` : '-'
+      const relatedCount = Array.isArray(result.etsyRelatedTerms) ? result.etsyRelatedTerms.length : 0
+      return `
+        <article class="marketplace-result-row">
+          <strong data-label="キーワード">${escapeHtml(item.query)}</strong>
+          <span data-label="30日検索">${escapeHtml(displayMetricValue(result.etsySearches30d))}</span>
+          <span data-label="掲載数">${escapeHtml(displayMetricValue(result.etsyListings))}</span>
+          <span data-label="検索変化">${escapeHtml(trendLabel)}</span>
+          <span data-label="関連語">${relatedCount}</span>
+          <span data-label="状態" class="pill ready">取得済み</span>
+        </article>
+      `
+    }).join('')}
+  `
+}
+
+function renderMarketplaceInsightPlan() {
+  const mode = state.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
+  const defaultQuota = mode === 'plus' ? 60 : 15
+  const eligibleCandidates = etsyValidationCandidates()
+  const officialProbeCount = eligibleCandidates.filter((candidate) => candidate.officialProbe).length
+  const hasErankResults = erankResultRows().length > 0
+  const restoredAwaiting = restoredResultsAwaitingConfirmation()
+  const officialKeywords = marketplaceCompletedKeywords(state.marketplaceInsightPlan)
+  const hasPlan = Boolean(state.marketplaceInsightPlan?.items?.length)
+  const canUsePlan = hasPlan && !restoredAwaiting
+  elements.marketplaceInsightPanel.hidden = false
+  elements.marketplaceStartBtn.hidden = canUsePlan
+  elements.marketplaceBuildPlanBtn.hidden = !canUsePlan
+  elements.marketplaceNextBtn.hidden = !canUsePlan || state.marketplaceInsightAutoRunning
+  elements.marketplaceAutoStopBtn.hidden = !state.marketplaceInsightAutoRunning
+  elements.marketplaceCaptureBtn.hidden = !canUsePlan
+  elements.marketplaceNextBatchBtn.hidden = !canUsePlan
+  elements.marketplaceSkipBtn.hidden = !canUsePlan
+  elements.marketplaceStartBtn.disabled = state.marketplaceInsightBusy || state.marketplaceInsightAutoRunning || eligibleCandidates.length === 0
+  elements.marketplaceStartStatus.textContent = restoredAwaiting
+      ? '前回の保存結果です。eRank結果の上にある「この前回結果から続ける」を押すと利用できます。'
+    : hasPlan
+      ? 'Etsy公式確認プランを作成済みです。下のボタンから自動実行または再開できます。'
+    : !hasErankResults
+      ? 'eRankで需要を確認すると利用できます。'
+      : eligibleCandidates.length === 0
+        ? 'eRank結果はありますが、Etsy公式へ進める基準を通った候補は0件です。上の「今回は保留した候補」を確認してください。'
+      : !state.extensionConnected
+        ? 'eRank確認は完了しています。実Chromeで開き、Chrome拡張1.26をReloadしてから押してください。'
+        : officialProbeCount > 0
+          ? `eRank保留のうち需要数値がある安全な上位${officialProbeCount}件を、Etsy公式データで再確認します。`
+        : `eRankで絞った${eligibleCandidates.length}件をEtsy公式で順番に自動確認します。`
+  elements.erankToEverbeeBtn.disabled = state.marketplaceInsightBusy || restoredAwaiting || (officialKeywords.length === 0 && erankResultRows().length === 0)
+  elements.everbeeQueueStatus.textContent = officialKeywords.length > 0
+    ? `Etsy公式で取得した${officialKeywords.length}件を優先してEverBeeへ渡します。`
+    : erankResultRows().length > 0
+      ? 'Etsy公式は未取得です。押した場合は確認後にeRank候補で続行できます。'
+      : 'Etsy公式結果を取り込むと、その候補を優先して売上確認します。'
+  elements.marketplaceFreeModeBtn.classList.toggle('is-active', mode === 'free')
+  elements.marketplaceFreeModeBtn.setAttribute('aria-pressed', String(mode === 'free'))
+  elements.marketplacePlusModeBtn.classList.toggle('is-active', mode === 'plus')
+  elements.marketplacePlusModeBtn.setAttribute('aria-pressed', String(mode === 'plus'))
+  elements.marketplaceAccessBadge.textContent = mode === 'plus' ? 'Etsy Plus・無制限' : '週15回無料'
+  elements.marketplaceAdaptiveStatus.hidden = mode !== 'plus'
+  elements.marketplacePlanHelp.textContent = mode === 'plus'
+    ? '入口20語から開始し、最大200語の候補プールから関連語を5語ずつ最大40語まで深掘りします。検索は常に1語ずつです。'
+    : '無料枠を入口5・検証7・予備3へ配分します。検索は常に1語ずつです。'
+  elements.marketplaceBuildPlanBtn.textContent = mode === 'plus' ? 'Plus段階式プランを作り直す' : '無料15語プランを作り直す'
+
+  const plan = state.marketplaceInsightPlan
+  if (!plan?.items?.length) {
+    elements.marketplacePlanCount.textContent = mode === 'plus' ? '入口 0 / 20' : `0 / ${defaultQuota}`
+    elements.marketplacePlanRemaining.textContent = '0'
+    elements.marketplaceOfficialRemaining.textContent = mode === 'plus' ? '無制限' : '未取得'
+    elements.marketplaceCandidatePoolCount.textContent = '0 / 200'
+    elements.marketplaceFollowUpCount.textContent = '0 / 40'
+    elements.marketplaceResearchRound.textContent = '0'
+    elements.marketplaceStopReason.textContent = '入口を調査中'
+    elements.marketplaceCurrentQuery.textContent = 'eRank結果を確認してください'
+    elements.marketplaceQueue.innerHTML = ''
+    elements.marketplaceBuildPlanBtn.disabled = state.marketplaceInsightBusy || eligibleCandidates.length === 0
+    elements.marketplaceNextBtn.disabled = true
+    elements.marketplaceCaptureBtn.disabled = true
+    elements.marketplaceNextBatchBtn.disabled = true
+    elements.marketplaceSkipBtn.disabled = true
+    elements.marketplaceStatus.textContent = state.marketplaceInsightMessage || 'eRank結果からEtsy公式で調べる候補を準備します。'
+    renderMarketplaceInsightResults()
+    return
+  }
+
+  const completed = plan.items.filter((item) => item.status === 'completed').length
+  const completedSeeds = plan.items.filter((item) => item.stage !== 'followup' && item.status === 'completed').length
+  const remaining = plan.items.filter((item) => !['completed', 'skipped'].includes(item.status)).length
+  const opened = openedMarketplaceInsightItem()
+  const current = nextMarketplaceInsightItem()
+  elements.marketplacePlanCount.textContent = mode === 'plus' ? `入口 ${completedSeeds} / 20` : `${completed} / ${plan.quota}`
+  elements.marketplacePlanRemaining.textContent = String(remaining)
+  const hasOfficialRemaining = plan.officialRemaining !== null
+    && plan.officialRemaining !== undefined
+    && String(plan.officialRemaining).trim() !== ''
+    && Number.isFinite(Number(plan.officialRemaining))
+  elements.marketplaceOfficialRemaining.textContent = mode === 'plus'
+    ? '無制限'
+    : hasOfficialRemaining
+      ? String(plan.officialRemaining)
+      : '未取得'
+  const followUpItems = plan.items.filter((item) => item.stage === 'followup')
+  const completedFollowUps = followUpItems.filter((item) => ['completed', 'skipped'].includes(item.status)).length
+  const nextBatchState = marketplaceNextBatchState(plan)
+  elements.marketplaceCandidatePoolCount.textContent = `${plan.candidatePool?.length ?? 0} / 200`
+  elements.marketplaceFollowUpCount.textContent = `${completedFollowUps} / 40`
+  elements.marketplaceResearchRound.textContent = String(plan.researchRound ?? 0)
+  elements.marketplaceStopReason.textContent = plan.stopReason
+    ? MARKETPLACE_STOP_LABELS[plan.stopReason] ?? plan.stopReason
+    : nextBatchState.reason
+  elements.marketplaceCurrentQuery.textContent = current?.query ?? 'このプランは完了しました'
+  elements.marketplaceBuildPlanBtn.disabled = state.marketplaceInsightBusy || state.marketplaceInsightAutoRunning || eligibleCandidates.length === 0
+  elements.marketplaceNextBtn.disabled = state.marketplaceInsightBusy || state.marketplaceInsightAutoRunning || Boolean(opened) || !current || !state.extensionConnected
+  const capturable = capturableMarketplaceInsightItem()
+  elements.marketplaceCaptureBtn.disabled = state.marketplaceInsightBusy || state.marketplaceInsightAutoRunning || !capturable || !state.extensionConnected
+  elements.marketplaceNextBtn.classList.toggle('primary-btn', !opened)
+  elements.marketplaceNextBtn.classList.toggle('ghost-btn', Boolean(opened))
+  elements.marketplaceCaptureBtn.classList.toggle('primary-btn', Boolean(opened))
+  elements.marketplaceCaptureBtn.classList.toggle('ghost-btn', !opened)
+  elements.marketplaceCaptureBtn.textContent = opened
+    ? '表示中の結果を取り込む'
+    : capturable
+      ? '同じ語の関連ページを追加取り込み'
+      : '表示中の結果を取り込む'
+  elements.marketplaceNextBatchBtn.disabled = state.marketplaceInsightBusy || state.marketplaceInsightAutoRunning || !nextBatchState.ready
+  elements.marketplaceSkipBtn.disabled = state.marketplaceInsightBusy || state.marketplaceInsightAutoRunning || !current
+  elements.marketplaceQueue.innerHTML = plan.items.map((item, index) => {
+    const isCurrent = item === current
+    const laneLabel = DISCOVERY_LANE_LABELS[item.discoveryLane] ?? '基準'
+    const stageLabel = MARKETPLACE_STAGE_LABELS[item.stage] ?? item.stage
+    const statusLabel = MARKETPLACE_STATUS_LABELS[item.status] ?? item.status
+    const className = item.status === 'completed' ? 'is-complete' : isCurrent ? 'is-current' : ''
+    const metricLabel = item.stage === 'followup'
+      ? ` / 優先 ${item.score ?? item.opportunityIndex ?? '-'} / 検索 ${item.result?.etsySearches30d ?? item.etsySearches30d ?? '-'} / 掲載 ${item.result?.etsyListings ?? item.etsyListings ?? '-'}${Number.isFinite(Number(item.result?.etsySearchTrendPercent)) ? ` / 変化 ${Number(item.result.etsySearchTrendPercent) > 0 ? '+' : ''}${item.result.etsySearchTrendPercent}%` : ''}`
+      : ''
+    const cohortLabel = item.cohortIndex === null || item.cohortIndex === undefined
+      ? ''
+      : ` / 調査内比較 ${Math.round(Number(item.cohortIndex))}`
+    const probeLabel = item.officialProbe ? ' / eRank保留から再確認' : ''
+    return `
+      <li class="${className}">
+        <span class="queue-index">${index + 1}</span>
+        <span class="queue-query">
+          <strong>${escapeHtml(item.query)}</strong>
+          <small>${escapeHtml(stageLabel)} / ${escapeHtml(laneLabel)} / ${escapeHtml(QUERY_STRATEGY_LABELS[item.queryStrategy] ?? item.queryStrategy)}${escapeHtml(probeLabel)}${escapeHtml(cohortLabel)}${escapeHtml(metricLabel)}</small>
+        </span>
+        <span class="queue-status">${escapeHtml(statusLabel)}</span>
+      </li>
+    `
+  }).join('')
+  elements.marketplaceStatus.textContent = state.marketplaceInsightMessage || (mode === 'plus'
+    ? 'Etsy Plusの無制限枠を使いますが、検索は確認しながら1語ずつ実行します。'
+    : '検索は1回ずつ実行します。自動では無料枠を消費しません。')
+  renderMarketplaceInsightResults()
+}
+
 function renderCandidates() {
-  elements.candidateCount.textContent = String(state.candidates.length)
+  renderDiscoveryControls()
+  const visibleCandidates = discoveryCandidates()
+  elements.candidateCount.textContent = state.activeDiscoveryLane === 'all'
+    ? String(state.candidates.length)
+    : `${visibleCandidates.length}/${state.candidates.length}`
   elements.copyKeywordsBtn.disabled = state.candidates.length === 0
   elements.copyReadyBtn.disabled = readyKeywords().length === 0
   elements.downloadJobBtn.disabled = readyKeywords().length === 0
@@ -1121,14 +1696,16 @@ function renderCandidates() {
     return
   }
 
-  elements.candidateList.innerHTML = state.candidates.map((candidate) => {
+  elements.candidateList.innerHTML = visibleCandidates.map((candidate) => {
     const researched = findResearchRow(candidate.keyword)
     const resultScore = researched ? scoreEverbeeResult(researched, currentOptions()) : null
     const erankCheckedAt = formatDateTime(researched?.erankCheckedAt)
     const erankTitle = `eRankの検索数・クリック・競合・KDを取得済みです。人気確定ではありません。${erankCheckedAt ? ` 確認: ${erankCheckedAt}` : ''}`
     const resultPill = resultScore?.validation.hasEverbeeData
-      ? `<span class="pill ready" title="EverBeeの売上確認まで終わった狙い目スコアです。">EverBee ${resultScore.score}点</span>`
-      : resultScore?.validation.hasErankData
+      ? `<span class="pill ready">Opportunity ${escapeHtml(resultScore.opportunityLabel)}</span><span class="pill">Confidence ${escapeHtml(resultScore.confidenceLabel)}</span>`
+      : resultScore?.validation.hasEtsyMarketplaceData
+        ? '<span class="pill ready">Etsy公式確認済み</span>'
+        : resultScore?.validation.hasErankData
         ? `<span class="pill" title="${escapeHtml(erankTitle)}">eRank確認済み</span>`
       : ''
     const sourceText = candidateSourceText(candidate, researched, resultScore)
@@ -1148,6 +1725,11 @@ function renderCandidates() {
             <span class="pill ${candidate.status === 'ready' ? 'ready' : 'review'}" title="${escapeHtml(statusTitle)}">${candidate.status === 'ready' ? '調査OK' : '要確認'}</span>
             <span class="pill" title="キーワードの単語数です。短すぎる語句は広すぎる場合があります。">${candidate.wordCount} words</span>
             <span class="pill" title="${escapeHtml(categoryTitle)}">${escapeHtml(categoryLabel)}</span>
+            ${candidate.discoveryLane ? `<span class="pill">${escapeHtml(DISCOVERY_LANE_LABELS[candidate.discoveryLane] ?? candidate.discoveryLane)}</span>` : ''}
+            ${candidate.queryStrategy ? `<span class="pill">${escapeHtml(QUERY_STRATEGY_LABELS[candidate.queryStrategy] ?? candidate.queryStrategy)}</span>` : ''}
+            ${candidate.clusterSize > 1 ? `<span class="pill">同系統 ${candidate.clusterSize}語</span>` : ''}
+            ${candidate.timing?.label && candidate.timing.label !== 'evergreen' ? `<span class="pill">時期 ${escapeHtml(candidate.timing.label)} / ${escapeHtml(candidate.timing.weeksUntil)}週</span>` : ''}
+            ${candidate.sourceFreshness?.freshnessLabel === 'inspiration' || candidate.sourceFreshness?.freshnessLabel === 'expired' ? '<span class="pill review">古いデータ・発想用</span>' : ''}
             ${resultPill}
             ${candidate.riskTerms.length ? `<span class="pill danger">${escapeHtml(candidate.riskTerms.join(', '))}</span>` : ''}
           </div>
@@ -1160,35 +1742,26 @@ function renderCandidates() {
 }
 
 function scoreReasonLabels(score) {
-  const normalized = score.normalized
   const reasons = []
-  if ((normalized.listingsAnalyzed ?? Infinity) <= 3000) reasons.push('EverBee競合少なめ')
-  else if ((normalized.listingsAnalyzed ?? Infinity) <= 5000) reasons.push('EverBee競合許容')
-  else if ((normalized.listingsAnalyzed ?? 0) > 5000) reasons.push('商品数5,000超')
-  if ((normalized.salesDensity ?? 0) >= 5) reasons.push('販売密度A')
-  else if ((normalized.salesDensity ?? 0) >= 3) reasons.push('販売密度B')
-  else if (normalized.salesDensity !== null && normalized.salesDensity !== undefined) reasons.push('販売密度弱め')
-  if ((normalized.topMonthlySales ?? 0) >= 30) reasons.push('月間販売が強い')
-  else if ((normalized.topMonthlySales ?? 0) >= 10) reasons.push('月間販売あり')
-  if ((normalized.topRevenue ?? 0) >= 1000) reasons.push('売上が強い')
-  else if ((normalized.topRevenue ?? 0) >= 300) reasons.push('売上あり')
-  if ((normalized.listingAgeMonths ?? Infinity) <= 12 && (normalized.topMonthlySales ?? 0) >= 10) reasons.push('新しめで売れている')
-  if ((normalized.listingAgeMonths ?? 0) >= 24) reasons.push('古い商品は参考中心')
-  if ((normalized.listingAgeMonths ?? Infinity) < 2 && (normalized.topMonthlySales ?? 0) < 10) reasons.push('新しすぎるので保留')
-  const hasErankDemand = (normalized.erankSearchVolume ?? 0) > 0 || (normalized.erankClicks ?? 0) > 0
-  if ((normalized.erankSearchVolume ?? 0) >= 300 || (normalized.erankClicks ?? 0) >= 100) reasons.push('eRank需要あり')
-  if (hasErankDemand && (normalized.erankCompetition ?? Infinity) < 5000) reasons.push('eRank競合低め')
-  if (hasErankDemand && (normalized.erankKeywordDifficulty ?? Infinity) <= 25) reasons.push('KD低め')
-  if ((normalized.erankClickDensity ?? 0) >= 20) reasons.push('クリック密度A')
+  const demandSource = score.validation.hasEtsyMarketplaceData ? 'Etsy公式' : 'eRank'
+  if (!score.gateReasons.includes('demand')) reasons.push(`${demandSource}需要あり`)
+  if (!score.gateReasons.includes('supply')) reasons.push(`${demandSource}参入余地あり`)
+  if (score.normalized.everbeeCompetitionBand === 'empty') reasons.push('EverBee結果なし')
+  else if (score.normalized.everbeeCompetitionBand === 'saturated') reasons.push('EverBee競合過密')
+  else if (score.normalized.everbeeCompetitionBand !== 'unknown') reasons.push(`EverBee競合 ${score.normalized.listingsAnalyzed}件`)
+  else if (score.gateReasons.includes('competition-unverified')) reasons.push('競合未取得')
+  if (!score.gateReasons.includes('sales-breadth')) reasons.push('複数商品で販売')
+  if (!score.gateReasons.includes('sales-concentration')) reasons.push('単一商品への集中なし')
+  if (!score.gateReasons.includes('freshness')) reasons.push('有効期限内のデータ')
   if (score.riskTerms.length > 0) reasons.push('要リスク確認')
   return reasons.slice(0, 5)
 }
 
 function opportunityScoreClass(score) {
-  if (score.label.startsWith('D')) return 'd'
-  if (score.score >= 80) return 'a'
-  if (score.score >= 62) return 'b'
-  if (score.score >= 40) return 'c'
+  if (score.opportunityLabel === 'D') return 'd'
+  if (score.opportunityLabel === 'A') return 'a'
+  if (score.opportunityLabel === 'B') return 'b'
+  if (score.opportunityLabel === 'C') return 'c'
   return 'weak'
 }
 
@@ -1216,20 +1789,24 @@ function renderErankSummary(rows) {
   const expandRows = rows.filter((row) => row.erankOpportunity.action === 'expand')
   const holdRows = rows.filter((row) => row.erankOpportunity.action === 'hold' || row.erankOpportunity.action === 'reject')
   const nextKeywords = salesCheckKeywords()
+  const restoredNotice = state.restoredResearchSavedAt
+    ? `<div class="restored-results-note${state.restoredResultsAccepted ? ' is-accepted' : ''}"><strong>${state.restoredResultsAccepted ? '前回の保存結果を今回の続きとして使用中です。' : '前回の保存結果を表示中です。Chrome拡張のReloadで再調査した結果ではありません。'}</strong><span>保存: ${escapeHtml(formatDateTime(state.restoredResearchSavedAt) || '日時不明')} / 新しい調査は「候補を自動で探す」から始めます。</span>${state.restoredResultsAccepted ? '' : '<button type="button" class="ghost-btn" data-use-restored-results>この前回結果から続ける</button>'}</div>`
+    : ''
   const conclusion = proceedRows.length > 0
-    ? `有望そうな語句を${proceedRows.length}件見つけました。関連語も使って、売上確認する候補を${nextKeywords.length}件に絞りました。`
+    ? `有望そうな語句を${proceedRows.length}件見つけました。関連語も使って、Etsy公式確認候補を${nextKeywords.length}件に絞りました。`
     : expandRows.length > 0
-      ? `強い語句はまだ少なめですが、追加探索に使える語句を${expandRows.length}件見つけました。関連語からEverBee候補を${nextKeywords.length}件作っています。`
+      ? `強い語句はまだ少なめですが、追加探索に使える語句を${expandRows.length}件見つけました。関連語からEtsy公式確認候補を${nextKeywords.length}件作っています。`
       : `今回の広い検索は弱めでした。無理に進めず、イベント・商品・手入力イベントを変えてもう一度広く見てください。`
 
   elements.erankSummary.innerHTML = `
+    ${restoredNotice}
     <div class="summary-main">
       <strong>${escapeHtml(conclusion)}</strong>
       <span>弱い結果が出ても、ここで終わりではありません。eRankの関連キーワードも見て、次に調べる候補を作ります。</span>
     </div>
     <div class="summary-stats">
       <span><strong>${rows.length}</strong><small>確認した語句</small></span>
-      <span><strong>${proceedRows.length}</strong><small>売上確認へ</small></span>
+      <span><strong>${proceedRows.length}</strong><small>Etsy確認へ</small></span>
       <span><strong>${expandRows.length}</strong><small>追加探索</small></span>
       <span><strong>${holdRows.length}</strong><small>今回は保留</small></span>
     </div>
@@ -1283,6 +1860,10 @@ function renderSmallScore(label, score, className) {
       <em>/100</em>
     </span>
   `
+}
+
+function erankNextActionLabel(opportunity) {
+  return opportunity.action === 'everbee' ? 'Etsyで確認' : opportunity.label
 }
 
 function renderChips(values = []) {
@@ -1355,7 +1936,7 @@ function renderErankTableRow(row) {
       <span class="table-cell number-cell" data-label="Competition">${escapeHtml(displayMetricValue(normalized.erankCompetition, 'Unknown'))}</span>
       <span class="table-cell number-cell" data-label="KD">${escapeHtml(displayMetricValue(normalized.erankKeywordDifficulty, '未取得'))}</span>
       <span class="table-cell reason-cell" data-label="判定">
-        <span class="pill action-${escapeHtml(opportunity.action)}">${escapeHtml(opportunity.label)}</span>
+        <span class="pill action-${escapeHtml(opportunity.action)}">${escapeHtml(erankNextActionLabel(opportunity))}</span>
         ${scoreReasons ? `<span class="table-reasons">${scoreReasons}</span>` : ''}
       </span>
     </article>
@@ -1379,7 +1960,7 @@ function renderErankCard(row) {
         <div>
           <h3>${escapeHtml(normalized.keyword)}</h3>
           <div class="meta-line">
-            <span class="pill action-${escapeHtml(opportunity.action)}">${escapeHtml(opportunity.label)}</span>
+            <span class="pill action-${escapeHtml(opportunity.action)}">${escapeHtml(erankNextActionLabel(opportunity))}</span>
             <span class="pill">${escapeHtml(sourceLabel)}</span>
             ${normalized.erankKeywordDifficulty !== null ? `<span class="pill">KD ${escapeHtml(normalized.erankKeywordDifficulty)}</span>` : ''}
           </div>
@@ -1449,7 +2030,7 @@ function renderErankResults() {
   renderErankSummary(ranked)
 
   if (ranked.length === 0) {
-    elements.erankResultsList.innerHTML = '<div class="empty-state">「検索されているか見る」が終わると、ここに結果が表示されます。</div>'
+    elements.erankResultsList.innerHTML = '<div class="empty-state">「eRankで検索数を見る」が終わると、ここに結果が表示されます。</div>'
     return
   }
 
@@ -1458,20 +2039,18 @@ function renderErankResults() {
   const holdRows = ranked.filter((row) => row.erankOpportunity.action === 'hold' || row.erankOpportunity.action === 'reject')
 
   elements.erankResultsList.innerHTML = [
-    renderErankGroup('次に売れているか見る候補', '検索・クリック・KDの反応がよい語句です。ここから細かい商品候補へ変換します。', proceedRows, { limit: 16 }),
-    renderErankGroup('関連語から追加探索する候補', '弱くはないけれど、もう少し関連語を広げたい語句です。EverBee候補づくりの材料にも使います。', expandRows, { limit: 10 }),
-    renderErankGroup('今回は保留した候補', '需要が弱い、または除外リスクがある語句です。必要な時だけ確認します。', holdRows, { limit: 12, collapsible: true }),
+    renderErankGroup('次にEtsy公式で確認する候補', '検索・クリック・KDの反応がよい語句です。Marketplace Insightsで直近30日の需要を確かめます。', proceedRows, { limit: 16 }),
+    renderErankGroup('関連語から追加探索する候補', '弱くはないけれど、もう少し関連語を広げたい語句です。Etsy公式確認候補づくりの材料にも使います。', expandRows, { limit: 10 }),
+    renderErankGroup('今回は保留した候補', '需要が弱い候補です。権利リスクがなくSearchまたはClicksがある上位候補は、Etsy Plusの公式データで再確認できます。', holdRows, { limit: 12, collapsible: true }),
   ].join('') || '<div class="empty-state">eRank結果は入りましたが、次に進める候補がありませんでした。</div>'
 }
 
 function renderResults() {
-  const options = currentOptions()
-  const ranked = rankResearchRows(state.researchRows, options)
-    .filter((row) => row.score.validation.hasEverbeeData)
+  const ranked = currentResearchAnalysis().everbeeRows
   elements.buildNextRoundBtn.disabled = state.researchRows.length === 0
 
   if (ranked.length === 0) {
-    elements.resultsList.innerHTML = '<div class="empty-state">「売れているか見る」が終わると、ここに狙い目候補が表示されます。</div>'
+    elements.resultsList.innerHTML = '<div class="empty-state">「EverBeeで売上を確認する」が終わると、ここにおすすめキーワードが表示されます。</div>'
     return
   }
 
@@ -1516,6 +2095,7 @@ function renderResults() {
         </div>
 
         <div class="idea-grid">
+          ${renderProductRoute(row.productRoute)}
           <div><span>ターゲット</span><p>${escapeHtml(row.idea.target)}</p></div>
           <div><span>SEOタイトル案</span><p>${escapeHtml(row.idea.seoTitle)}</p></div>
           <div><span>タグ案</span><div class="tag-list">${tags}</div></div>
@@ -1525,6 +2105,25 @@ function renderResults() {
       </article>
     `
   }).join('')
+}
+
+function renderProductRoute(route) {
+  if (!route) return ''
+  if (!route.primary) {
+    return `
+    <div><span>おすすめ商品</span><p>${escapeHtml(route.decision ?? '見送り')}: なし</p></div>
+    <div><span>判断メモ</span><p>${escapeHtml(route.summary ?? '商品化しない候補です。')}</p></div>
+    <div><span>逃がし候補</span><p>なし</p></div>
+  `
+  }
+  const alternates = route.alternates?.length
+    ? route.alternates.map((item) => `${item.label}: ${item.reason}`).join(' / ')
+    : 'なし'
+  return `
+    <div><span>おすすめ商品</span><p>${escapeHtml(route.decision)}: ${escapeHtml(route.primary.label)}</p></div>
+    <div><span>判断メモ</span><p>${escapeHtml(route.summary)}</p></div>
+    <div><span>逃がし候補</span><p>${escapeHtml(alternates)}</p></div>
+  `
 }
 
 function resultRowKey(row, index = 0) {
@@ -1547,17 +2146,18 @@ function renderEverbeeTableRow(item, selectedKey) {
   return `
     <button type="button" class="research-table-row everbee-table-row${selectedClass}" data-result-key="${escapeHtml(key)}" aria-pressed="${key === selectedKey ? 'true' : 'false'}">
       <span class="table-cell score-cell" data-label="狙い目">
-        ${renderSmallScore('狙い目', row.score.score, labelClass)}
+        ${renderSmallScore(`Opportunity ${row.score.opportunityLabel}`, row.score.score, labelClass)}
       </span>
       <span class="table-cell keyword-cell" data-label="キーワード">
         <strong>${escapeHtml(normalized.keyword)}</strong>
         <span class="table-subline">${escapeHtml(sourceLine)}</span>
         ${scoreReasons ? `<span class="table-reasons">${scoreReasons}</span>` : ''}
       </span>
-      <span class="table-cell number-cell" data-label="商品数">${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</span>
-      <span class="table-cell number-cell" data-label="月販売">${escapeHtml(displayMetricValue(normalized.topMonthlySales))}</span>
-      <span class="table-cell number-cell" data-label="売上">${escapeHtml(displayMoneyValue(normalized.topRevenue))}</span>
-      <span class="table-cell number-cell" data-label="新しさ">${escapeHtml(age)}</span>
+      <span class="table-cell number-cell" data-label="EverBee競合">${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</span>
+      <span class="table-cell number-cell" data-label="販売商品">${escapeHtml(displayMetricValue(normalized.sellingListingCount))}</span>
+      <span class="table-cell number-cell" data-label="最近販売">${escapeHtml(displayMetricValue(normalized.recentSellingListingCount))}</span>
+      <span class="table-cell number-cell" data-label="中央値">${escapeHtml(displayMetricValue(normalized.medianMonthlySales))}</span>
+      <span class="table-cell number-cell" data-label="集中率">${normalized.topSalesShare === null ? '-' : `${Math.round(normalized.topSalesShare * 100)}%`}</span>
     </button>
   `
 }
@@ -1582,7 +2182,8 @@ function renderEverbeeDetail(row) {
           <h3>${escapeHtml(normalized.keyword)}</h3>
           <div class="meta-line">
             <span class="pill">${escapeHtml(row.score.label)}</span>
-            <span class="pill">${escapeHtml(row.score.validation.label)}</span>
+            <span class="pill">Confidence ${escapeHtml(row.score.confidenceLabel)}</span>
+            <span class="pill">Stage ${escapeHtml(row.score.candidateStage)}</span>
             <span class="pill">${escapeHtml(row.idea.theme)}</span>
           </div>
           ${sourceKeyword ? `<div class="candidate-source-line">eRank派生元: ${escapeHtml(sourceKeyword)}</div>` : ''}
@@ -1591,24 +2192,30 @@ function renderEverbeeDetail(row) {
       </div>
 
       <div class="metric-grid selected-metric-grid">
-        <div class="metric"><span>Listings</span><strong>${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</strong></div>
-        <div class="metric"><span>Sales</span><strong>${escapeHtml(displayMetricValue(normalized.topMonthlySales))}</strong></div>
-        <div class="metric"><span>Revenue</span><strong>${escapeHtml(displayMoneyValue(normalized.topRevenue))}</strong></div>
-        <div class="metric"><span>Price</span><strong>${escapeHtml(displayMoneyValue(normalized.averagePrice))}</strong></div>
-        <div class="metric"><span>Age</span><strong>${escapeHtml(displayMetricValue(normalized.listingAgeMonths))} mo</strong></div>
+        <div class="metric"><span>EverBee Listings Analyzed</span><strong>${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</strong></div>
+        <div class="metric"><span>Visible Listings</span><strong>${escapeHtml(displayMetricValue(normalized.visibleListingCount))}</strong></div>
+        <div class="metric"><span>Selling Listings</span><strong>${escapeHtml(displayMetricValue(normalized.sellingListingCount))}</strong></div>
+        <div class="metric"><span>Recent Selling</span><strong>${escapeHtml(displayMetricValue(normalized.recentSellingListingCount))}</strong></div>
+        <div class="metric"><span>Median Sales</span><strong>${escapeHtml(displayMetricValue(normalized.medianMonthlySales))}</strong></div>
+        <div class="metric"><span>Total Visible Sales</span><strong>${escapeHtml(displayMetricValue(normalized.totalVisibleMonthlySales))}</strong></div>
+        <div class="metric"><span>Top Sales Share</span><strong>${normalized.topSalesShare === null ? '-' : `${Math.round(normalized.topSalesShare * 100)}%`}</strong></div>
+        <div class="metric"><span>Median Age</span><strong>${escapeHtml(displayMetricValue(normalized.medianListingAgeMonths))} mo</strong></div>
+        <div class="metric"><span>Etsy 30d Searches</span><strong>${escapeHtml(displayMetricValue(normalized.etsySearches30d))}</strong></div>
+        <div class="metric"><span>Etsy Listings</span><strong>${escapeHtml(displayMetricValue(normalized.etsyListings))}</strong></div>
+        <div class="metric"><span>Etsy Checked</span><strong>${escapeHtml(formatDateTime(normalized.etsyCheckedAt) || '-')}</strong></div>
         <div class="metric"><span>eRank Search</span><strong>${escapeHtml(displayMetricValue(normalized.erankSearchVolume))}</strong></div>
         <div class="metric"><span>eRank Clicks</span><strong>${escapeHtml(displayMetricValue(normalized.erankClicks))}</strong></div>
         <div class="metric"><span>eRank CTR</span><strong>${escapeHtml(displayMetricValue(normalized.erankCtr))}</strong></div>
         <div class="metric"><span>eRank Comp</span><strong>${escapeHtml(displayMetricValue(normalized.erankCompetition, 'Unknown'))}</strong></div>
         <div class="metric"><span>eRank KD</span><strong>${escapeHtml(displayMetricValue(normalized.erankKeywordDifficulty, '未取得'))}</strong></div>
-        <div class="metric"><span>eRank Trend</span><strong>${escapeHtml(displayMetricValue(normalized.erankTrend))}</strong></div>
-        <div class="metric"><span>Sales / 1000</span><strong>${escapeHtml(displayMetricValue(normalized.salesDensity?.toFixed?.(1) ?? normalized.salesDensity))}</strong></div>
-        <div class="metric"><span>Revenue / 1000</span><strong>${escapeHtml(displayMoneyValue(normalized.revenueDensity?.toFixed?.(0) ?? normalized.revenueDensity))}</strong></div>
-        <div class="metric"><span>Clicks / 1000</span><strong>${escapeHtml(displayMetricValue(normalized.erankClickDensity?.toFixed?.(1) ?? normalized.erankClickDensity))}</strong></div>
+        <div class="metric"><span>eRank Checked</span><strong>${escapeHtml(formatDateTime(normalized.erankCheckedAt) || '-')}</strong></div>
+        <div class="metric"><span>EverBee Checked</span><strong>${escapeHtml(formatDateTime(normalized.everbeeCheckedAt) || '-')}</strong></div>
       </div>
+      ${renderEverbeeProductRows(row)}
       ${renderDecisionEvidence(row.score)}
 
       <div class="idea-grid">
+        ${renderProductRoute(row.productRoute)}
         <div><span>ターゲット</span><p>${escapeHtml(row.idea.target)}</p></div>
         <div><span>SEOタイトル案</span><p>${escapeHtml(row.idea.seoTitle)}</p></div>
         <div><span>タグ案</span><div class="tag-list">${tags}</div></div>
@@ -1619,9 +2226,47 @@ function renderEverbeeDetail(row) {
   `
 }
 
+function renderEverbeeProductRows(row) {
+  const productRows = (Array.isArray(row.productRows) ? row.productRows : [])
+    .filter((product) => normalizePhrase(product?.title))
+    .sort((a, b) => (Number(b.monthlySales) || 0) - (Number(a.monthlySales) || 0)
+      || (Number(b.monthlyRevenue) || 0) - (Number(a.monthlyRevenue) || 0))
+    .slice(0, 14)
+
+  if (productRows.length === 0) return ''
+
+  const rows = productRows.map((product) => {
+    const ageMonths = Number(product.listingAgeMonths)
+    const isNewWinner = Number.isFinite(ageMonths) && ageMonths > 0 && ageMonths <= 12 && Number(product.monthlySales) > 0
+    return `
+      <div class="everbee-product-row">
+        <span class="everbee-product-title">
+          <strong>${escapeHtml(product.title)}</strong>
+          <small>${escapeHtml(product.shopName || '-')} / 売上 $${escapeHtml(formatCompactNumber(product.monthlyRevenue))}</small>
+        </span>
+        <strong>${escapeHtml(formatCompactNumber(product.monthlySales))}</strong>
+        <span class="everbee-age${isNewWinner ? ' is-new-winner' : ''}">${escapeHtml(displayMetricValue(product.listingAgeMonths))}か月</span>
+        <strong>${escapeHtml(formatCompactNumber(product.totalSales))}</strong>
+      </div>
+    `
+  }).join('')
+
+  return `
+    <section class="everbee-product-evidence">
+      <div class="everbee-product-heading">
+        <h4>EverBee売れ筋商品</h4>
+        <span>月間販売数順 / 緑は公開12か月以内</span>
+      </div>
+      <div class="everbee-product-head">
+        <span>商品名</span><span>月販</span><span>公開</span><span>累計</span>
+      </div>
+      <div class="everbee-product-list">${rows}</div>
+    </section>
+  `
+}
+
 function everbeeResultRows() {
-  return rankResearchRows(state.researchRows, currentOptions())
-    .filter((row) => row.score.validation.hasEverbeeData)
+  return currentResearchAnalysis().everbeeRows
 }
 
 function renderResultsTable() {
@@ -1631,7 +2276,7 @@ function renderResultsTable() {
 
   if (ranked.length === 0) {
     state.selectedResultKey = ''
-    elements.resultsList.innerHTML = '<div class="empty-state">「売れているか見る」が終わると、ここに狙い目候補が表示されます。</div>'
+    elements.resultsList.innerHTML = '<div class="empty-state">「EverBeeで売上を確認する」が終わると、ここにおすすめキーワードが表示されます。</div>'
     return
   }
 
@@ -1651,10 +2296,11 @@ function renderResultsTable() {
           <div class="research-table-head everbee-table-head">
             <span>狙い目</span>
             <span>キーワード</span>
-            <span>商品数</span>
-            <span>月販売</span>
-            <span>売上</span>
-            <span>新しさ</span>
+            <span>EverBee競合</span>
+            <span>販売商品</span>
+            <span>最近販売</span>
+            <span>中央値</span>
+            <span>集中率</span>
           </div>
           ${tableRows}
         </div>
@@ -1714,7 +2360,7 @@ function bucketInputsAreEmpty() {
 
 function autoBucketKeywords(showStatus = true) {
   const options = currentOptions()
-  const allRanked = rankResearchRows(state.researchRows, options)
+  const allRanked = currentResearchAnalysis().scoredRows
   const everbeeRanked = allRanked.filter((row) => row.score.validation.hasEverbeeData)
   const ranked = everbeeRanked.length > 0 ? everbeeRanked : allRanked
 
@@ -1792,17 +2438,17 @@ function renderTrendScoutStatus() {
   const terms = trendScoutTerms()
   if (terms.length === 0) {
     if (state.candidates.length > 0) {
-      setTrendStatus('Step 2の候補を作成済みです。条件を変えたら、もう一度「おすすめ自動探索をはじめる」を押します。', 'ready')
+      setTrendStatus('調査候補を作成済みです。条件を変えたら、もう一度「候補を自動で探す」を押します。', 'ready')
     } else {
-      setTrendStatus('商品を選んだら、このボタンを押します。見つかった語句からStep 2の候補を作ります。')
+      setTrendStatus('商品を選んだら、このボタンを押します。見つかった語句から調査候補を作ります。')
     }
     return
   }
 
   const variant = state.candidates.length > 0 ? 'ready' : 'warn'
   const message = state.candidates.length > 0
-    ? `Step 2候補を作成済みです。条件を変えたら、もう一度「おすすめ自動探索をはじめる」を押します。`
-    : `商品を選んで「おすすめ自動探索をはじめる」を押してください。`
+    ? `調査候補を作成済みです。条件を変えたら、もう一度「候補を自動で探す」を押します。`
+    : `商品と条件を選んで「候補を自動で探す」を押してください。`
   setTrendStatus(message, variant)
 }
 
@@ -1812,6 +2458,7 @@ function renderAll() {
   renderSearchSeedRows()
   renderCandidates()
   renderErankResults()
+  renderMarketplaceInsightPlan()
   renderResultsTable()
   renderSeoPlan()
   persistMarketFinderState()
@@ -1840,6 +2487,7 @@ function candidateProvenance(trendMeta, fallbackSourceLabel = '商品条件か�
       sourceDetail: '',
       sourceAt: '',
       sourceBaseKeyword: '',
+      sourceFreshness: getSourceFreshness(''),
     }
   }
 
@@ -1852,11 +2500,13 @@ function candidateProvenance(trendMeta, fallbackSourceLabel = '商品条件か�
       ? 'サンプル'
       : '保存済み/手入力Trend'
 
+  const sourceAt = isCurrentRun ? (state.lastTrendRunStartedAt || trendMeta.capturedAt) : trendMeta.capturedAt
   return {
     sourceLabel,
     sourceDetail,
-    sourceAt: isCurrentRun ? (state.lastTrendRunStartedAt || trendMeta.capturedAt) : trendMeta.capturedAt,
+    sourceAt,
     sourceBaseKeyword: baseKeyword,
+    sourceFreshness: getSourceFreshness(sourceAt),
   }
 }
 
@@ -1865,6 +2515,9 @@ function candidateSourceText(candidate, researched, resultScore) {
   const sourceDetail = candidate.sourceDetail ? `（${candidate.sourceDetail}）` : ''
   const sourceAt = formatDateTime(candidate.sourceAt)
   const parts = [`由来: ${sourceLabel}${sourceDetail}${sourceAt ? ` / ${sourceAt}` : ''}`]
+  if (candidate.sourceFreshness?.freshnessDays !== null) {
+    parts.push(`鮮度: ${candidate.sourceFreshness.freshnessDays}日 / ${candidate.sourceFreshness.freshnessLabel}`)
+  }
 
   if (candidate.sourceBaseKeyword && candidate.sourceBaseKeyword !== candidate.keyword) {
     parts.push(`元語: ${candidate.sourceBaseKeyword}`)
@@ -1872,6 +2525,9 @@ function candidateSourceText(candidate, researched, resultScore) {
 
   if (resultScore?.validation.hasErankData) {
     parts.push(`eRank確認: ${formatDateTime(researched?.erankCheckedAt) || '済み（時刻なし）'}`)
+  }
+  if (resultScore?.validation.hasEtsyMarketplaceData) {
+    parts.push(`Etsy公式確認: ${formatDateTime(researched?.etsyCheckedAt) || '済み（時刻なし）'}`)
   }
 
   return parts.join('　')
@@ -1881,6 +2537,7 @@ function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Ma
   const normalized = normalizePhrase(keyword)
   const classification = keywordClass(normalized)
   if (classification.action !== 'candidate') return null
+  const riskTerms = detectRiskTerms(normalized, elements.riskInput.value.split(/\r?\n|,/))
   const generated = generatedMap.get(normalized)
   const trendMeta = trendMetaByKeyword.get(normalized)
   if (generated) {
@@ -1900,15 +2557,18 @@ function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Ma
     categoryLabel: fromTrendScout ? 'Trend Scout' : category.label,
     score: fromTrendScout ? 70 : 45,
     wordCount: normalized.split(' ').filter(Boolean).length,
-    riskTerms: [],
-    status: 'ready',
+    riskTerms,
+    status: riskTerms.length > 0 ? 'review' : 'ready',
     ...candidateProvenance(trendMeta),
   }
 }
 
-function generateCandidates() {
+function generateCandidates({ preserveMarketplacePlan = false } = {}) {
   const options = currentOptions()
-  const generated = generateKeywordCandidates(options)
+  const broadEventMode = isBroadEventDiscovery()
+  const generated = broadEventMode
+    ? generateBroadEventCandidates({ ...options, limit: 40 })
+    : generateKeywordCandidates(options)
   const generatedMap = new Map(generated.map((candidate) => [normalizePhrase(candidate.keyword), candidate]))
   const trendEntries = trendCandidateEntries()
   const trendKeywords = cleanKeywordList(trendEntries.map((entry) => entry.keyword)).slice(0, 50)
@@ -1917,23 +2577,43 @@ function generateCandidates() {
     const key = normalizePhrase(entry.keyword)
     if (key && !trendMetaByKeyword.has(key)) trendMetaByKeyword.set(key, entry)
   })
-  const keywords = cleanKeywordList([
-    ...trendKeywords,
-    ...generated.map((candidate) => candidate.keyword),
-  ])
+  const keywords = broadEventMode
+    ? generated.map((candidate) => candidate.keyword)
+    : cleanKeywordList([
+        ...trendKeywords,
+        ...generated.map((candidate) => candidate.keyword),
+      ])
 
-  state.candidates = keywords
+  const candidates = keywords
     .map((keyword) => candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword))
     .filter(Boolean)
-    .slice(0, Number(elements.limitInput.value) || 80)
+    .map((candidate) => ({
+      ...candidate,
+      timing: getMarketTiming(selectedEvent()),
+      candidateStage: 'idea',
+    }))
+  state.candidates = broadEventMode
+    ? candidates.slice(0, 40)
+    : clusterKeywordCandidates(candidates, options)
+      .slice(0, Number(elements.limitInput.value) || 80)
+  state.activeDiscoveryLane = 'all'
+  if (preserveMarketplacePlan && state.marketplaceInsightPlan?.items?.length > 0) {
+    rebuildMarketplaceInsightPlan({ preserveExisting: true })
+  } else {
+    state.marketplaceInsightPlan = null
+    state.marketplaceInsightMessage = ''
+  }
   state.candidateMessage = state.candidates.length > 0
     ? ''
     : '候補を作れませんでした。商品や流行語を変えてからもう一度押してください。'
   renderAll()
 }
 
-function resetCandidatesForInputChange(message = '条件を変更しました。もう一度「おすすめ自動探索をはじめる」を押してください。') {
+function resetCandidatesForInputChange(message = '条件を変更しました。もう一度「候補を自動で探す」を押してください。') {
   state.candidates = []
+  state.activeDiscoveryLane = 'all'
+  state.marketplaceInsightPlan = null
+  state.marketplaceInsightMessage = ''
   state.candidateMessage = message
   renderAll()
 }
@@ -1961,20 +2641,15 @@ function buildNextRound() {
   elements.extensionStatus.textContent = `${followUps.length}件の派生候補を追加しました。`
 }
 
-function addResearchRow(row) {
-  const keyword = normalizePhrase(row.keyword)
-  if (!keyword) return
-
-  const existingIndex = state.researchRows.findIndex((item) => normalizePhrase(item.keyword) === keyword)
-  const existingRow = existingIndex >= 0 ? state.researchRows[existingIndex] : null
+function buildMergedResearchRow(existingRow, row, keyword) {
   const keepExistingWhenBlank = (field) => {
     const incoming = row[field]
     return String(incoming ?? '').trim() !== '' ? incoming : existingRow?.[field]
   }
-  const now = new Date().toISOString()
   const incomingHasErank = rowHasErankInput(row)
+  const incomingHasEtsyMarketplace = rowHasEtsyMarketplaceInput(row)
   const incomingHasEverbee = rowHasEverbeeInput(row)
-  const incomingCheckedAt = row.checkedAt || row.createdAt || row.updatedAt || now
+  const incomingCheckedAt = row.checkedAt || row.createdAt || row.updatedAt || ''
   const incomingNotes = String(row.notes ?? '').trim()
   const mergedNotes = mergeRowNotes(existingRow?.notes, incomingNotes)
   const sourceKeyword = String(row.sourceKeyword ?? '').trim()
@@ -1982,7 +2657,7 @@ function addResearchRow(row) {
     || existingRow?.sourceKeyword
     || erankSourceKeyword(existingRow ?? {})
 
-  const nextRow = {
+  return {
     keyword,
     sourceKeyword,
     listingsAnalyzed: keepExistingWhenBlank('listingsAnalyzed'),
@@ -1990,29 +2665,50 @@ function addResearchRow(row) {
     topRevenue: keepExistingWhenBlank('topRevenue'),
     averagePrice: keepExistingWhenBlank('averagePrice'),
     listingAge: keepExistingWhenBlank('listingAge'),
+    visibleListingCount: keepExistingWhenBlank('visibleListingCount'),
+    sellingListingCount: keepExistingWhenBlank('sellingListingCount'),
+    recentSellingListingCount: keepExistingWhenBlank('recentSellingListingCount'),
+    medianMonthlySales: keepExistingWhenBlank('medianMonthlySales'),
+    medianMonthlyRevenue: keepExistingWhenBlank('medianMonthlyRevenue'),
+    totalVisibleMonthlySales: keepExistingWhenBlank('totalVisibleMonthlySales'),
+    topSalesShare: keepExistingWhenBlank('topSalesShare'),
+    medianListingAgeMonths: keepExistingWhenBlank('medianListingAgeMonths'),
+    productRows: Array.isArray(row.productRows) ? row.productRows : (existingRow?.productRows ?? []),
     erankSearchVolume: keepExistingWhenBlank('erankSearchVolume'),
     erankClicks: keepExistingWhenBlank('erankClicks'),
     erankCtr: keepExistingWhenBlank('erankCtr'),
     erankCompetition: keepExistingWhenBlank('erankCompetition'),
     erankKeywordDifficulty: keepExistingWhenBlank('erankKeywordDifficulty'),
     erankTrend: keepExistingWhenBlank('erankTrend'),
+    etsySearches30d: keepExistingWhenBlank('etsySearches30d'),
+    etsyListings: keepExistingWhenBlank('etsyListings'),
+    etsyRelatedTerms: keepExistingWhenBlank('etsyRelatedTerms'),
     erankCheckedAt: incomingHasErank
-      ? (existingRow?.erankCheckedAt || row.erankCheckedAt || incomingCheckedAt)
+      ? (row.erankCheckedAt || incomingCheckedAt || existingRow?.erankCheckedAt || '')
       : existingRow?.erankCheckedAt ?? '',
+    etsyCheckedAt: incomingHasEtsyMarketplace
+      ? (row.etsyCheckedAt || incomingCheckedAt || existingRow?.etsyCheckedAt || '')
+      : existingRow?.etsyCheckedAt ?? '',
     everbeeCheckedAt: incomingHasEverbee
-      ? (existingRow?.everbeeCheckedAt || row.everbeeCheckedAt || incomingCheckedAt)
+      ? (row.everbeeCheckedAt || incomingCheckedAt || existingRow?.everbeeCheckedAt || '')
       : existingRow?.everbeeCheckedAt ?? '',
     notes: mergedNotes,
   }
+}
 
-  if (existingIndex >= 0) {
-    state.researchRows.splice(existingIndex, 1, nextRow)
-  } else {
-    state.researchRows.push(nextRow)
-  }
+function addResearchRows(rows) {
+  state.researchRows = mergeRowsByKey(state.researchRows, rows, {
+    keyOf: (row) => normalizePhrase(row.keyword),
+    merge: buildMergedResearchRow,
+  })
+}
+
+function addResearchRow(row) {
+  addResearchRows([row])
 }
 
 function addManualResearch() {
+  const checkedAt = new Date().toISOString()
   addResearchRow({
     keyword: elements.keywordSelect.value,
     listingsAnalyzed: elements.listingsInput.value,
@@ -2026,6 +2722,10 @@ function addManualResearch() {
     erankCompetition: elements.erankCompetitionInput.value,
     erankKeywordDifficulty: elements.erankKeywordDifficultyInput.value,
     erankTrend: elements.erankTrendInput.value,
+    etsySearches30d: elements.etsySearchesInput.value,
+    etsyListings: elements.etsyListingsInput.value,
+    etsyRelatedTerms: elements.etsyRelatedTermsInput.value,
+    checkedAt,
     notes: elements.notesInput.value,
   })
 
@@ -2040,13 +2740,18 @@ function addManualResearch() {
   elements.erankCompetitionInput.value = ''
   elements.erankKeywordDifficultyInput.value = ''
   elements.erankTrendInput.value = ''
+  elements.etsySearchesInput.value = ''
+  elements.etsyListingsInput.value = ''
+  elements.etsyRelatedTermsInput.value = ''
   elements.notesInput.value = ''
   renderAll()
 }
 
 function importCsv() {
   const rows = parseEverbeeRows(elements.csvInput.value)
-  rows.forEach(addResearchRow)
+  state.restoredResearchSavedAt = ''
+  state.acceptExtensionResults = false
+  addResearchRows(rows)
   if (rows.some((row) => rowHasErankInput(row) && !rowHasEverbeeInput(row))) {
     const count = fillEverbeeJobFromErank()
     setSimpleStatus(`検索結果を読み込みました。関連語も使って、売上確認する候補を${count}件作りました。`)
@@ -2065,6 +2770,14 @@ function rowHasErankInput(row) {
   ].some((value) => String(value ?? '').trim() !== '')
 }
 
+function rowHasEtsyMarketplaceInput(row) {
+  return [
+    row.etsySearches30d,
+    row.etsyListings,
+    row.etsyRelatedTerms,
+  ].some((value) => String(value ?? '').trim() !== '')
+}
+
 function rowHasEverbeeInput(row) {
   return [
     row.listingsAnalyzed,
@@ -2072,6 +2785,13 @@ function rowHasEverbeeInput(row) {
     row.topRevenue,
     row.averagePrice,
     row.listingAge,
+    row.visibleListingCount,
+    row.sellingListingCount,
+    row.recentSellingListingCount,
+    row.medianMonthlySales,
+    row.totalVisibleMonthlySales,
+    row.topSalesShare,
+    Array.isArray(row.productRows) && row.productRows.length > 0 ? 'productRows' : '',
   ].some((value) => String(value ?? '').trim() !== '')
 }
 
@@ -2115,8 +2835,16 @@ function extensionResearchRows(extensionState) {
 }
 
 function importExtensionResults(extensionState) {
-  if (!extensionState?.results?.length) return
-  extensionResearchRows(extensionState).map(sanitizeErankMetricLeak).forEach(addResearchRow)
+  const importMode = extensionResultsImportMode(extensionState, state.researchRows, state.acceptExtensionResults)
+  if (importMode === 'ignore') return
+  const importedRows = extensionResearchRows(extensionState).map(sanitizeErankMetricLeak)
+  if (importMode === 'restore') {
+    state.restoredResearchSavedAt = latestResearchCheckedAt(importedRows) || new Date().toISOString()
+    state.restoredResultsAccepted = false
+  } else {
+    state.restoredResearchSavedAt = ''
+  }
+  addResearchRows(importedRows)
   ingestBroadSnippetsFromExtensionState(extensionState)
   if (state.progress.mode === 'erank') {
     const keywords = salesCheckKeywords()
@@ -2125,12 +2853,13 @@ function importExtensionResults(extensionState) {
     const proceedCount = erankWinnerRows().length
     const exploreCount = erankExploreRows().length
     const nextMessage = proceedCount > 0
-      ? `eRank確認中です。関連キーワード${relatedCount}件も見て、有望語句${proceedCount}件からEverBee候補${keywords.length}件を作っています。`
+      ? `eRank確認中です。関連キーワード${relatedCount}件も見て、有望語句${proceedCount}件からEtsy公式確認候補${keywords.length}件を作っています。`
       : exploreCount > 0
-        ? `eRank確認中です。強い語句は少なめですが、追加探索に使える語句${exploreCount}件からEverBee候補${keywords.length}件を作っています。`
+        ? `eRank確認中です。強い語句は少なめですが、追加探索に使える語句${exploreCount}件からEtsy公式確認候補${keywords.length}件を作っています。`
         : `eRank確認中です。関連キーワード${relatedCount}件を見ていますが、今はまだ強い候補が少なめです。`
     setSimpleStatus(nextMessage)
   }
+  persistMarketFinderState()
   renderAll()
 }
 
@@ -2155,7 +2884,7 @@ async function copyKeywords() {
 async function copyReadyKeywords() {
   const text = readyKeywords().join('\n')
   elements.researchJobInput.value = text
-  await copyText(text, elements.copyReadyBtn, 'Step 3へ入力済み', 'Step 3へ候補を入れる')
+  await copyText(text, elements.copyReadyBtn, '調査欄へ入力済み', '調査欄へ候補を入れる')
 }
 
 async function copySeoTitle() {
@@ -2251,7 +2980,25 @@ function exportStep4Csv() {
     'Grade',
     'Decision Summary',
     'Validation',
+    'Opportunity',
+    'Confidence',
+    'Candidate Stage',
     'Listings Analyzed',
+    'Visible Listing Count',
+    'Selling Listing Count',
+    'Recent Selling Listing Count',
+    'Median Monthly Sales',
+    'Median Monthly Revenue',
+    'Total Visible Monthly Sales',
+    'Top Sales Share',
+    'Median Listing Age Months',
+    'Etsy Searches 30d',
+    'Etsy Listings',
+    'Etsy Related Terms',
+    'eRank Checked At',
+    'Etsy Checked At',
+    'EverBee Checked At',
+    'EverBee Product Rows JSON',
     'Top Monthly Sales',
     'Top Revenue',
     'Average Price',
@@ -2262,9 +3009,10 @@ function exportStep4Csv() {
     'eRank Competition',
     'eRank KD',
     'eRank Trend',
-    'Sales Density per 1000 Listings',
-    'Revenue Density per 1000 Listings',
-    'Click Density per 1000 eRank Competition',
+    'Product Decision',
+    'Recommended Product Category',
+    'Product Route Summary',
+    'Alternate Product Categories',
     'Product Theme',
     'Target',
     'Hero Nouns',
@@ -2282,6 +3030,8 @@ function exportStep4Csv() {
   const lines = rows.map((row, index) => {
     const normalized = row.score.normalized
     const brief = row.idea.nounBrief ?? {}
+    const route = row.productRoute ?? {}
+    const blockedForProduct = route.decision === 'Do not use'
     return [
       index + 1,
       normalized.keyword,
@@ -2290,7 +3040,25 @@ function exportStep4Csv() {
       row.score.label,
       explainEverbeeScore(row.score).summary,
       row.score.validation.label,
+      row.score.opportunityLabel,
+      row.score.confidenceLabel,
+      row.score.candidateStage,
       normalized.listingsAnalyzed ?? '',
+      normalized.visibleListingCount ?? '',
+      normalized.sellingListingCount ?? '',
+      normalized.recentSellingListingCount ?? '',
+      normalized.medianMonthlySales ?? '',
+      normalized.medianMonthlyRevenue ?? '',
+      normalized.totalVisibleMonthlySales ?? '',
+      normalized.topSalesShare ?? '',
+      normalized.medianListingAgeMonths ?? '',
+      normalized.etsySearches30d ?? '',
+      normalized.etsyListings ?? '',
+      (normalized.etsyRelatedTerms ?? []).join(', '),
+      normalized.erankCheckedAt ?? '',
+      normalized.etsyCheckedAt ?? '',
+      normalized.everbeeCheckedAt ?? '',
+      JSON.stringify(Array.isArray(row.productRows) ? row.productRows : []),
       normalized.topMonthlySales ?? '',
       normalized.topRevenue ?? '',
       normalized.averagePrice ?? '',
@@ -2301,9 +3069,10 @@ function exportStep4Csv() {
       normalized.erankCompetition ?? '',
       normalized.erankKeywordDifficulty ?? '',
       normalized.erankTrend ?? '',
-      normalized.salesDensity !== null && normalized.salesDensity !== undefined ? normalized.salesDensity.toFixed(2) : '',
-      normalized.revenueDensity !== null && normalized.revenueDensity !== undefined ? normalized.revenueDensity.toFixed(2) : '',
-      normalized.erankClickDensity !== null && normalized.erankClickDensity !== undefined ? normalized.erankClickDensity.toFixed(2) : '',
+      route.decision ?? '',
+      route.primary?.label ?? '',
+      route.summary ?? '',
+      (route.alternates ?? []).map((item) => item.label).join(', '),
       row.idea.theme,
       row.idea.target,
       (brief.heroNouns ?? []).join(', '),
@@ -2311,8 +3080,8 @@ function exportStep4Csv() {
       (brief.unsafeNouns ?? []).join(', '),
       (brief.sourceSignals ?? []).join(', '),
       brief.usableForTypography ?? '',
-      row.idea.seoTitle,
-      row.idea.tags.join(', '),
+      blockedForProduct ? '' : row.idea.seoTitle,
+      blockedForProduct ? '' : row.idea.tags.join(', '),
       scoreReasonLabels(row.score).join(' / '),
       row.score.exclusionReasons.join(' / '),
       row.notes ?? '',
@@ -2370,6 +3139,9 @@ function clearResearchResults(scope = 'all') {
     state.researchRows = state.researchRows.filter((row) => !scoreEverbeeResult(row, currentOptions()).validation.hasEverbeeData)
   } else {
     state.researchRows = []
+    state.restoredResearchSavedAt = ''
+    state.restoredResultsAccepted = false
+    state.acceptExtensionResults = false
   }
   state.selectedResultKey = ''
   state.seoPlan = null
@@ -2378,7 +3150,7 @@ function clearResearchResults(scope = 'all') {
 
 function fillResearchJob() {
   elements.researchJobInput.value = readyKeywords().join('\n')
-  elements.extensionStatus.textContent = 'Step 2の候補を調査欄へ入れました。この欄の中身だけChrome拡張で調査します。'
+  elements.extensionStatus.textContent = '調査候補を調査欄へ入れました。この欄の中身だけChrome拡張で調査します。'
   persistMarketFinderState()
 }
 
@@ -2392,18 +3164,19 @@ function fillTrendSample() {
   const sampleAt = new Date().toISOString()
   state.recentTrendKeywords = new Set()
   elements.trendScoutInput.value = [
-    `summerween | サンプル | ${sampleAt}`,
+    `spooky reader | サンプル | ${sampleAt}`,
     `pickleball mom | サンプル | ${sampleAt}`,
     `western birthday | サンプル | ${sampleAt}`,
     `book nook | サンプル | ${sampleAt}`,
     `coastal grandma | サンプル | ${sampleAt}`,
     `teacher era | サンプル | ${sampleAt}`,
   ].join('\n')
-  resetCandidatesForInputChange('サンプルを入れました。Step 2はまだ空です。「おすすめ自動探索をはじめる」を押してください。')
-  setTrendStatus('サンプルの流行語を入れました。まだStep 2には入っていません。', 'warn')
+  resetCandidatesForInputChange('サンプルを入れました。候補一覧はまだ空です。「候補を自動で探す」を押してください。')
+  setTrendStatus('サンプルの流行語を入れました。まだ候補一覧には入っていません。', 'warn')
 }
 
 function applyTrendScoutTerms() {
+  if (!prepareForNewCandidateDiscovery()) return
   const count = trendScoutTerms().length
   generateCandidates()
   const made = state.candidates.length
@@ -2413,14 +3186,22 @@ function applyTrendScoutTerms() {
   }
 
   setTrendStatus(count > 0
-    ? `${count}件の流行語からStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
-    : `流行語なしでStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`, 'ready')
+    ? `${count}件の流行語から調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`
+    : `流行語なしで調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`, 'ready')
+}
+
+function prepareForNewCandidateDiscovery() {
+  state.acceptExtensionResults = false
+  if (state.researchRows.length === 0) return true
+  if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回のeRank・Etsy・EverBee結果' })) return false
+  clearResearchResults('all')
+  return true
 }
 
 function appendTrendScoutCandidates(candidates) {
   const existing = new Set(trendScoutTerms().map((term) => normalizePhrase(term)))
   const nextLines = []
-  const capturedAt = state.lastTrendRunStartedAt || new Date().toISOString()
+  const currentRunCapturedAt = state.lastTrendRunStartedAt || new Date().toISOString()
 
   candidates.forEach((candidate) => {
     const keyword = normalizePhrase(candidate?.keyword ?? candidate)
@@ -2428,7 +3209,8 @@ function appendTrendScoutCandidates(candidates) {
     const source = String(candidate?.source ?? '').trim()
     const quality = trendSeedQuality({ keyword, source })
     if (!quality.usable) return
-    state.recentTrendKeywords.add(keyword)
+    const capturedAt = String(candidate?.capturedAt ?? '').trim() || currentRunCapturedAt
+    if (!candidate?.capturedAt) state.recentTrendKeywords.add(keyword)
     if (existing.has(keyword)) return
     existing.add(keyword)
     nextLines.push([keyword, source || '自動探索', capturedAt].join(' | '))
@@ -2441,6 +3223,7 @@ function appendTrendScoutCandidates(candidates) {
 }
 
 async function collectTrendScoutTerms() {
+  if (!prepareForNewCandidateDiscovery()) return
   const originalLabel = elements.trendAutoBtn.textContent
   state.lastTrendRunStartedAt = new Date().toISOString()
   state.recentTrendKeywords = new Set()
@@ -2448,9 +3231,9 @@ async function collectTrendScoutTerms() {
   elements.trendAutoBtn.textContent = '取得中...'
   openProgressModal({
     mode: 'trend',
-    title: 'おすすめ自動探索',
+    title: '候補を自動で探す',
     total: state.extensionConnected ? 3 : 2,
-    message: '開始しました。Step 2に入れる候補を作っています。',
+    message: '開始しました。調査候補を作っています。',
   })
   resetCandidatesForInputChange('おすすめ元から探しています。完了するとここに候補が入ります。')
   updateProgressModal({
@@ -2468,17 +3251,17 @@ async function collectTrendScoutTerms() {
       generateCandidates()
       const made = state.candidates.length
       const message = made > 0
-        ? `候補作成は完了しました。外部サイトの自動取得は未接続ですが、入口ワード${searchSeedAdded}件と商品条件からStep 2に${made}件の候補を作りました。次は「検索されているか見る」です。`
-        : '候補を作れませんでした。外部サイトの自動取得も使う場合は、Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。'
+        ? `候補作成は完了しました。外部サイトの自動取得は未接続ですが、入口ワード${searchSeedAdded}件と商品条件から調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`
+        : '候補を作れませんでした。外部サイトの自動取得も使う場合は、実Chromeで開き、Chrome拡張1.26をReloadしてください。Market Finderページは自動で再読み込みされます。'
       updateProgressModal({
-        current: made > 0 ? 'Step 2へ候補を反映' : '候補なし',
+        current: made > 0 ? '調査候補を反映' : '候補なし',
         done: 2,
         message,
       })
       setTrendStatus(message, made > 0 ? 'ready' : 'warn')
       completeProgressModal(message)
     } catch (error) {
-      const message = error?.message || 'おすすめ自動探索でエラーが起きました。'
+      const message = error?.message || '候補の自動探索でエラーが起きました。'
       setTrendStatus(message, 'warn')
       failProgress(message)
     } finally {
@@ -2497,6 +3280,7 @@ async function collectTrendScoutTerms() {
     const result = await requestExtension('COLLECT_TRENDS', {
       sources: ['erank', 'pinterest', 'google'],
       limit: 24,
+      contextQuery: normalizePhrase(`${selectedEvent().searchTerm} ${selectedCategory().searchTerm}`),
     }, 90000)
     const response = result.response ?? {}
     const trends = Array.isArray(response.trends) ? response.trends : []
@@ -2504,7 +3288,7 @@ async function collectTrendScoutTerms() {
     updateProgressModal({
       current: '見つかった語句を整理中',
       done: 3,
-      message: `${trends.length}件の語句を確認しました。Step 2に入れる候補へ変換しています。`,
+      message: `${trends.length}件の語句を確認しました。調査候補へ変換しています。`,
     })
     const added = appendTrendScoutCandidates(trends)
     generateCandidates()
@@ -2513,9 +3297,9 @@ async function collectTrendScoutTerms() {
     let variant = 'ready'
     if (added > 0) {
       const note = errors.length > 0 ? ` 取得できなかったページ: ${errors.slice(0, 2).join(' / ')}` : ''
-      message = `完了しました。入口ワード${searchSeedAdded}件と外部の流行語${added}件を使い、Step 2に${state.candidates.length}件の候補を作りました。次は「検索されているか見る」です。${note}`
+      message = `完了しました。入口ワード${searchSeedAdded}件と外部の流行語${added}件を使い、調査候補を${state.candidates.length}件作りました。次は「eRankで検索数を見る」です。${note}`
     } else if (trends.length > 0 && state.candidates.length > 0) {
-      message = `完了しました。入口ワード${searchSeedAdded}件と既存の流行語からStep 2に${state.candidates.length}件の候補を作りました。`
+      message = `完了しました。入口ワード${searchSeedAdded}件と既存の流行語から調査候補を${state.candidates.length}件作りました。`
     } else if (errors.length > 0) {
       message = `完了しましたが、自動取得できませんでした。対象ページにログインして表示後、もう一度押してください。${errors.slice(0, 2).join(' / ')}`
       variant = 'warn'
@@ -2524,7 +3308,7 @@ async function collectTrendScoutTerms() {
       variant = 'warn'
     }
     updateProgressModal({
-      current: variant === 'ready' ? 'Step 2へ候補を反映' : '確認が必要',
+      current: variant === 'ready' ? '調査候補を反映' : '確認が必要',
       done: 3,
       message,
     })
@@ -2540,6 +3324,13 @@ async function collectTrendScoutTerms() {
   }
 }
 
+function acceptRestoredResearchResults() {
+  if (!state.restoredResearchSavedAt || state.researchRows.length === 0) return
+  state.restoredResultsAccepted = true
+  setSimpleStatus('前回の保存結果を今回の続きとして使います。次は「Etsy公式確認を自動実行」です。')
+  renderAll()
+}
+
 function setSimpleStatus(message) {
   elements.simpleStatus.textContent = message
 }
@@ -2548,13 +3339,14 @@ function setFlowMode(mode, options = {}) {
   const activeMode = mode === 'csv' ? 'csv' : 'auto'
   document.body.classList.remove('flow-auto', 'flow-csv', 'flow-seo')
   document.body.classList.add(`flow-${activeMode}`)
-  ;[elements.flowAutoBtn, elements.flowCsvBtn, elements.flowSeoBtn].forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.flowChoice === activeMode)
+  ;[elements.flowAutoBtn, elements.flowCsvBtn, elements.flowSeoBtn].forEach((choice) => {
+    choice.checked = choice.dataset.flowChoice === activeMode
+    choice.closest('.flow-choice')?.classList.toggle('is-active', choice.checked)
   })
 
   if (activeMode === 'auto') {
     elements.simpleSeoStepNumber.textContent = '4'
-    setSimpleStatus('まず商品を選んで「おすすめ自動探索をはじめる」を押してください。')
+    setSimpleStatus('商品と条件を選んで「候補を自動で探す」を押してください。')
   } else {
     elements.simpleSeoStepNumber.textContent = '2'
     setSimpleStatus('CSVを貼って、1「CSVを読み込む」を押してください。')
@@ -2568,6 +3360,18 @@ async function simpleStartErankResearch() {
 }
 
 async function simpleStartResearch() {
+  if (restoredResultsAwaitingConfirmation()) {
+    setSimpleStatus('前回の保存結果です。eRank結果の上にある「この前回結果から続ける」を押してから進んでください。')
+    return
+  }
+  const officialKeywords = marketplaceCompletedKeywords(state.marketplaceInsightPlan)
+  if (officialKeywords.length === 0 && erankResultRows().length > 0) {
+    const proceed = window.confirm('Etsy公式データを取得していません。eRank結果だけでEverBeeへ進みますか？')
+    if (!proceed) {
+      elements.everbeeQueueStatus.textContent = 'EverBee確認を中止しました。先にEtsy公式結果を取り込んでください。'
+      return
+    }
+  }
   const keywords = salesCheckKeywords()
   elements.researchJobInput.value = keywords.join('\n')
   setSimpleStatus(`${keywords.length}件を売上確認します。終わるまでそのまま待ってください。`)
@@ -2577,7 +3381,7 @@ async function simpleStartResearch() {
 function simpleImportCsv() {
   elements.csvInput.value = elements.simpleCsvInput.value
   importCsv()
-  setSimpleStatus(`${state.researchRows.length}件の結果を読み込みました。Step 4で候補・名詞・CSV保存を確認してください。`)
+  setSimpleStatus(`${state.researchRows.length}件の結果を読み込みました。最終結果で候補・名詞・CSV保存を確認してください。`)
 }
 
 function simpleUseSeoKeywords() {
@@ -2610,16 +3414,16 @@ function closeAdvancedModal() {
 function friendlyExtensionError(error) {
   const message = error instanceof Error ? error.message : String(error ?? '')
   if (/activeTab.*permission is required|either the .*activeTab.*permission is required/i.test(message)) {
-    return 'Chrome拡張の画面キャプチャ権限が不足しています。拡張をReloadして、バージョン1.19になっているか確認してからMarket Finderページも再読み込みしてください。'
+    return 'Chrome拡張の画面キャプチャ権限が不足しています。実Chromeで開き、拡張をReloadしてバージョン1.26になっているか確認してください。'
   }
   if (/extension context invalidated/i.test(message)) {
-    return 'Chrome拡張を更新したあと、ページ側の接続が古くなっています。Chrome拡張をReloadしてから、このMarket Finderページも再読み込みしてください。'
+    return 'Chrome拡張の旧接続が残っています。実Chromeで拡張1.26をReloadすると、開いているMarket Finderも自動で再読み込みされます。'
   }
   if (/receiving end does not exist|could not establish connection/i.test(message)) {
-    return 'Chrome拡張とページがつながっていません。Chrome拡張をReloadしてから、Market Finderページも再読み込みしてください。'
+    return 'Chrome拡張とページがつながっていません。Market Finderを実Chromeで開き、Chrome拡張1.26をReloadしてください。ページは自動で再読み込みされます。'
   }
   if (/応答がありません/.test(message)) {
-    return 'Chrome拡張から応答がありません。Chrome拡張をReloadしてから、Market Finderページも再読み込みしてください。'
+    return 'Chrome拡張から応答がありません。Market Finderを実Chromeで開き、Chrome拡張1.26をReloadしてください。'
   }
   return message || 'Chrome拡張の処理に失敗しました。'
 }
@@ -2635,6 +3439,7 @@ function fillSampleCsv() {
   const keyword = state.candidates[0]?.keyword ?? 'dad est 2026 dad to be shirt'
   const event = selectedEvent()
   const category = selectedCategory()
+  const checkedAt = new Date().toISOString()
   const idea = buildProductIdea(keyword, {
     eventId: event.id,
     categoryId: category.id,
@@ -2653,20 +3458,33 @@ function fillSampleCsv() {
     erankCompetition: 4200,
     erankKeywordDifficulty: 18,
     erankTrend: 12,
+    etsySearches30d: 180,
+    etsyListings: 9000,
+    etsyRelatedTerms: 'spooky season shirt, ghost teacher shirt',
+    visibleListingCount: 12,
+    sellingListingCount: 4,
+    recentSellingListingCount: 3,
+    medianMonthlySales: 4,
+    medianMonthlyRevenue: 120,
+    totalVisibleMonthlySales: 36,
+    topSalesShare: 0.4,
+    medianListingAgeMonths: 8,
+    erankCheckedAt: checkedAt,
+    etsyCheckedAt: checkedAt,
+    everbeeCheckedAt: checkedAt,
   })
 
   elements.csvInput.value = [
-    'Keyword,Listings Analyzed,Top Monthly Sales,Top Revenue,Average Price,Listing Age,eRank Search Volume,eRank Clicks,eRank CTR,eRank Competition,eRank KD,eRank Trend,Notes',
-    `"${keyword}","1,039",54,1749,20.44,24 Mo.,720,410,57,4200,18,12,"${idea.target} / sample score ${score.score}"`,
+    'Keyword,Listings Analyzed,Top Monthly Sales,Top Revenue,Average Price,Listing Age,eRank Search Volume,eRank Clicks,eRank CTR,eRank Competition,eRank KD,eRank Trend,Etsy Searches 30d,Etsy Listings,Etsy Related Terms,Notes,Visible Listing Count,Selling Listing Count,Recent Selling Listing Count,Median Monthly Sales,Median Monthly Revenue,Total Visible Monthly Sales,Top Sales Share,Median Listing Age Months,eRank Checked At,Etsy Checked At,EverBee Checked At',
+    `"${keyword}","1,039",14,420,20.44,8 Mo.,720,410,57,4200,18,12,180,9000,"spooky season shirt, ghost teacher shirt","${idea.target} / sample score ${score.score}",12,4,3,4,120,36,0.4,8,${checkedAt},${checkedAt},${checkedAt}`,
   ].join('\n')
 }
 
 function setRunningControls(active) {
   elements.startExtensionBtn.disabled = active
   elements.broadStartBtn.disabled = active
-  elements.simpleImportErankBtn.disabled = active
-  elements.simpleStartBtn.disabled = active
   elements.candidateErankBtn.disabled = active || readyKeywords().length === 0
+  elements.marketplaceStartBtn.disabled = active || etsyValidationCandidates().length === 0
   elements.erankToEverbeeBtn.disabled = active || erankResultRows().length === 0
   elements.stopExtensionBtn.disabled = !active
   elements.progressStopBtn.disabled = !active
@@ -2801,22 +3619,22 @@ function renderProgressModal(extensionState = state.extensionState) {
       const exploreCount = erankExploreRows().length
       elements.researchJobInput.value = keywords.join('\n')
       const message = proceedCount > 0
-        ? `eRank確認が完了しました。関連キーワード${relatedCount}件も見て、有望語句${proceedCount}件からEverBee候補${keywords.length}件を作りました。`
+        ? `eRank確認が完了しました。関連キーワード${relatedCount}件も見て、有望語句${proceedCount}件からEtsy公式確認候補${keywords.length}件を作りました。`
         : exploreCount > 0
-          ? `eRank確認が完了しました。強い語句は少なめですが、追加探索語句${exploreCount}件からEverBee候補${keywords.length}件を作りました。`
+          ? `eRank確認が完了しました。強い語句は少なめですが、追加探索語句${exploreCount}件からEtsy公式確認候補${keywords.length}件を作りました。`
           : `eRank確認が完了しました。今回は弱めなので、イベント・商品・手入力イベントを変えてもう一度広く見るのがおすすめです。`
       setSimpleStatus(message)
     } else if (state.progress.mode === 'keyword') {
-      setSimpleStatus(`${done}件の売上確認が完了しました。Step 4で候補と名詞候補を確認してください。必要ならCSV保存できます。`)
+      setSimpleStatus(`${done}件の売上確認が完了しました。最終結果で候補と名詞候補を確認してください。必要ならCSV保存できます。`)
     } else if (state.progress.mode === 'trend') {
-      setSimpleStatus(state.progress.message || `おすすめ自動探索が完了しました。Step 2に${state.candidates.length}件の候補を作りました。`)
+      setSimpleStatus(state.progress.message || `候補の自動探索が完了しました。候補一覧に${state.candidates.length}件を追加しました。`)
     }
     elements.progressDetail.textContent = state.progress.mode === 'broad'
       ? `広め調査が完了しました。商品名を取り込めた場合は、種ワード欄も更新済みです。`
       : state.progress.mode === 'erank'
-        ? `eRank確認が完了しました。弱い語句で止めず、関連語も見てEverBee候補を作りました。`
+        ? `eRank確認が完了しました。弱い語句で止めず、関連語も見てEtsy公式確認候補を作りました。`
         : state.progress.mode === 'trend'
-          ? state.progress.message || `おすすめ自動探索が完了しました。Step 2に${state.candidates.length}件の候補を作りました。`
+          ? state.progress.message || `候補の自動探索が完了しました。候補一覧に${state.candidates.length}件を追加しました。`
           : `${done}件のEverBee調査が完了しました。`
     elements.progressHideBtn.textContent = '閉じる'
     return
@@ -2864,6 +3682,7 @@ function handleExtensionMessage(event) {
   if (data.action === 'BRIDGE_READY') {
     state.extensionConnected = true
     updateExtensionBadge()
+    renderMarketplaceInsightPlan()
     pollExtensionState()
     return
   }
@@ -2875,6 +3694,7 @@ function handleExtensionMessage(event) {
     state.extensionState = data.state
     importExtensionResults(data.state)
     renderExtensionState()
+    renderMarketplaceInsightPlan()
   }
 
   if (!pending) return
@@ -2883,9 +3703,10 @@ function handleExtensionMessage(event) {
 
   if (data.ok === false) {
     const message = friendlyExtensionError(data.error ?? 'Chrome拡張の処理に失敗しました。')
-    if (/ページ側の接続が古くなっています|つながっていません/.test(message)) {
+    if (/旧接続が残っています|ページ側の接続が古くなっています|つながっていません/.test(message)) {
       state.extensionConnected = false
       updateExtensionBadge()
+      renderMarketplaceInsightPlan()
     }
     pending.reject(new Error(message))
   } else {
@@ -2915,7 +3736,7 @@ function renderExtensionState() {
     if (elements.quickExtensionStatus) {
       elements.quickExtensionStatus.textContent = state.extensionConnected
         ? '接続済みです。eRankやEverBeeの自動取得を使えます。'
-        : '未接続です。実Chromeで開き、Chrome拡張をReloadしてからページを再読み込みしてください。'
+        : '未接続です。実Chromeで開き、Chrome拡張1.26をReloadしてください。ページは自動で再読み込みされます。'
     }
     renderProgressModal(extensionState)
     return
@@ -2937,12 +3758,14 @@ async function pollExtensionState() {
     state.extensionState = response.state
     importExtensionResults(response.state)
     renderExtensionState()
+    renderMarketplaceInsightPlan()
     if (response.state?.active) window.setTimeout(pollExtensionState, 2000)
   } catch (error) {
     const message = friendlyExtensionError(error)
     state.extensionConnected = false
     releaseRunningControls()
     updateExtensionBadge()
+    renderMarketplaceInsightPlan()
     elements.extensionStatus.textContent = message
     if (state.progress.visible) failProgress(message)
   }
@@ -2957,6 +3780,7 @@ async function startExtensionResearch() {
   }
   if (!confirmExportBeforeClearingResults({ scope: 'everbee', label: '前回のEverBee売上結果' })) return
   clearResearchResults('everbee')
+  state.acceptExtensionResults = true
 
   try {
     openProgressModal({
@@ -2984,7 +3808,7 @@ async function startExtensionResearch() {
 async function startErankResearch() {
   const keywords = erankResearchKeywords()
   if (keywords.length === 0) {
-    const message = 'Step 2が空です。先に「おすすめ自動探索をはじめる」を押してください。'
+    const message = '候補一覧が空です。先に「候補を自動で探す」を押してください。'
     setSimpleStatus(message)
     state.candidateMessage = message
     renderCandidates()
@@ -2992,6 +3816,7 @@ async function startErankResearch() {
   }
   if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回の調査結果' })) return
   clearResearchResults('all')
+  state.acceptExtensionResults = true
 
   try {
     openProgressModal({
@@ -3007,7 +3832,7 @@ async function startErankResearch() {
       delayMs: Math.max(3000, Math.min(Number(elements.delayInput.value) * 1000 || 5000, 20000)),
     })
     ensureExtensionStarted(startResponse, 'eRank調査を開始できませんでした。')
-    setSimpleStatus(`${keywords.length}件の候補を確認します。終わったら「売れているか見る」です。`)
+    setSimpleStatus(`${keywords.length}件の候補を確認します。終わったら「Etsy公式確認を自動実行」です。`)
     pollExtensionState()
   } catch (error) {
     const message = friendlyExtensionError(error)
@@ -3024,6 +3849,7 @@ async function startBroadEverbeeResearch() {
   }
   if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回の調査結果' })) return
   clearResearchResults('all')
+  state.acceptExtensionResults = true
 
   try {
     openProgressModal({
@@ -3057,11 +3883,244 @@ async function startBroadEverbeeResearch() {
   }
 }
 
+function createMarketplaceInsightPlan() {
+  if (!rebuildMarketplaceInsightPlan()) {
+    renderMarketplaceInsightPlan()
+    return
+  }
+  renderMarketplaceInsightPlan()
+  persistMarketFinderState()
+}
+
+async function startMarketplaceInsight() {
+  if (!state.extensionConnected) {
+    state.marketplaceInsightMessage = 'Chrome拡張へ接続してからEtsy公式の自動確認を開始してください。'
+    renderMarketplaceInsightPlan()
+    return
+  }
+  if (etsyValidationCandidates().length === 0) {
+    state.marketplaceInsightMessage = 'Etsy公式へ進めるeRank確認済み候補がありません。先にeRankで検索数を確認してください。'
+    renderMarketplaceInsightPlan()
+    return
+  }
+  if (!state.marketplaceInsightPlan?.items?.length && !rebuildMarketplaceInsightPlan()) {
+    renderMarketplaceInsightPlan()
+    return
+  }
+
+  renderMarketplaceInsightPlan()
+  await runMarketplaceInsightAutomation()
+}
+
+async function runMarketplaceInsightAutomation() {
+  if (state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) return
+  if (!state.extensionConnected) {
+    state.marketplaceInsightMessage = 'Chrome拡張へ接続してからEtsy公式の自動確認を開始してください。'
+    renderMarketplaceInsightPlan()
+    return
+  }
+
+  state.marketplaceInsightAutoRunning = true
+  let stoppedByError = false
+  try {
+    while (state.marketplaceInsightAutoRunning) {
+      let item = state.marketplaceInsightPlan?.items?.find((candidate) => candidate.status === 'planned' || candidate.status === 'error')
+      if (!item && marketplaceNextBatchState().ready) {
+        releaseMarketplaceInsightBatch()
+        item = state.marketplaceInsightPlan?.items?.find((candidate) => candidate.status === 'planned' || candidate.status === 'error')
+      }
+      if (!item) break
+
+      const completed = state.marketplaceInsightPlan.items.filter((candidate) => candidate.status === 'completed').length
+      const total = state.marketplaceInsightPlan.items.filter((candidate) => candidate.status !== 'skipped').length
+      state.marketplaceInsightBusy = true
+      item.status = 'opened'
+      item.openedAt = new Date().toISOString()
+      item.error = ''
+      state.marketplaceInsightMessage = `${completed + 1} / ${total}件目「${item.query}」を検索し、結果を自動取得しています。`
+      renderMarketplaceInsightPlan()
+
+      try {
+        const result = await requestExtension('RUN_AND_CAPTURE_ETSY_MARKETPLACE_INSIGHT', { query: item.query }, 90000)
+        const response = result.response ?? result
+        if (response?.started === false || response?.ok === false) {
+          throw new Error(response?.error || 'Marketplace Insightsの自動取得を開始できませんでした。')
+        }
+        const captured = await captureMarketplaceInsight({
+          marketplaceItem: item,
+          suppliedResult: result,
+          manageBusy: false,
+        })
+        if (!captured) {
+          stoppedByError = true
+          break
+        }
+      } catch (error) {
+        item.status = 'error'
+        item.error = error?.message || String(error)
+        state.marketplaceInsightMessage = `${friendlyExtensionError(error)} 自動確認を停止しました。`
+        stoppedByError = true
+        break
+      } finally {
+        state.marketplaceInsightBusy = false
+        renderAll()
+        persistMarketFinderState()
+      }
+    }
+  } finally {
+    const stoppedByUser = !state.marketplaceInsightAutoRunning
+    state.marketplaceInsightAutoRunning = false
+    const remaining = state.marketplaceInsightPlan?.items?.filter((item) => ['planned', 'opened', 'error'].includes(item.status)).length ?? 0
+    if (!stoppedByError && stoppedByUser) {
+      state.marketplaceInsightMessage = `自動確認を停止しました。未処理は${remaining}件です。`
+    } else if (!stoppedByError && remaining === 0) {
+      const completed = state.marketplaceInsightPlan?.items?.filter((item) => item.status === 'completed').length ?? 0
+      state.marketplaceInsightMessage = `Etsy公式の自動確認が完了しました。${completed}件を取得しました。`
+    }
+    renderAll()
+    persistMarketFinderState()
+  }
+}
+
+function stopMarketplaceInsightAutomation() {
+  if (!state.marketplaceInsightAutoRunning) return
+  state.marketplaceInsightAutoRunning = false
+  state.marketplaceInsightMessage = '現在の語句を取得したあとで自動確認を停止します。'
+  renderMarketplaceInsightPlan()
+}
+
+async function captureMarketplaceInsight(options = {}) {
+  const item = options?.marketplaceItem ?? capturableMarketplaceInsightItem()
+  if (!item) return false
+  const hasSuppliedResult = Object.prototype.hasOwnProperty.call(options, 'suppliedResult')
+  const manageBusy = options?.manageBusy !== false
+
+  if (manageBusy) state.marketplaceInsightBusy = true
+  state.marketplaceInsightMessage = `「${item.query}」の30日データを読み取っています。`
+  renderMarketplaceInsightPlan()
+  try {
+    const result = hasSuppliedResult
+      ? options.suppliedResult
+      : await requestExtension('CAPTURE_ETSY_MARKETPLACE_INSIGHT', { query: item.query }, 20000)
+    const response = result.response ?? result
+    const insight = response?.result ?? response
+    if (response?.ok === false || insight?.ok === false) {
+      throw new Error(insight?.error || response?.error || 'Marketplace Insightsの数値を読み取れませんでした。')
+    }
+    const hasSearches = insight?.etsySearches30d !== null && insight?.etsySearches30d !== undefined && insight?.etsySearches30d !== ''
+    const hasListings = insight?.etsyListings !== null && insight?.etsyListings !== undefined && insight?.etsyListings !== ''
+    if (!hasSearches && !hasListings) {
+      throw new Error('30日検索数と掲載数が見つかりません。Etsyの結果が表示されてから、もう一度取り込んでください。')
+    }
+
+    const checkedAt = insight.etsyCheckedAt || new Date().toISOString()
+    const relatedTerms = Array.isArray(insight.etsyRelatedTerms) ? insight.etsyRelatedTerms : []
+    const relatedModes = Array.isArray(insight.etsyRelatedModes) ? insight.etsyRelatedModes : []
+    const searchTrendPercent = Number(insight.etsySearchTrendPercent)
+    const hasSearchTrend = Number.isFinite(searchTrendPercent)
+    const relatedMetrics = Array.isArray(insight.etsyRelatedKeywordMetrics)
+      ? insight.etsyRelatedKeywordMetrics
+        .map((metric) => ({
+          keyword: normalizePhrase(metric?.keyword),
+          etsySearches30d: metric?.etsySearches30d,
+          etsyListings: metric?.etsyListings,
+          conversionLabel: String(metric?.conversionLabel ?? '').trim(),
+          sourceQuery: item.query,
+          sourceModes: Array.isArray(metric?.sourceModes) ? metric.sourceModes : [],
+        }))
+        .filter((metric) => metric.keyword && [metric.etsySearches30d, metric.etsyListings]
+          .some((value) => value !== null && value !== undefined && value !== ''))
+      : []
+    addResearchRow({
+      keyword: insight.keyword || insight.query || item.query,
+      etsySearches30d: insight.etsySearches30d,
+      etsyListings: insight.etsyListings,
+      etsyRelatedTerms: relatedTerms.join(', '),
+      etsyCheckedAt: checkedAt,
+      notes: `Etsy Marketplace Insights / 直近30日${hasSearchTrend ? ` / 検索変化 ${searchTrendPercent > 0 ? '+' : ''}${searchTrendPercent}%` : ''}`,
+    })
+    relatedMetrics.forEach((metric) => {
+      const conversionNote = metric.conversionLabel ? ` / Conversion: ${metric.conversionLabel}` : ''
+      const modeNote = metric.sourceModes?.length ? ` / Views: ${metric.sourceModes.join('+')}` : ''
+      addResearchRow({
+        keyword: metric.keyword,
+        etsySearches30d: metric.etsySearches30d,
+        etsyListings: metric.etsyListings,
+        etsyCheckedAt: checkedAt,
+        notes: `Etsy Marketplace Insights related to ${item.query}${conversionNote}${modeNote}`,
+      })
+    })
+    const previousRelatedTerms = Array.isArray(item.result?.etsyRelatedTerms) ? item.result.etsyRelatedTerms : []
+    const mergedRelatedTerms = Array.from(new Set(
+      [...previousRelatedTerms, ...relatedTerms].map(normalizePhrase).filter(Boolean),
+    ))
+    const mergedRelatedMetrics = mergeMarketplaceInsightRelatedMetrics(
+      Array.isArray(item.result?.etsyRelatedKeywordMetrics) ? item.result.etsyRelatedKeywordMetrics : [],
+      relatedMetrics,
+    )
+    item.status = 'completed'
+    item.completedAt = checkedAt
+    item.result = {
+      etsySearches30d: insight.etsySearches30d,
+      etsyListings: insight.etsyListings,
+      etsySearchTrendPercent: hasSearchTrend ? searchTrendPercent : null,
+      etsyRelatedTerms: mergedRelatedTerms,
+      etsyRelatedKeywordMetrics: mergedRelatedMetrics,
+      etsyRelatedModes: relatedModes,
+      etsyCheckedAt: checkedAt,
+    }
+    item.error = ''
+    if (state.marketplaceInsightMode !== 'plus' && Number.isFinite(Number(insight.remainingSearches))) {
+      state.marketplaceInsightPlan.officialRemaining = Number(insight.remainingSearches)
+    }
+
+    const added = appendTrendScoutCandidates(relatedTerms.map((keyword) => ({
+      keyword,
+      source: `Etsy Marketplace Insights related to ${item.query}`,
+      capturedAt: checkedAt,
+    })))
+    if (added > 0) generateCandidates({ preserveMarketplacePlan: true })
+    else if (state.marketplaceInsightMode === 'plus' && relatedMetrics.length > 0) {
+      rebuildMarketplaceInsightPlan({ preserveExisting: true })
+    }
+    const followUpMessage = state.marketplaceInsightMode === 'plus'
+      ? ` / 候補プール ${state.marketplaceInsightPlan?.candidatePool?.length ?? 0}件${marketplaceNextBatchState().ready ? ' / 次の5語を追加できます' : ''}`
+      : ''
+    const modeLabel = relatedModes.length > 0
+      ? ` / 取得面 ${relatedModes.map((mode) => mode === 'similar' ? '似たワード' : mode === 'explore' ? '探索アイデア' : mode).join('＋')}`
+      : ''
+    state.marketplaceInsightMessage = `取得しました。30日検索数 ${insight.etsySearches30d ?? '-'} / 掲載数 ${insight.etsyListings ?? '-'}${hasSearchTrend ? ` / 検索変化 ${searchTrendPercent > 0 ? '+' : ''}${searchTrendPercent}%` : ''} / 関連語 ${relatedTerms.length}件（数値付き ${relatedMetrics.length}件）${modeLabel}${followUpMessage}。`
+    return true
+  } catch (error) {
+    item.error = error?.message || String(error)
+    state.marketplaceInsightMessage = `${friendlyExtensionError(error)} 自動確認を停止しました。表示中の結果を手動で取り込めます。`
+    return false
+  } finally {
+    if (manageBusy) state.marketplaceInsightBusy = false
+    renderAll()
+  }
+}
+
+function skipMarketplaceInsight() {
+  const item = nextMarketplaceInsightItem()
+  if (!item) return
+  const wasOpened = item.status === 'opened'
+  item.status = 'skipped'
+  item.skippedAt = new Date().toISOString()
+  state.marketplaceInsightMessage = wasOpened
+    ? `「${item.query}」をスキップしました。Etsy側で検索済みの場合、無料枠は戻りません。`
+    : `「${item.query}」をスキップしました。無料検索は実行していません。`
+  renderMarketplaceInsightPlan()
+  persistMarketFinderState()
+}
+
 async function stopExtensionResearch() {
   try {
     state.progress.stopped = true
     const response = await requestExtension('STOP_MARKET_RESEARCH')
-    state.extensionState = response.state
+    const latest = response.state ? response : await requestExtension('GET_MARKET_STATE', {}, 3000)
+    state.extensionState = latest.state
+    importExtensionResults(latest.state)
     renderExtensionState()
   } catch (error) {
     const message = friendlyExtensionError(error)
@@ -3103,6 +4162,31 @@ function bindEvents() {
   elements.broadExtractBtn.addEventListener('click', extractBroadMarketHints)
   elements.broadApplyBtn.addEventListener('click', applyBroadHintsToSeeds)
   elements.broadSampleBtn.addEventListener('click', fillBroadSample)
+  elements.discoveryLaneTabs.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    const button = event.target.closest('[data-discovery-lane]')
+    if (!button) return
+    state.activeDiscoveryLane = button.dataset.discoveryLane || 'all'
+    renderCandidates()
+    persistMarketFinderState()
+  })
+  elements.erankSummary.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    if (event.target.closest('[data-use-restored-results]')) acceptRestoredResearchResults()
+  })
+  elements.marketplaceModeControl.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    const button = event.target.closest('[data-marketplace-mode]')
+    if (!button) return
+    setMarketplaceInsightMode(button.dataset.marketplaceMode)
+  })
+  elements.marketplaceBuildPlanBtn.addEventListener('click', createMarketplaceInsightPlan)
+  elements.marketplaceStartBtn.addEventListener('click', startMarketplaceInsight)
+  elements.marketplaceNextBtn.addEventListener('click', runMarketplaceInsightAutomation)
+  elements.marketplaceAutoStopBtn.addEventListener('click', stopMarketplaceInsightAutomation)
+  elements.marketplaceCaptureBtn.addEventListener('click', captureMarketplaceInsight)
+  elements.marketplaceNextBatchBtn.addEventListener('click', releaseMarketplaceInsightBatch)
+  elements.marketplaceSkipBtn.addEventListener('click', skipMarketplaceInsight)
   elements.trendSampleBtn.addEventListener('click', fillTrendSample)
   elements.trendAutoBtn.addEventListener('click', collectTrendScoutTerms)
   elements.trendApplyBtn.addEventListener('click', applyTrendScoutTerms)
@@ -3128,11 +4212,15 @@ function bindEvents() {
   elements.stopExtensionBtn.addEventListener('click', stopExtensionResearch)
   elements.progressHideBtn.addEventListener('click', closeProgressModal)
   elements.progressStopBtn.addEventListener('click', stopExtensionResearch)
-  elements.flowAutoBtn.addEventListener('click', () => setFlowMode('auto'))
-  elements.flowCsvBtn.addEventListener('click', () => setFlowMode('csv'))
-  elements.flowSeoBtn.addEventListener('click', () => setFlowMode('seo'))
-  elements.simpleImportErankBtn.addEventListener('click', simpleStartErankResearch)
-  elements.simpleStartBtn.addEventListener('click', simpleStartResearch)
+  elements.flowAutoBtn.addEventListener('change', () => {
+    if (elements.flowAutoBtn.checked) setFlowMode('auto')
+  })
+  elements.flowCsvBtn.addEventListener('change', () => {
+    if (elements.flowCsvBtn.checked) setFlowMode('csv')
+  })
+  elements.flowSeoBtn.addEventListener('change', () => {
+    if (elements.flowSeoBtn.checked) setFlowMode('seo')
+  })
   elements.simpleImportCsvBtn.addEventListener('click', simpleImportCsv)
   elements.simpleUseSeoKeywordsBtn.addEventListener('click', simpleUseSeoKeywords)
   elements.simpleSeoBtn.addEventListener('click', simpleBuildSeo)
@@ -3159,8 +4247,22 @@ function init() {
   bindEvents()
   setFlowMode(persisted?.flowMode ?? 'auto', { persist: false })
   state.candidates = []
-  state.candidateMessage = 'まだ空です。左で商品を選んで「おすすめ自動探索をはじめる」を押してください。'
-  renderAll()
+  state.candidateMessage = 'まだ候補はありません。商品と条件を選んで「候補を自動で探す」を押してください。'
+  if (shouldDiscardMarketplacePlan(state.marketplaceInsightPlan, erankResultRows())) {
+    state.marketplaceInsightPlan = null
+    state.marketplaceInsightMessage = ''
+  }
+  const needsAdaptiveMigration = state.marketplaceInsightMode === 'plus'
+    && state.marketplaceInsightPlan?.items?.length > 0
+    && (state.marketplaceInsightPlan.seedQuota !== 20
+      || !Array.isArray(state.marketplaceInsightPlan.candidatePool))
+  if (needsAdaptiveMigration) generateCandidates({ preserveMarketplacePlan: true })
+  else {
+    if (state.marketplaceInsightPlan?.items?.length > 0 && erankResultRows().length > 0) {
+      rebuildMarketplaceInsightPlan({ preserveExisting: true })
+    }
+    renderAll()
+  }
   if (state.researchRows.length > 0) {
     setSimpleStatus(`${state.researchRows.length}件の前回結果を復元しました。続きから使えます。`)
   }

@@ -17,6 +17,7 @@
         erankCompetition: string
         erankKeywordDifficulty: string
         erankTrend: string
+        erankCheckedAt?: string
         notes: string
         rawText: string
         relatedKeywords?: ErankResult[]
@@ -39,6 +40,7 @@
     ]
 
     const SEARCH_BUTTON_WORDS = ['search', 'lookup', 'submit', 'go', 'find', 'analyze']
+    let erankRunActive = false
 
     function wait(ms: number) {
         return new Promise((resolve) => window.setTimeout(resolve, ms))
@@ -46,6 +48,10 @@
 
     function normalizeText(value: string) {
         return value.replace(/\s+/g, ' ').trim()
+    }
+
+    function pageHasNoDataMessage() {
+        return /(?:we don't have any data|do not have any data|no data for|no data to show)/i.test(normalizeText(document.body.innerText || ''))
     }
 
     function normalizeMetric(value: string) {
@@ -191,6 +197,7 @@
         while (Date.now() - startedAt < 18000) {
             await wait(900)
             const text = normalizeText(document.body.innerText || '')
+            if (pageHasNoDataMessage()) return
             const hasMetric = /(average searches|avg searches|average clicks|avg clicks|etsy competition|search trend|competition|ctr)/i.test(text)
             const hasKeyword = text.toLowerCase().includes(keyword.toLowerCase().slice(0, 16))
 
@@ -275,6 +282,7 @@
 
         while (Date.now() - startedAt < 60000) {
             await wait(1000)
+            if (pageHasNoDataMessage()) return
             const snapshot = keywordIdeasMetricSnapshot(keyword)
             if (snapshot.text && snapshot.text === lastText) {
                 stableCount += 1
@@ -1190,6 +1198,8 @@
         const erankKeywordDifficulty = visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty
         const erankTrend = visualMetrics.erankTrend || tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText)
         const relatedKeywords = extractRelatedKeywordRows(keyword)
+        const erankCheckedAt = new Date().toISOString()
+        const timestampedRelatedKeywords = relatedKeywords.map((row) => ({ ...row, erankCheckedAt }))
 
         const notes = erankSearchVolume || erankClicks || erankCompetition || erankKeywordDifficulty || relatedKeywords.length > 0
             ? `Extracted from eRank screen${relatedKeywords.length > 0 ? ` / related ${relatedKeywords.length}` : ''}`
@@ -1208,9 +1218,10 @@
             erankCompetition,
             erankKeywordDifficulty,
             erankTrend,
+            erankCheckedAt,
             notes,
             rawText: bodyText.slice(0, 1500),
-            relatedKeywords,
+            relatedKeywords: timestampedRelatedKeywords,
         }
     }
 
@@ -1233,9 +1244,19 @@
     chrome.runtime.onMessage.addListener((request: ErankRunRequest, _sender, sendResponse) => {
         if (request.action !== 'ERANK_RUN_KEYWORD') return false
 
+        if (erankRunActive) {
+            sendResponse({ ok: false, error: 'eRank画面は前のキーワードをまだ処理中です。少し待ってから再実行してください。' })
+            return true
+        }
+
+        erankRunActive = true
         runKeyword(request.keyword)
-            .then((result) => sendResponse({ ok: true, result }))
+            .then((result) => {
+                erankRunActive = false
+                sendResponse({ ok: true, result })
+            })
             .catch((error: unknown) => {
+                erankRunActive = false
                 const message = error instanceof Error ? error.message : 'Unexpected eRank automation error.'
                 sendResponse({ ok: false, error: message })
             })

@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ServerPidPath = Join-Path $Root '.tmp\market-finder-server.pid'
 $Port = 4173
 $AppPath = "http://127.0.0.1:$Port/market-finder/"
 $AppUrl = "${AppPath}?v=$(Get-Date -Format 'yyyyMMddHHmmss')"
@@ -25,19 +26,23 @@ function Test-MarketFinderServer {
 }
 
 function Start-MarketFinderServer {
-  $python = Get-Command python -ErrorAction SilentlyContinue
-  if (-not $python) {
-    throw 'Python was not found. Could not start the Market Finder local server.'
+  $node = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $node) {
+    throw 'Node.js was not found. Could not start the Market Finder local server.'
   }
+
+  $serverScript = Join-Path $Root 'market-finder\scripts\static-server.mjs'
 
   $serverProcess = @{
-    FilePath = $python.Source
-    ArgumentList = @('-m', 'http.server', "$Port", '--bind', '127.0.0.1')
+    FilePath = $node.Source
+    ArgumentList = @($serverScript, $Root, "$Port")
     WorkingDirectory = $Root
     WindowStyle = 'Hidden'
+    PassThru = $true
   }
 
-  Start-Process @serverProcess | Out-Null
+  $process = Start-Process @serverProcess
+  Set-Content -LiteralPath $ServerPidPath -Value $process.Id -Encoding ASCII
 
   for ($index = 0; $index -lt 20; $index += 1) {
     Start-Sleep -Milliseconds 300
@@ -82,6 +87,6 @@ if (-not $NoBrowser) {
 }
 
 Write-Host "Market Finder is ready: $AppUrl"
-if (-not $NoResearch) {
+if (-not $NoResearch -and -not $NoBrowser) {
   Write-Host 'Research pages opened: eRank, EverBee, Etsy'
 }

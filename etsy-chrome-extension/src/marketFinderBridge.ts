@@ -3,6 +3,8 @@
         source?: string
         action?: string
         requestId?: string
+        query?: string
+        contextQuery?: string
         keywords?: string[]
         sources?: string[]
         everbeeUrl?: string
@@ -84,8 +86,33 @@
                 const response = await sendRuntimeMessage('COLLECT_TRENDS', {
                     sources: request.sources ?? [],
                     limit: request.limit,
+                    contextQuery: request.contextQuery ?? '',
                 })
                 postToPage({ action: 'TREND_RESULTS', requestId: request.requestId, ok: true, response })
+                return
+            }
+
+            if (request.action === 'RUN_ETSY_MARKETPLACE_INSIGHT') {
+                const response = await sendRuntimeMessage('RUN_ETSY_MARKETPLACE_INSIGHT', {
+                    query: request.query ?? '',
+                })
+                postToPage({ action: 'ETSY_MARKETPLACE_OPENED', requestId: request.requestId, ok: true, response })
+                return
+            }
+
+            if (request.action === 'RUN_AND_CAPTURE_ETSY_MARKETPLACE_INSIGHT') {
+                const response = await sendRuntimeMessage('RUN_AND_CAPTURE_ETSY_MARKETPLACE_INSIGHT', {
+                    query: request.query ?? '',
+                })
+                postToPage({ action: 'ETSY_MARKETPLACE_RESULT', requestId: request.requestId, ok: true, response })
+                return
+            }
+
+            if (request.action === 'CAPTURE_ETSY_MARKETPLACE_INSIGHT') {
+                const response = await sendRuntimeMessage('CAPTURE_ETSY_MARKETPLACE_INSIGHT', {
+                    query: request.query ?? '',
+                })
+                postToPage({ action: 'ETSY_MARKETPLACE_RESULT', requestId: request.requestId, ok: true, response })
                 return
             }
 

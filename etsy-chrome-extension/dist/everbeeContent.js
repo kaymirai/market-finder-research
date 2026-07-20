@@ -1,4 +1,15 @@
 "use strict";
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
 (() => {
     const SEARCH_SELECTORS = [
         'input[type="search"]',
@@ -218,6 +229,64 @@
     function isPercentCell(value) {
         return /^[-+]?\d[\d,.]*%$/.test(value);
     }
+    function extractEverbeeProductRows() {
+        var _a, _b, _c, _d;
+        const rowsById = new Map();
+        const visibleRows = Array.from(document.querySelectorAll('[role="row"][data-id]'));
+        for (const row of visibleRows) {
+            const listingId = normalizeText((_a = row.getAttribute('data-id')) !== null && _a !== void 0 ? _a : '');
+            if (!listingId)
+                continue;
+            const current = (_b = rowsById.get(listingId)) !== null && _b !== void 0 ? _b : {
+                listingId,
+                rowIndex: Number((_c = row.getAttribute('data-rowindex')) !== null && _c !== void 0 ? _c : Number.MAX_SAFE_INTEGER),
+                fields: {},
+            };
+            const cells = Array.from(row.querySelectorAll('[role="cell"][data-field]'));
+            for (const cell of cells) {
+                const field = (_d = cell.getAttribute('data-field')) !== null && _d !== void 0 ? _d : '';
+                const value = normalizeText(cell.innerText || cell.textContent || '');
+                if (field && value && !current.fields[field])
+                    current.fields[field] = value;
+            }
+            rowsById.set(listingId, current);
+        }
+        return Array.from(rowsById.values())
+            .map((row) => {
+            var _a, _b, _c;
+            const title = normalizeText((_a = row.fields.product) !== null && _a !== void 0 ? _a : '');
+            const totalSales = parseDisplayNumber(row.fields.totalSales);
+            const monthlySales = parseDisplayNumber(row.fields.sales);
+            const monthlyRevenue = parseDisplayNumber(row.fields.revenue);
+            const listingAge = normalizeText((_b = row.fields.listingAge) !== null && _b !== void 0 ? _b : '');
+            const price = parseDisplayNumber(row.fields.price);
+            if (!title || totalSales === null || monthlySales === null || monthlyRevenue === null || !isAgeCell(listingAge) || price === null) {
+                return null;
+            }
+            return {
+                listingId: row.listingId,
+                title,
+                totalSales,
+                monthlySales,
+                monthlyRevenue,
+                listingAge,
+                listingAgeMonths: parseAgeMonths(listingAge),
+                price,
+                shopName: normalizeText((_c = row.fields.shopName) !== null && _c !== void 0 ? _c : ''),
+                rowIndex: row.rowIndex,
+            };
+        })
+            .filter((row) => row !== null)
+            .sort((a, b) => b.monthlySales - a.monthlySales
+            || b.monthlyRevenue - a.monthlyRevenue
+            || b.totalSales - a.totalSales
+            || a.rowIndex - b.rowIndex)
+            .slice(0, 24)
+            .map((_a) => {
+            var { rowIndex: _rowIndex } = _a, row = __rest(_a, ["rowIndex"]);
+            return row;
+        });
+    }
     function parseAgeMonths(value) {
         const numberMatch = value.match(/\d+(?:\.\d+)?/);
         if (!numberMatch)
@@ -234,6 +303,15 @@
     }
     function rowAgeMonths(row) {
         return parseAgeMonths(row.listingAge);
+    }
+    function median(values) {
+        if (values.length === 0)
+            return null;
+        const sorted = [...values].sort((a, b) => a - b);
+        const middle = Math.floor(sorted.length / 2);
+        if (sorted.length % 2 === 1)
+            return sorted[middle];
+        return (sorted[middle - 1] + sorted[middle]) / 2;
     }
     function opportunityScore(row) {
         const ageMonths = rowAgeMonths(row);
@@ -284,8 +362,46 @@
             source,
         };
     }
+    function summarizeVisibleProductAnalyticsRows(rows) {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+        const picked = pickBestRows(rows);
+        const representativeRow = (_b = (_a = picked.opportunity) !== null && _a !== void 0 ? _a : picked.bySales) !== null && _b !== void 0 ? _b : picked.byRevenue;
+        const revenues = rows.map((row) => row.revenue);
+        const monthlySales = rows.map((row) => row.monthlySales);
+        const listingAges = rows.map(rowAgeMonths).filter((value) => value !== null);
+        const sellingRows = rows.filter((row) => row.monthlySales > 0);
+        const recentSellingRows = sellingRows.filter((row) => {
+            const age = rowAgeMonths(row);
+            return age !== null && age <= 18;
+        });
+        const prices = rows.map((row) => row.price);
+        const bestRevenue = (_d = (_c = picked.byRevenue) === null || _c === void 0 ? void 0 : _c.revenue) !== null && _d !== void 0 ? _d : 0;
+        const bestSales = (_f = (_e = picked.bySales) === null || _e === void 0 ? void 0 : _e.monthlySales) !== null && _f !== void 0 ? _f : 0;
+        const bestRevenueAge = (_h = (_g = picked.byRevenue) === null || _g === void 0 ? void 0 : _g.listingAge) !== null && _h !== void 0 ? _h : '';
+        const bestSalesAge = (_k = (_j = picked.bySales) === null || _j === void 0 ? void 0 : _j.listingAge) !== null && _k !== void 0 ? _k : '';
+        const totalVisibleMonthlySales = monthlySales.length > 0
+            ? monthlySales.reduce((sum, value) => sum + value, 0)
+            : null;
+        return {
+            topMonthlySales: rows.length > 0 ? String(bestSales) : '',
+            topRevenue: rows.length > 0 ? String(bestRevenue) : '',
+            averagePrice: prices.length > 0 ? (prices.reduce((sum, value) => sum + value, 0) / prices.length).toFixed(2) : '',
+            listingAge: (_o = (_l = representativeRow === null || representativeRow === void 0 ? void 0 : representativeRow.listingAge) !== null && _l !== void 0 ? _l : (_m = rows[0]) === null || _m === void 0 ? void 0 : _m.listingAge) !== null && _o !== void 0 ? _o : '',
+            visibleListingCount: rows.length > 0 ? String(rows.length) : '',
+            sellingListingCount: rows.length > 0 ? String(sellingRows.length) : '',
+            recentSellingListingCount: rows.length > 0 ? String(recentSellingRows.length) : '',
+            medianMonthlySales: monthlySales.length > 0 ? String(median(monthlySales)) : '',
+            medianMonthlyRevenue: revenues.length > 0 ? String(median(revenues)) : '',
+            totalVisibleMonthlySales: totalVisibleMonthlySales === null ? '' : String(totalVisibleMonthlySales),
+            topSalesShare: totalVisibleMonthlySales && bestSales >= 0 ? String(bestSales / totalVisibleMonthlySales) : '',
+            medianListingAgeMonths: listingAges.length > 0 ? String(median(listingAges)) : '',
+            notes: rows.length > 0
+                ? `EverBee visible rows=${rows.length}; picked=${picked.source}; marketMaxRevenue=${bestRevenue}; marketMaxSales=${bestSales}; maxRevenueAge=${bestRevenueAge}; maxSalesAge=${bestSalesAge}`
+                : '',
+        };
+    }
     function extractVisibleProductAnalyticsMetrics(rawBodyText) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
+        var _a, _b;
         const rows = [];
         const lines = rawBodyText
             .split(/\r?\n/)
@@ -328,23 +444,7 @@
             });
             index = cursor + 1;
         }
-        const picked = pickBestRows(rows);
-        const representativeRow = (_d = (_c = picked.opportunity) !== null && _c !== void 0 ? _c : picked.bySales) !== null && _d !== void 0 ? _d : picked.byRevenue;
-        const revenues = rows.map((row) => row.revenue);
-        const prices = rows.map((row) => row.price);
-        const bestRevenue = (_f = (_e = picked.byRevenue) === null || _e === void 0 ? void 0 : _e.revenue) !== null && _f !== void 0 ? _f : 0;
-        const bestSales = (_h = (_g = picked.bySales) === null || _g === void 0 ? void 0 : _g.monthlySales) !== null && _h !== void 0 ? _h : 0;
-        const bestRevenueAge = (_k = (_j = picked.byRevenue) === null || _j === void 0 ? void 0 : _j.listingAge) !== null && _k !== void 0 ? _k : '';
-        const bestSalesAge = (_m = (_l = picked.bySales) === null || _l === void 0 ? void 0 : _l.listingAge) !== null && _m !== void 0 ? _m : '';
-        return {
-            topMonthlySales: representativeRow ? String(representativeRow.monthlySales) : '',
-            topRevenue: representativeRow ? String(representativeRow.revenue) : '',
-            averagePrice: prices.length > 0 ? (prices.reduce((sum, value) => sum + value, 0) / prices.length).toFixed(2) : '',
-            listingAge: (_q = (_o = representativeRow === null || representativeRow === void 0 ? void 0 : representativeRow.listingAge) !== null && _o !== void 0 ? _o : (_p = rows[0]) === null || _p === void 0 ? void 0 : _p.listingAge) !== null && _q !== void 0 ? _q : '',
-            notes: rows.length > 0
-                ? `EverBee visible rows=${rows.length}; picked=${picked.source}; marketMaxRevenue=${bestRevenue}; marketMaxSales=${bestSales}; maxRevenueAge=${bestRevenueAge}; maxSalesAge=${bestSalesAge}`
-                : '',
-        };
+        return summarizeVisibleProductAnalyticsRows(rows);
     }
     function looksLikeMetricText(value) {
         return /(total sales|monthly sales|sales|revenue|average price|listing age|listings analyzed|estimated|favorites|views|price|shop|nothing to show)/i.test(value)
@@ -423,12 +523,22 @@
     function extractMetrics(keyword) {
         const rawBodyText = document.body.innerText || '';
         const bodyText = normalizeText(rawBodyText);
-        const visibleTableMetrics = extractVisibleProductAnalyticsMetrics(rawBodyText);
+        const productRows = extractEverbeeProductRows();
+        const visibleTableMetrics = productRows.length > 0
+            ? summarizeVisibleProductAnalyticsRows(productRows.map((row) => ({
+                totalSales: row.totalSales,
+                monthlySales: row.monthlySales,
+                revenue: row.monthlyRevenue,
+                listingAge: row.listingAge,
+                price: row.price,
+            })))
+            : extractVisibleProductAnalyticsMetrics(rawBodyText);
         const listingsAnalyzed = numberLike(/listings\s+analyzed\s*[:\-]?\s*(\d[\d,.]*[kKmM]?)/i, bodyText);
         const topMonthlySales = visibleTableMetrics.topMonthlySales || parseTopSalesFromVisibleRows();
         const topRevenue = visibleTableMetrics.topRevenue;
         const averagePrice = visibleTableMetrics.averagePrice;
         const listingAge = visibleTableMetrics.listingAge;
+        const everbeeCheckedAt = new Date().toISOString();
         const notes = listingsAnalyzed || topMonthlySales || topRevenue
             ? `Extracted from EverBee screen${visibleTableMetrics.notes ? ` / ${visibleTableMetrics.notes}` : ''}`
             : `Metrics not found. Check the EverBee screen manually. URL=${location.href}`;
@@ -439,8 +549,18 @@
             topRevenue,
             averagePrice,
             listingAge,
+            visibleListingCount: visibleTableMetrics.visibleListingCount,
+            sellingListingCount: visibleTableMetrics.sellingListingCount,
+            recentSellingListingCount: visibleTableMetrics.recentSellingListingCount,
+            medianMonthlySales: visibleTableMetrics.medianMonthlySales,
+            medianMonthlyRevenue: visibleTableMetrics.medianMonthlyRevenue,
+            totalVisibleMonthlySales: visibleTableMetrics.totalVisibleMonthlySales,
+            topSalesShare: visibleTableMetrics.topSalesShare,
+            medianListingAgeMonths: visibleTableMetrics.medianListingAgeMonths,
+            everbeeCheckedAt,
             notes,
-            listingSnippets: extractListingSnippets(keyword),
+            listingSnippets: productRows.length > 0 ? productRows.map((row) => row.title) : extractListingSnippets(keyword),
+            productRows,
             rawText: bodyText.slice(0, 1500),
         };
     }
@@ -463,6 +583,9 @@
         await waitForLikelyResults(keyword);
         return extractMetrics(keyword);
     }
+    const testHooks = globalThis.__ETSY_MIRAI_TEST_HOOKS__;
+    if (testHooks)
+        testHooks.extractEverbeeProductRows = extractEverbeeProductRows;
     chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         if (request.action !== 'EVERBEE_RUN_KEYWORD')
             return false;

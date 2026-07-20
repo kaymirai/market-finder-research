@@ -5,34 +5,37 @@ EtsyMiraiProducerへ組み込む前に、イベント別の低競合キーワー
 ## できること
 
 - 父の日、母の日、ハロウィン、クリスマスなどのイベントからロングテール候補を生成
+- ハロウィンのような大型イベントを、モチーフ・場面・相手・テイスト・周辺需要の5レーンに分解
+- Etsy Marketplace Insightsを無料15語、またはEtsy Plusの入口20語＋有望な関連語を最大40語まで段階式で確認
 - 広めの市場で売れた商品のタイトル・タグから種ワードを抽出
 - `event + target + product + year` を軸に候補を増やす
 - Chrome拡張へ直接依頼して、eRank Keyword ToolとEverBee Product Analyticsを順番に検索
 - eRankで検索需要を見て、良さそうな候補だけEverBeeで売上確認
-- 低競合、需要、収益性、新しさ、商標リスクを点数化
-- 「両方OK」「EverBeeのみ」「eRankのみ」「要判断」で根拠の強さを表示
+- eRankの需要・供給と、EverBeeで複数商品が売れている広がりを別々に評価
+- `Opportunity A-D` と `Confidence High/Medium/Low` を分けて表示
+- 古い検索種や一般トレンドは発想用に留め、45日以内のeRank/EverBeeまたは7日以内のEtsy公式データだけをA/B判定に使用
 - 良い候補を商品テーマ、ターゲット、デザイン方向性、SEOタイトル、タグ案へ変換
 - 売れている候補から次ラウンドの派生キーワードを作成
 
 ## 起動
 
-リポジトリルートで静的サーバーを立てます。
+起動スクリプトで、Market Finderと共有エンジンだけを配信するローカルサーバーを立てます。
 
 ```powershell
-python -m http.server 3021
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-market-finder.ps1 -NoBrowser
 ```
 
 開くURL:
 
 ```text
-http://127.0.0.1:3021/market-finder/
+http://127.0.0.1:4173/market-finder/
 ```
 
 ## Chrome拡張連携
 
 1. `etsy-chrome-extension` をChromeでLoad unpackedする
-2. 拡張のバージョンが `1.5` になっていることを確認
-3. Market Finderページをリロードする
+2. 拡張のバージョンが `1.26` になっていることを確認
+3. 実Chromeで開いているMarket Finderページが自動再読み込みされることを確認
 4. 画面上部のかんたんモードで `候補を作る` を押す
 5. `eRankで広く見る` を押す
 6. `EverBeeで売上確認` を押す
@@ -40,7 +43,19 @@ http://127.0.0.1:3021/market-finder/
 調査開始後は進捗モーダルが開き、現在のキーワード、完了件数、残り件数、完了/停止/エラー状態を確認できます。
 モーダル内の `停止` から途中停止もできます。
 
-接続されない場合は、拡張をReloadしてMarket Finderページも再読み込みしてください。
+接続されない場合は、Market FinderがCodex内蔵ブラウザではなく実Chromeで開かれているか確認し、拡張をReloadしてください。自動再読み込みされない場合だけMarket Finderページを一度再読み込みします。
+
+## 大型イベント分解 / Etsy公式段階式プラン
+
+ハロウィンを選んで候補を作ると、40候補を5レーンへ8件ずつ配分します。イベント名を含む `Direct` は30%以下、イベント名から離れた `Adjacent` は40%以上を維持し、外部サイトで実際に見つけた語句は `Observed` として表示します。
+
+同時にMarketplace Insightsの調査プランを作ります。無料モードは入口5件・検証7件・予備3件の15語です。Etsy Plusモードは入口20語から始め、最大200語の関連候補プールから5語ずつ、最大40語を追加する段階式の60検索構成です。検索数・掲載数・コンバージョン表示・商品一致・語句の具体性・複数入口からの再発見を評価し、同じ意味の語は1バッチ2語までに制限します。
+
+`Etsy公式確認を自動実行` を押すと、候補を1語ずつ検索し、結果表示を待って直近30日の検索数・検索変化率・掲載数・関連語を保存し、次の候補へ自動で進みます。Etsyが日本語表示でも英語表示でも、「似たような検索ワード / Similar search terms」と「探索のアイデア / Exploration ideas」を自動で切り替え、各行の検索数・検索結果数・コンバージョン表示を統合します。Etsy側の画面変更などで止まった場合は、対象画面を手動で表示して `表示中の結果を取り込む` から復旧できます。
+
+入口結果を10語以上取得すると、`次の5語を追加` が有効になります。最初の5語を終えた後は残りの入口を確認し、その後は5語ごとに再評価します。20語以上を深掘りした後、2ラウンド連続で新しい有望群が増えなければ早期終了します。Plusモードでもアプリが自動でページ送りや連続検索を行うことはありません。
+
+Etsy公式値は取得後7日以内だけOpportunity A/Bの判定に使い、EverBeeの複数商品販売データと組み合わせます。検索需要だけで「売れる」とは判定しません。
 
 ## Broad Market Scan
 
@@ -48,7 +63,7 @@ http://127.0.0.1:3021/market-finder/
 `種ワード抽出` を押すと、`dog dad`、`bonus dad`、`from daughter` のような語句を拾い、`追加語句へ入れる` で候補生成に使えます。
 
 `広め検索語を作る` を押すと、イベントと商品から `fathers day shirt` などの広め検索語を作ります。
-Chrome拡張が接続済みなら、`EverBeeで広め調査` でその検索語を順番に調査し、EverBee画面から拾えた商品名を自動で種ワード抽出へ流します。
+Chrome拡張が接続済みなら、`EverBeeで広め調査` でその検索語を順番に調査し、EverBee画面から商品名と商品別の月間販売数・累計販売数・売上・公開後月数を共通IDで取得します。月間販売数順に並べ、公開12か月以内に複数商品で現れる語句を種ワード抽出で優先します。商品別の結合に失敗した場合は、検索結果全体の最大販売数を各商品へ流用しません。
 
 ## eRank連携
 
@@ -61,11 +76,21 @@ Chrome拡張が接続済みなら、`EverBeeで広め調査` でその検索語�
 対応している列:
 
 ```csv
-Keyword,Listings Analyzed,Top Monthly Sales,Top Revenue,Average Price,Listing Age,eRank Search Volume,eRank Clicks,eRank CTR,eRank Competition,eRank Trend,Notes
+Keyword,Listings Analyzed,Top Monthly Sales,Top Revenue,Average Price,Listing Age,eRank Search Volume,eRank Clicks,eRank CTR,eRank Competition,eRank KD,eRank Trend,Etsy Searches 30d,Etsy Listings,Etsy Related Terms,Notes,Visible Listing Count,Selling Listing Count,Recent Selling Listing Count,Median Monthly Sales,Median Monthly Revenue,Total Visible Monthly Sales,Top Sales Share,Median Listing Age Months,eRank Checked At,Etsy Checked At,EverBee Checked At,EverBee Product Rows JSON
 ```
 
-EverBeeは売れている証拠、eRankは検索されてクリックされる証拠として扱います。
+`Listings Analyzed` はEverBee側の補助競合指標として段階評価します。500件以下を20点、1,000件以下を18点、2,500件以下を15点、5,000件以下を12点とし、30,000件以上は過密としてA/Bへ昇格させません。ただし、Etsy公式やeRankの競合数の代替、または販売密度の分母には使いません。
 詳しい判断基準は `market-finder/DUAL_TOOL_STRATEGY.md` に置いています。
+
+## Halloween実測の再現検証
+
+2026-07-20にEtsy US、eRank、EverBeeで確認したHalloweenシャツ候補は `validation/halloween-shirt-evidence-2026-07-20.json` に保存しています。デジタル素材、明確なIP候補、検索意図に合わない商品をEverBee集計から外した上で、次のコマンドでMarket Finderの推奨順位を再現できます。
+
+```powershell
+node market-finder/scripts/validate-halloween-research.mjs
+```
+
+この検証では、同じB候補でも掲載数が少ない語を上位にし、Etsy公式とeRankで需要帯が食い違う語は5点下げます。A/B/C/Dの昇格条件自体は変更しません。
 
 ## SEOタイトル / タグ設計
 
@@ -75,7 +100,11 @@ Step 5で、調査済みキーワードを3つのバケットに整理できま�
 - `Reach` は中競合で検索範囲を広げる語句
 - `Best seller` は競合は強いが市場の中心になる語句
 
-`結果からバケット作成` を押すと、EverBee/eRankの数値から自動で振り分けます。`SEO案を作る` で、Etsyタイトル140文字以内とタグ13個以内に整えます。タグはEtsyの20文字制限に合わせて短い語句へ分割します。
+`結果からバケット作成` を押すと、EverBee/eRankの数値から自動で振り分けます。`SEO案を作る` で、タイトルは14語以内を目安に商品名を1回だけ入れ、タグは13個以内・各20文字以内に整えます。
+
+## 30日後の実績記録
+
+判定は販売保証ではなく、調査順を決めるためのものです。出品した商品の30日後の表示・訪問・お気に入り・注文・売上は `validation/research-outcome-template.csv` に記録し、20〜50件たまってからA/Bの基準を調整します。
 
 ## 共通ロジック
 

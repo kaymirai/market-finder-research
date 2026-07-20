@@ -14,11 +14,11 @@ Market Finderの候補キーワードをeRank Keyword ToolとEverBee Product Ana
 C:\work\AntiGravity\Etsy_product\etsy-chrome-extension
 ```
 
-更新後は、拡張カードのReloadを押してください。バージョン `1.19` ?????????OK???
+更新後は、拡張カードのReloadを押してください。バージョン `1.26` ならOKです。Reload時に実Chromeで開いているMarket Finderページも自動で再読み込みされます。
 
 ## Market Finderから使う
 
-1. `http://127.0.0.1:3021/market-finder/` を開く
+1. `http://127.0.0.1:4173/market-finder/` を開く
 2. イベントと商品カテゴリを選び、キーワードを生成する
 3. `eRankで広く見る` を押す
 4. 拡張がeRankを開き、広めの検索語で検索数・クリック・競合を順番に確認する
@@ -26,9 +26,11 @@ C:\work\AntiGravity\Etsy_product\etsy-chrome-extension
 6. 拡張がEverBee Product Analyticsを開き、売上指標を順番に確認する
 7. 取得できた結果がMarket Finderへ戻り、スコアリングされる
 
-Broad Market Scanの `EverBeeで広め調査` から起動した場合は、EverBee画面で拾えた商品名もMarket Finderへ戻し、種ワード抽出に使います。
+Broad Market Scanの `EverBeeで広め調査` から起動した場合は、EverBee画面の共通商品IDを使って商品名・月間販売数・累計販売数・売上・公開後月数を一対一で取得します。Market Finderでは月間販売数順に表示し、公開12か月以内に複数商品で売れている語句を種ワード抽出で優先します。
 
-Market Finderページに「接続済み」と出ない場合は、Chrome拡張をReloadしてMarket Finderページもリロードしてください。
+Halloweenのような大型イベントでは、無料モードは15語、Etsy Plusモードは入口20語から始めて有望語を5語ずつ最大40語まで追加する段階式プランを作ります。`Etsy公式確認を自動実行` を押すと、候補を1語ずつ検索し、結果表示を待って直近30日の検索数・検索変化率・掲載数・関連語を取り込み、次の語句へ自動で進みます。日本語・英語表示の両方に対応し、「似たような検索ワード / Similar search terms」と「探索のアイデア / Exploration ideas」を自動で切り替え、各行の検索数・検索結果数・コンバージョン表示を統合します。失敗時だけ停止し、手動取り込みで復旧できます。
+
+Market Finderページに「接続済み」と出ない場合は、そのページがCodex内蔵ブラウザではなく実Chromeで開かれているか確認し、Chrome拡張をReloadしてください。バージョン `1.26` ではMarket Finderページも自動で再読み込みされます。
 
 ## ポップアップから使う
 
@@ -41,5 +43,5 @@ Market Finderページから直接起動できない場合は、拡張アイコ�
 
 ## 注意
 
-eRankやEverBeeの画面構造が変わると、検索欄や数値を見つけられないことがあります。
+eRank、EverBee、Etsy Marketplace Insightsの画面構造が変わると、検索欄や数値を見つけられないことがあります。
 その場合はCSVのNotesに理由が残るので、手動確認してください。

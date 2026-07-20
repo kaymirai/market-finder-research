@@ -1,0 +1,160 @@
+{
+  "capturedAt": "2026-07-20T00:00:00Z",
+  "market": "Etsy US",
+  "categoryId": "shirt",
+  "selectionRule": "EverBeeは検索意図に合う物理POD商品だけを集計し、デジタル素材、明確なIP候補、無関係商品を除外する。",
+  "candidates": [
+    {
+      "keyword": "ghost reading shirt",
+      "etsySearches30d": 179,
+      "etsyListings": 10700,
+      "etsySearchTrendPercent": -10.5,
+      "erankSearchVolume": 114,
+      "erankClicks": 168,
+      "erankCtr": 147,
+      "erankCompetition": 27405,
+      "everbeeListings": [
+        { "label": "Retro Ghost Reading Books Sweatshirt", "monthlySales": 14, "monthlyRevenue": 602, "listingAgeMonths": 23 },
+        { "label": "Retro Ghost Reading Sweatshirt", "monthlySales": 10, "monthlyRevenue": 480, "listingAgeMonths": 24 },
+        { "label": "Read in Peace Sweatshirt", "monthlySales": 7, "monthlyRevenue": 350, "listingAgeMonths": 24 },
+        { "label": "Ghost Reading Book Sweatshirt", "monthlySales": 6, "monthlyRevenue": 288, "listingAgeMonths": 22 },
+        { "label": "Bookish Ghost Halloween Shirt", "monthlySales": 10, "monthlyRevenue": 200, "listingAgeMonths": 10 }
+      ],
+      "expectedOpportunity": "A",
+      "expectedConfidence": "High",
+      "expectedRank": 1
+    },
+    {
+      "keyword": "halloween nurse shirt",
+      "etsySearches30d": 1300,
+      "etsyListings": 20100,
+      "etsySearchTrendPercent": 27.4,
+      "erankSearchVolume": 564,
+      "erankClicks": 647,
+      "erankCtr": 115,
+      "erankCompetition": 45341,
+      "everbeeListings": [
+        { "label": "Comfort Colors Halloween Nurse Shirt", "monthlySales": 12, "monthlyRevenue": 300, "listingAgeMonths": 12 },
+        { "label": "Personalized Halloween Nurse Sweatshirt", "monthlySales": 5, "monthlyRevenue": 257, "listingAgeMonths": 23 },
+        { "label": "Ghost Nurse Halloween Shirt", "monthlySales": 6, "monthlyRevenue": 165, "listingAgeMonths": 12 },
+        { "label": "Halloween Nurse Practitioner Sweatshirt", "monthlySales": 6, "monthlyRevenue": 155, "listingAgeMonths": 10 },
+        { "label": "ER Nurse Halloween Sweatshirt", "monthlySales": 7, "monthlyRevenue": 147, "listingAgeMonths": 10 },
+        { "label": "Ortho Nurse Halloween Shirt", "monthlySales": 5, "monthlyRevenue": 142, "listingAgeMonths": 22 },
+        { "label": "Spooky Nurse Halloween Shirt", "monthlySales": 7, "monthlyRevenue": 126, "listingAgeMonths": 11 },
+        { "label": "NICU Nurse Halloween Sweatshirt", "monthlySales": 4, "monthlyRevenue": 120, "listingAgeMonths": 13 },
+        { "label": "Nurse Tarot Card Shirt", "monthlySales": 8, "monthlyRevenue": 118, "listingAgeMonths": 24 },
+        { "label": "ER Nurse Tarot Card Shirt", "monthlySales": 4, "monthlyRevenue": 116, "listingAgeMonths": 23 }
+      ],
+      "expectedOpportunity": "B",
+      "expectedConfidence": "High",
+      "expectedRank": 2
+    },
+    {
+      "keyword": "halloween teacher shirt",
+      "etsySearches30d": 1600,
+      "etsyListings": 31700,
+      "etsySearchTrendPercent": 78.8,
+      "erankSearchVolume": 730,
+      "erankClicks": 921,
+      "erankCtr": 126,
+      "erankCompetition": 90556,
+      "everbeeListings": [
+        { "label": "Vintage Bat Teacher Shirt", "monthlySales": 33, "monthlyRevenue": 989, "listingAgeMonths": 2 },
+        { "label": "Ghost Reading Books Teacher Sweatshirt", "monthlySales": 14, "monthlyRevenue": 602, "listingAgeMonths": 23 },
+        { "label": "Ghost Reading Teacher Sweatshirt", "monthlySales": 10, "monthlyRevenue": 480, "listingAgeMonths": 24 },
+        { "label": "Ghost Reading Librarian Teacher Sweatshirt", "monthlySales": 6, "monthlyRevenue": 288, "listingAgeMonths": 22 },
+        { "label": "Teacher Life Halloween Skeleton Shirt", "monthlySales": 12, "monthlyRevenue": 239, "listingAgeMonths": 24 },
+        { "label": "Personalized Halloween Teacher Shirt", "monthlySales": 7, "monthlyRevenue": 228, "listingAgeMonths": 9 }
+      ],
+      "expectedOpportunity": "B",
+      "expectedConfidence": "High",
+      "expectedRank": 3
+    },
+    {
+      "keyword": "halloween book lover shirt",
+      "etsySearches30d": 59,
+      "etsyListings": 11900,
+      "etsySearchTrendPercent": 245.5,
+      "erankSearchVolume": 19,
+      "erankSearchVolumeNote": "eRank表示は20未満。検証では上限側の19として扱う。",
+      "erankCompetition": 32251,
+      "everbeeListings": [
+        { "label": "Reader Tarot Skeleton Shirt", "monthlySales": 23, "monthlyRevenue": 359, "listingAgeMonths": 26 },
+        { "label": "Skeleton Reading Book Tee", "monthlySales": 10, "monthlyRevenue": 350, "listingAgeMonths": 12 },
+        { "label": "Read in Peace Sweatshirt", "monthlySales": 7, "monthlyRevenue": 350, "listingAgeMonths": 24 },
+        { "label": "Haunted Bookstore Sweatshirt", "monthlySales": 6, "monthlyRevenue": 308, "listingAgeMonths": 11 },
+        { "label": "Reader Tarot Skeleton Sweatshirt", "monthlySales": 7, "monthlyRevenue": 301, "listingAgeMonths": 24 }
+      ],
+      "expectedOpportunity": "B",
+      "expectedConfidence": "High",
+      "expectedRank": 4
+    },
+    {
+      "keyword": "witchy book club shirt",
+      "etsySearches30d": 4,
+      "etsyListings": 3300,
+      "erankSearchVolume": 31,
+      "erankClicks": 46,
+      "erankCtr": 148,
+      "erankCompetition": 933,
+      "expectedOpportunity": "C"
+    },
+    {
+      "keyword": "halloween dental shirt",
+      "etsySearches30d": 89,
+      "etsyListings": 6800,
+      "etsySearchTrendPercent": -8.8,
+      "erankSearchVolume": 19,
+      "erankClicks": 19,
+      "erankCtr": 25,
+      "erankCompetition": 3380,
+      "expectedOpportunity": "C"
+    },
+    {
+      "keyword": "nicu nurse halloween shirt",
+      "etsySearches30d": 97,
+      "etsyListings": 4900,
+      "erankSearchVolume": 19,
+      "erankCompetition": 8036,
+      "topMonthlySales": 1,
+      "expectedOpportunity": "C"
+    },
+    {
+      "keyword": "french ghost halloween t-shirt",
+      "etsySearches30d": 34,
+      "etsyListings": 46,
+      "etsySearchTrendPercent": -78.6,
+      "erankCompetition": 292,
+      "topMonthlySales": 0,
+      "expectedOpportunity": "C"
+    },
+    {
+      "keyword": "halloween radiology shirt",
+      "etsySearches30d": 47,
+      "etsyListings": 7200,
+      "etsySearchTrendPercent": 35.3,
+      "expectedOpportunity": "C"
+    },
+    {
+      "keyword": "skeleton reading shirt",
+      "etsySearches30d": 29,
+      "etsyListings": 7400,
+      "etsySearchTrendPercent": -18.2,
+      "expectedOpportunity": "C"
+    },
+    {
+      "keyword": "halloween pumpkin patch shirt",
+      "etsySearches30d": 1,
+      "etsyListings": 14500,
+      "etsySearchTrendPercent": -100,
+      "expectedOpportunity": "C"
+    },
+    {
+      "keyword": "summerween shirt",
+      "etsySearches30d": 5700,
+      "etsyListings": 20900,
+      "etsySearchTrendPercent": -43.6,
+      "expectedOpportunity": "D"
+    }
+  ]
+}

@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260524-2">
+    <link rel="stylesheet" href="./styles.css?v=20260720-9">
   </head>
   <body>
     <main class="app-shell">
@@ -20,43 +20,44 @@
         <div class="top-actions advanced-only">
           <button id="copyKeywordsBtn" type="button" class="ghost-btn" data-optional="予備">候補リストをコピー</button>
           <button id="downloadJobBtn" type="button" class="dark-btn" data-optional="予備">接続できない時のJSON</button>
-          <small>通常はStep 3の「Step 2の候補を入れる」を使えばOKです。この2つは外部保存・拡張機能へ直接渡す時用です。</small>
+          <small>通常は画面の案内に沿って進めればOKです。この2つは外部保存・拡張機能へ直接渡す時だけ使います。</small>
         </div>
       </header>
 
-      <section class="workflow-strip" aria-label="作業の流れ">
-        <div><span>1</span><strong>商品を選ぶ</strong><small>年やイベントは任意</small></div>
-        <div><span>2</span><strong>eRankで需要</strong><small>検索数・クリックを見る</small></div>
-        <div><span>3</span><strong>EverBeeで売上</strong><small>売れているか見る</small></div>
-        <div><span>4</span><strong>候補を使う</strong><small>名詞候補とCSVを確認</small></div>
-      </section>
-
       <section class="quick-start">
         <div class="quick-start-copy">
-          <p class="section-kicker">はじめて使う人へ</p>
-          <h2>迷ったら、下の1から順に押してください</h2>
-          <p class="quick-start-text">商品を選ぶと候補を作り、eRankで需要を見て、EverBeeで売上を確認します。最後にEtsyMiraiProducerへ渡しやすい主役名詞を出します。</p>
+          <p class="section-kicker">調査方法</p>
+          <h2>どちらから始めますか</h2>
+          <p class="quick-start-text">初めてなら「自動で探す」を選んでください。調査済みのCSVがある場合だけ、CSV判定を使います。</p>
         </div>
-        <div class="flow-choice-grid" aria-label="使い方を選ぶ">
-          <button id="flowAutoBtn" class="flow-choice is-active" type="button" data-flow-choice="auto">
-            <strong>まずこれで始める</strong>
-            <span>商品選びから売上確認まで、順番に進めます。</span>
-          </button>
-          <button id="flowCsvBtn" class="flow-choice" type="button" data-flow-choice="csv">
-            <strong>CSVから判定</strong>
-            <span>調査結果の表を持っている時だけ。</span>
-          </button>
-          <button id="flowSeoBtn" class="flow-choice advanced-only" type="button" data-flow-choice="seo">
-            <strong>SEOだけ作成</strong>
-            <span>良いキーワードが決まっている時だけ。</span>
-          </button>
-        </div>
+        <fieldset class="flow-choice-grid">
+          <legend class="sr-only">調べ方を選ぶ</legend>
+          <label class="flow-choice is-active">
+            <input id="flowAutoBtn" type="radio" name="flowChoice" value="auto" data-flow-choice="auto" checked>
+            <span class="flow-choice-copy">
+              <strong>自動で探す（おすすめ）</strong>
+              <small>商品を選び、需要と売上を順番に確認します。</small>
+            </span>
+          </label>
+          <label class="flow-choice">
+            <input id="flowCsvBtn" type="radio" name="flowChoice" value="csv" data-flow-choice="csv">
+            <span class="flow-choice-copy">
+              <strong>CSVから判定</strong>
+              <small>調査済みの表を持っている場合に使います。</small>
+            </span>
+          </label>
+          <label class="flow-choice advanced-only">
+            <input id="flowSeoBtn" type="radio" name="flowChoice" value="seo" data-flow-choice="seo">
+            <span class="flow-choice-copy">
+              <strong>SEOだけ作成</strong>
+              <small>良いキーワードが決まっている場合に使います。</small>
+            </span>
+          </label>
+        </fieldset>
         <button id="openAdvancedModalBtn" class="text-btn advanced-link" type="button">上級者向け</button>
       </section>
 
       <section class="simple-runner">
-        <button id="simpleImportErankBtn" type="button" class="primary-btn flow-auto-only">検索されているか見る</button>
-        <button id="simpleStartBtn" type="button" class="primary-btn flow-auto-only">売れているか見る</button>
         <div class="simple-step flow-csv-only">
           <span>1</span>
           <strong>CSVを貼る</strong>
@@ -77,23 +78,15 @@
           <small>数字が入ったら、タイトルとタグを作ります。</small>
           <button id="simpleSeoBtn" type="button" class="dark-btn">Etsy用タイトル・タグを作る</button>
         </div>
-        <div class="simple-status" id="simpleStatus">まず商品を選んで「おすすめ自動探索をはじめる」を押してください。</div>
+        <div class="simple-status" id="simpleStatus">まず商品を選んで「候補を自動で探す」を押してください。</div>
       </section>
 
       <section class="workspace-grid">
         <aside class="panel controls-panel">
           <div class="panel-heading">
-            <p class="section-kicker">Step 1</p>
-            <h2>まず商品を選ぶ</h2>
-            <p class="panel-help">商品を選んでから、下の大きなボタンを押します。イベントや年は必要な時だけ入れます。</p>
-            <div class="route-note">
-              <strong>ここでやること</strong>
-              <span>商品を選ぶ → 必要なら年やイベントを足す → おすすめ自動探索をはじめる。</span>
-            </div>
-            <div class="auto-scout-note">
-              <strong>基本は自動でOK</strong>
-              <span>イベント・相手・状況・趣味職業は、アプリが自動で混ぜて広め候補を作ります。イベントを指定したい時だけ下で選んでください。</span>
-            </div>
+            <p class="section-kicker">1 / 5</p>
+            <h2>条件を決めて候補を作る</h2>
+            <p class="panel-help">商品、イベント、年などの条件を決めてから、最後に候補を作ります。</p>
           </div>
 
           <div class="two-col starter-fields">
@@ -102,17 +95,11 @@
               <select id="categorySelect"></select>
             </label>
             <label class="field">
-              <span>年入りで探す場合だけ</span>
-              <input id="yearInput" type="number" min="2025" max="2032" placeholder="例: 2026">
-              <small>空欄でOKです。年入りの商品を狙う時だけ入れます。</small>
+              <span>イベント（任意）</span>
+              <select id="eventSelect"></select>
+              <small>通常は「イベントなし」でOKです。</small>
             </label>
           </div>
-
-          <label class="field">
-            <span>イベント（任意・月別）</span>
-            <select id="eventSelect"></select>
-            <small>季節イベントを狙う時だけ選びます。通常は「イベントなし」でOKです。</small>
-          </label>
 
           <label class="field advanced-only">
             <span>イベントを手入力する時だけ</span>
@@ -120,22 +107,21 @@
             <small>ここに入れると、上の選択より手入力イベントを優先します。空欄なら上の選択を使います。</small>
           </label>
 
-          <div class="start-action-box">
-            <button id="trendAutoBtn" type="button" class="primary-btn full-width">1 ここを押して候補を作る</button>
-            <div class="connection-strip">
-              <span>外部サイト自動取得</span>
-              <span id="quickExtensionBadge" class="status-badge">確認中</span>
-            </div>
-            <div id="quickExtensionStatus" class="inline-status">実Chromeで開くと接続状態を確認できます。</div>
-            <div id="trendStatus" class="inline-status">押すボタンはここだけです。入口ワードも自動で使って、Step 2の候補を作ります。</div>
-          </div>
+          <details class="optional-fields">
+            <summary>年を指定する（任意）</summary>
+            <label class="field">
+              <span>商品に入れる年</span>
+              <input id="yearInput" type="number" min="2025" max="2032" placeholder="例: 2026">
+              <small>年入りの商品を狙う時だけ入力します。</small>
+            </label>
+          </details>
 
           <div class="paste-box compact-box search-seed-box">
             <div class="mini-heading">
               <span>需要の入口ワード（自動で使います）</span>
               <span id="searchSeedCount" class="soft-pill">読み込み中</span>
             </div>
-            <p class="box-help">ここは見るだけです。率は「検索数 ÷ 商品数」です。上の「1 ここを押して候補を作る」を押すと、検索数と率がよいワードを材料として自動で使います。ここに出た語句は最終候補ではありません。</p>
+            <p class="box-help">ここは見るだけです。「候補を自動で探す」を押すと、検索数と率がよいワードを材料として使います。ここに出た語句は最終候補ではありません。</p>
             <div id="searchSeedList" class="search-seed-list"></div>
             <div id="searchSeedStatus" class="inline-status">商品を選ぶと、近い入口ワードを表示します。操作は不要です。</div>
           </div>
@@ -157,7 +143,7 @@
           </div>
 
           <label class="field advanced-only">
-            <span>Step 2に表示する候補数</span>
+            <span>調査候補の表示数</span>
             <input id="limitInput" type="number" min="10" max="250" value="80">
             <small>多すぎると調査が重くなるので、最初は80前後で十分です。</small>
           </label>
@@ -195,7 +181,7 @@
             </label>
             <div class="button-row">
               <button id="broadExtractBtn" type="button" class="ghost-btn" data-optional="任意">売れ筋ワードを抽出</button>
-              <button id="broadApplyBtn" type="button" class="ghost-btn" data-optional="任意">Step 2の材料に入れる</button>
+              <button id="broadApplyBtn" type="button" class="ghost-btn" data-optional="任意">調査候補の材料に入れる</button>
             </div>
             <div id="broadHintList" class="hint-list"></div>
             <div id="broadStatus" class="inline-status">大きめ検索の売れ筋ワードを先に拾えます。</div>
@@ -207,25 +193,40 @@
             <small>商標・著作権が怪しい言葉を入れると、候補や結果で警告します。</small>
           </label>
 
-          <div class="auto-update-note advanced-only">Step 2の候補は自動更新しません。条件を変えたら「おすすめ自動探索をはじめる」を押します。</div>
+          <div class="auto-update-note advanced-only">候補は自動更新しません。条件を変えたら「候補を自動で探す」を押します。</div>
+
+          <div id="candidateDiscoveryAction" class="start-action-box step-primary-action">
+            <button id="trendAutoBtn" type="button" class="primary-btn full-width">候補を自動で探す</button>
+            <div class="connection-strip">
+              <span>外部サイト自動取得</span>
+              <span id="quickExtensionBadge" class="status-badge">確認中</span>
+            </div>
+            <div id="quickExtensionStatus" class="inline-status">実Chromeで開くと接続状態を確認できます。</div>
+            <div id="trendStatus" class="inline-status">商品条件と需要の入口ワードから、調査候補を作ります。</div>
+          </div>
         </aside>
 
         <section class="panel candidates-panel">
           <div class="panel-heading row-heading">
             <div>
-              <p class="section-kicker">Step 2</p>
-              <h2>次にeRankで調べる候補</h2>
-              <p class="panel-help">Step 1で作った調査候補です。ここはまだ結果ではありません。日付軸ノイズや、tshirt gift / wedding shirt のように広すぎる入口語は自動で外します。</p>
+              <p class="section-kicker">2 / 5</p>
+              <h2>候補を確認する</h2>
+              <p class="panel-help">上で作った調査候補です。ここはまだ最終結果ではありません。日付軸ノイズや、tshirt gift / wedding shirt のように広すぎる入口語は自動で外します。</p>
             </div>
             <span class="count-badge"><strong id="candidateCount">0</strong><small>候補</small></span>
           </div>
 
-          <div class="button-row candidate-actions advanced-only">
-            <button id="buildNextRoundBtn" type="button" class="ghost-btn" data-optional="任意">売れた語句から追加候補</button>
-            <button id="copyReadyBtn" type="button" class="ghost-btn" data-optional="任意">調査欄へ候補を入れる</button>
-          </div>
-          <button id="candidateErankBtn" type="button" class="primary-btn full-width">2 eRankで検索数を見る</button>
-          <div class="mini-guide">eRankで検索数・クリック・競合・KDを見て、EverBeeへ進める語句を絞ります。</div>
+          <section id="broadEventDiscovery" class="broad-event-discovery" hidden>
+            <div class="mini-heading">
+              <span>大型イベント分解</span>
+              <span class="soft-pill">5レーン / 40候補</span>
+            </div>
+            <div id="discoveryLaneTabs" class="discovery-lane-tabs" role="tablist" aria-label="探索レーン"></div>
+            <div id="discoveryStrategySummary" class="discovery-strategy-summary"></div>
+          </section>
+
+          <div id="candidateList" class="candidate-list"></div>
+
           <dl class="badge-guide" aria-label="候補バッジの見方">
             <div><dt>調査OK</dt><dd>次のeRank確認に入れてよい候補です。人気確定ではありません。</dd></div>
             <div><dt>2 words</dt><dd>キーワードの単語数です。短すぎる語句は広すぎる場合があります。</dd></div>
@@ -233,7 +234,14 @@
             <div><dt>eRank確認済み</dt><dd>eRankの数字を取得済みです。下のeRank結果で需要点を見ます。</dd></div>
           </dl>
 
-          <div id="candidateList" class="candidate-list"></div>
+          <div class="button-row candidate-actions advanced-only">
+            <button id="buildNextRoundBtn" type="button" class="ghost-btn" data-optional="任意">売れた語句から追加候補</button>
+            <button id="copyReadyBtn" type="button" class="ghost-btn" data-optional="任意">調査欄へ候補を入れる</button>
+          </div>
+          <div class="step-primary-action">
+            <div class="mini-guide">候補を確認したら、eRankで検索数・クリック・競合・KDを調べます。</div>
+            <button id="candidateErankBtn" type="button" class="primary-btn full-width">eRankで検索数を見る</button>
+          </div>
         </section>
 
         <aside class="panel research-panel">
@@ -251,9 +259,9 @@
             <p class="box-help">「調査欄へ候補を入れる」を押すと、この欄に調査対象が入ります。「この欄をEverBee取得」を押すと、その欄の中身だけを順番に検索します。</p>
             <ul class="preflight-list">
               <li>Chrome拡張を読み込み済み</li>
-              <li>このページを 127.0.0.1:3021 で開いている</li>
+              <li>このページを 127.0.0.1:4173 で開いている</li>
               <li>EverBeeにログイン済み</li>
-              <li>拡張バージョン 1.18</li>
+              <li>拡張バージョン 1.26</li>
             </ul>
 
             <label class="field">
@@ -268,7 +276,7 @@
             </label>
 
             <div class="button-row advanced-only">
-              <button id="fillResearchJobBtn" type="button" class="ghost-btn" data-optional="再入力">Step 2の候補を入れる</button>
+              <button id="fillResearchJobBtn" type="button" class="ghost-btn" data-optional="再入力">調査候補を入れ直す</button>
               <button id="clearResearchJobBtn" type="button" class="ghost-btn" data-optional="任意">欄をクリア</button>
             </div>
 
@@ -293,7 +301,7 @@
 
           <div class="two-col advanced-only">
             <label class="field">
-              <span>Listings / EverBeeの商品数</span>
+              <span>Listings Analyzed / EverBee参考値（競合判定には不使用）</span>
               <input id="listingsInput" inputmode="numeric" placeholder="1250">
             </label>
             <label class="field">
@@ -355,6 +363,26 @@
             </div>
           </div>
 
+          <div class="paste-box compact-box advanced-only">
+            <div class="mini-heading">
+              <span>Etsy公式 Marketplace Insights（任意）</span>
+            </div>
+            <div class="two-col">
+              <label class="field">
+                <span>30日検索数</span>
+                <input id="etsySearchesInput" inputmode="numeric" placeholder="180">
+              </label>
+              <label class="field">
+                <span>掲載数</span>
+                <input id="etsyListingsInput" inputmode="numeric" placeholder="9000">
+              </label>
+            </div>
+            <label class="field">
+              <span>関連語</span>
+              <textarea id="etsyRelatedTermsInput" rows="3" placeholder="spooky season shirt, ghost teacher shirt"></textarea>
+            </label>
+          </div>
+
           <label class="field advanced-only">
             <span>Notes</span>
             <textarea id="notesInput" rows="3"></textarea>
@@ -377,19 +405,18 @@
       <section class="erank-section">
         <div class="results-heading">
           <div>
-            <p class="section-kicker">Step 3 - eRankの結果</p>
-            <h2>eRankで見つけた需要キーワード</h2>
-            <p class="panel-help">検索数やクリックがある語句です。ここで良さそうな語句だけ、次にEverBeeで売上を確認します。</p>
+            <p class="section-kicker">3 / 5</p>
+            <h2>eRankの需要結果を確認する</h2>
+            <p class="panel-help">検索数やクリックがある語句を確認し、良さそうな語句だけEtsy公式データで確かめます。</p>
           </div>
           <div class="heading-actions">
-            <span class="count-badge"><strong id="erankCount">0</strong><small>語句</small></span>
+            <span class="count-badge"><strong id="erankCount">0</strong><small>eRank結果</small></span>
             <button id="downloadErankCsvBtn" type="button" class="ghost-btn" data-optional="保存">eRank結果CSV保存</button>
-            <button id="erankToEverbeeBtn" type="button" class="primary-btn">3 EverBeeで売上を確認する</button>
           </div>
         </div>
         <div class="service-note">
-          <strong>次はEverBeeです。</strong>
-          <span>売上確認にはChrome拡張とEverBeeログインを使います。EverBeeを開ける状態にしてから、3のボタンを押します。</span>
+          <strong>次はEtsy公式です。</strong>
+          <span>eRankで需要が確認できた候補を、Marketplace Insightsの直近30日データで確かめます。</span>
         </div>
         <div class="metric-glossary">
           <span><strong>Search</strong> 検索されている量</span>
@@ -406,19 +433,69 @@
         </div>
         <div id="erankSummary" class="research-summary"></div>
         <div id="erankResultsList" class="erank-results-list"></div>
+        <div id="marketplaceStartAction" class="step-primary-action">
+          <button id="marketplaceStartBtn" type="button" class="primary-btn full-width">Etsy公式確認を自動実行</button>
+          <div id="marketplaceStartStatus" class="inline-status">eRank結果が入ると利用できます。</div>
+        </div>
+      </section>
+
+      <section id="marketplaceInsightPanel" class="marketplace-section">
+        <div class="results-heading">
+          <div>
+            <p class="section-kicker">4 / 5</p>
+            <h2>Etsy公式の結果を確認する</h2>
+            <p class="panel-help">直近30日の検索数、掲載数、関連語を取り込み、EverBeeで売上を見る候補を絞ります。</p>
+          </div>
+          <span id="marketplaceAccessBadge" class="soft-pill">週15回無料</span>
+        </div>
+        <div id="marketplaceModeControl" class="marketplace-mode-control" role="group" aria-label="Marketplace Insightsの利用プラン">
+          <button id="marketplaceFreeModeBtn" type="button" class="is-active" data-marketplace-mode="free" aria-pressed="true">無料 15</button>
+          <button id="marketplacePlusModeBtn" type="button" data-marketplace-mode="plus" aria-pressed="false">Etsy Plus 段階式</button>
+        </div>
+        <p id="marketplacePlanHelp" class="marketplace-plan-help">無料枠を入口5・検証7・予備3へ配分します。検索は常に1語ずつです。</p>
+        <div class="marketplace-plan-stats">
+          <div><small>取得済み</small><strong id="marketplacePlanCount">0 / 15</strong></div>
+          <div><small>キュー残り</small><strong id="marketplacePlanRemaining">0</strong></div>
+          <div><small>Etsy利用枠</small><strong id="marketplaceOfficialRemaining">未取得</strong></div>
+        </div>
+        <div id="marketplaceAdaptiveStatus" class="marketplace-adaptive-status" hidden>
+          <span><small>候補プール</small><strong id="marketplaceCandidatePoolCount">0 / 200</strong></span>
+          <span><small>関連深掘り</small><strong id="marketplaceFollowUpCount">0 / 40</strong></span>
+          <span><small>ラウンド</small><strong id="marketplaceResearchRound">0</strong></span>
+          <span><small>探索状態</small><strong id="marketplaceStopReason">入口を調査中</strong></span>
+        </div>
+        <div class="marketplace-current">
+          <small>次の検索</small>
+          <strong id="marketplaceCurrentQuery">eRank結果を確認してください</strong>
+        </div>
+        <div class="marketplace-actions">
+          <button id="marketplaceBuildPlanBtn" type="button" class="ghost-btn">無料15語プランを作り直す</button>
+          <button id="marketplaceNextBtn" type="button" class="primary-btn">Etsy公式確認を自動再開</button>
+          <button id="marketplaceAutoStopBtn" type="button" class="danger-btn" hidden>自動確認を停止</button>
+          <button id="marketplaceCaptureBtn" type="button" class="ghost-btn">表示中の結果を取り込む</button>
+          <button id="marketplaceNextBatchBtn" type="button" class="ghost-btn">次の5語を追加</button>
+          <button id="marketplaceSkipBtn" type="button" class="text-btn">この語句をスキップ</button>
+        </div>
+        <ol id="marketplaceQueue" class="marketplace-queue"></ol>
+        <div id="marketplaceStatus" class="inline-status">eRank結果を確認すると、Etsy公式で調べる候補が準備されます。</div>
+        <div id="marketplaceResultsList" class="marketplace-results-list"></div>
+        <div class="step-primary-action">
+          <button id="erankToEverbeeBtn" type="button" class="primary-btn full-width">EverBeeで売上を確認する</button>
+          <div id="everbeeQueueStatus" class="inline-status">Etsy公式結果を取り込むと、その候補を優先して売上確認します。</div>
+        </div>
       </section>
 
       <section class="results-section">
         <div class="results-heading">
           <div>
-            <p class="section-kicker">Step 4 - EverBeeの結果</p>
-            <h2>EverBeeで売上確認した結果</h2>
-            <p class="panel-help">ここがMarket Finderの最終結果です。良い候補を選ぶと、EtsyMiraiProducerへ渡しやすい主役名詞を確認できます。</p>
+            <p class="section-kicker">5 / 5</p>
+            <h2>おすすめキーワード</h2>
+            <p class="panel-help">eRank、Etsy公式、EverBeeの根拠をまとめた最終結果です。優先順位と主役名詞を確認できます。</p>
           </div>
           <div class="heading-actions">
             <div class="legend">
-              <span>A: すぐ商品化候補</span>
-              <span>B: 有望</span>
+              <span>A: 直接テスト候補</span>
+              <span>B: 小さく試す候補</span>
               <span>C: 派生探索・追加確認</span>
               <span>D: 除外候補</span>
             </div>
@@ -426,15 +503,15 @@
           </div>
         </div>
         <div class="metric-glossary">
-          <span><strong>狙い目スコア</strong> 商品化しやすさ</span>
-          <span><strong>Listings</strong> 競合数</span>
-          <span><strong>Sales</strong> 上位商品の月間販売数</span>
-          <span><strong>Revenue</strong> 上位商品の売上</span>
-          <span><strong>Age</strong> 売れている商品の出品期間</span>
-          <span><strong>eRank</strong> 検索需要と競合の補助指標</span>
+          <span><strong>Opportunity</strong> A-Dのテスト優先度</span>
+          <span><strong>Confidence</strong> 根拠の完全性と鮮度</span>
+          <span><strong>Selling</strong> 見えている範囲で売れている商品数</span>
+          <span><strong>Recent</strong> 18か月以内で売れている商品数</span>
+          <span><strong>Median Sales</strong> 複数商品の月販売中央値</span>
+          <span><strong>eRank</strong> 検索需要と供給の指標</span>
           <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
-          <span><strong>Sales/1000</strong> 競合1,000件あたりの月販売。5以上を強め、3未満を弱めに判定</span>
-          <span><strong>商品数</strong> Aは原則5,000件以下。10,000件以上は直接商品化ではなく派生探索扱い</span>
+          <span><strong>Top Share</strong> 70%以上は単一ヒットへの集中としてAから除外</span>
+          <span><strong>Freshness</strong> eRankとEverBeeが45日以内の時だけA/B候補</span>
         </div>
         <div id="resultsList" class="results-list"></div>
       </section>
@@ -444,11 +521,11 @@
           <div>
             <p class="section-kicker">予備機能 - Etsy出品準備</p>
             <h2>Etsy用タイトル・タグ設計</h2>
-            <p class="panel-help">Step 4の良い候補を、3つの役割に整理して、Etsyのタイトルとタグに変換します。</p>
+            <p class="panel-help">売上確認後の良い候補を、3つの役割に整理して、Etsyのタイトルとタグに変換します。</p>
           </div>
           <div class="button-row seo-actions">
-            <button id="autoBucketBtn" type="button" class="ghost-btn" data-optional="任意">4 結果から語句を整理</button>
-            <button id="buildSeoPlanBtn" type="button" class="primary-btn" data-optional="任意">5 Etsy用タイトル・タグを作る</button>
+            <button id="autoBucketBtn" type="button" class="ghost-btn" data-optional="任意">結果から語句を整理</button>
+            <button id="buildSeoPlanBtn" type="button" class="primary-btn" data-optional="任意">Etsy用タイトル・タグを作る</button>
           </div>
         </div>
 
@@ -556,6 +633,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260524-2"></script>
+    <script type="module" src="./src/app.js?v=20260720-31"></script>
   </body>
 </html>

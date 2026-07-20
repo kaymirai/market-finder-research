@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "EtsyMirai Research Helper",
-  "version": "1.19",
+  "version": "1.26",
   "description": "Market Finderのキーワード調査とEtsy商品画像取得を補助します。",
   "permissions": [
     "activeTab",

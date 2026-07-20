@@ -11,9 +11,31 @@
         topRevenue: string
         averagePrice: string
         listingAge: string
+        visibleListingCount: string
+        sellingListingCount: string
+        recentSellingListingCount: string
+        medianMonthlySales: string
+        medianMonthlyRevenue: string
+        totalVisibleMonthlySales: string
+        topSalesShare: string
+        medianListingAgeMonths: string
+        everbeeCheckedAt: string
         notes: string
         listingSnippets: string[]
+        productRows: EverbeeProductRow[]
         rawText: string
+    }
+
+    type EverbeeProductRow = {
+        listingId: string
+        title: string
+        totalSales: number
+        monthlySales: number
+        monthlyRevenue: number
+        listingAge: string
+        listingAgeMonths: number | null
+        price: number
+        shopName: string
     }
 
     type EditableSearchField = HTMLInputElement | HTMLTextAreaElement | HTMLElement
@@ -267,6 +289,66 @@
         price: number
     }
 
+    function extractEverbeeProductRows(): EverbeeProductRow[] {
+        const rowsById = new Map<string, {
+            listingId: string
+            rowIndex: number
+            fields: Record<string, string>
+        }>()
+        const visibleRows = Array.from(document.querySelectorAll('[role="row"][data-id]')) as HTMLElement[]
+
+        for (const row of visibleRows) {
+            const listingId = normalizeText(row.getAttribute('data-id') ?? '')
+            if (!listingId) continue
+
+            const current = rowsById.get(listingId) ?? {
+                listingId,
+                rowIndex: Number(row.getAttribute('data-rowindex') ?? Number.MAX_SAFE_INTEGER),
+                fields: {},
+            }
+            const cells = Array.from(row.querySelectorAll('[role="cell"][data-field]')) as HTMLElement[]
+            for (const cell of cells) {
+                const field = cell.getAttribute('data-field') ?? ''
+                const value = normalizeText(cell.innerText || cell.textContent || '')
+                if (field && value && !current.fields[field]) current.fields[field] = value
+            }
+            rowsById.set(listingId, current)
+        }
+
+        return Array.from(rowsById.values())
+            .map((row) => {
+                const title = normalizeText(row.fields.product ?? '')
+                const totalSales = parseDisplayNumber(row.fields.totalSales)
+                const monthlySales = parseDisplayNumber(row.fields.sales)
+                const monthlyRevenue = parseDisplayNumber(row.fields.revenue)
+                const listingAge = normalizeText(row.fields.listingAge ?? '')
+                const price = parseDisplayNumber(row.fields.price)
+                if (!title || totalSales === null || monthlySales === null || monthlyRevenue === null || !isAgeCell(listingAge) || price === null) {
+                    return null
+                }
+
+                return {
+                    listingId: row.listingId,
+                    title,
+                    totalSales,
+                    monthlySales,
+                    monthlyRevenue,
+                    listingAge,
+                    listingAgeMonths: parseAgeMonths(listingAge),
+                    price,
+                    shopName: normalizeText(row.fields.shopName ?? ''),
+                    rowIndex: row.rowIndex,
+                }
+            })
+            .filter((row): row is EverbeeProductRow & { rowIndex: number } => row !== null)
+            .sort((a, b) => b.monthlySales - a.monthlySales
+                || b.monthlyRevenue - a.monthlyRevenue
+                || b.totalSales - a.totalSales
+                || a.rowIndex - b.rowIndex)
+            .slice(0, 24)
+            .map(({ rowIndex: _rowIndex, ...row }) => row)
+    }
+
     function parseAgeMonths(value: string) {
         const numberMatch = value.match(/\d+(?:\.\d+)?/)
         if (!numberMatch) return null
@@ -280,6 +362,14 @@
 
     function rowAgeMonths(row: VisibleAnalyticsRow) {
         return parseAgeMonths(row.listingAge)
+    }
+
+    function median(values: number[]) {
+        if (values.length === 0) return null
+        const sorted = [...values].sort((a, b) => a - b)
+        const middle = Math.floor(sorted.length / 2)
+        if (sorted.length % 2 === 1) return sorted[middle]
+        return (sorted[middle - 1] + sorted[middle]) / 2
     }
 
     function opportunityScore(row: VisibleAnalyticsRow) {
@@ -333,6 +423,45 @@
         }
     }
 
+    function summarizeVisibleProductAnalyticsRows(rows: VisibleAnalyticsRow[]) {
+        const picked = pickBestRows(rows)
+        const representativeRow = picked.opportunity ?? picked.bySales ?? picked.byRevenue
+        const revenues = rows.map((row) => row.revenue)
+        const monthlySales = rows.map((row) => row.monthlySales)
+        const listingAges = rows.map(rowAgeMonths).filter((value): value is number => value !== null)
+        const sellingRows = rows.filter((row) => row.monthlySales > 0)
+        const recentSellingRows = sellingRows.filter((row) => {
+            const age = rowAgeMonths(row)
+            return age !== null && age <= 18
+        })
+        const prices = rows.map((row) => row.price)
+        const bestRevenue = picked.byRevenue?.revenue ?? 0
+        const bestSales = picked.bySales?.monthlySales ?? 0
+        const bestRevenueAge = picked.byRevenue?.listingAge ?? ''
+        const bestSalesAge = picked.bySales?.listingAge ?? ''
+        const totalVisibleMonthlySales = monthlySales.length > 0
+            ? monthlySales.reduce((sum, value) => sum + value, 0)
+            : null
+
+        return {
+            topMonthlySales: rows.length > 0 ? String(bestSales) : '',
+            topRevenue: rows.length > 0 ? String(bestRevenue) : '',
+            averagePrice: prices.length > 0 ? (prices.reduce((sum, value) => sum + value, 0) / prices.length).toFixed(2) : '',
+            listingAge: representativeRow?.listingAge ?? rows[0]?.listingAge ?? '',
+            visibleListingCount: rows.length > 0 ? String(rows.length) : '',
+            sellingListingCount: rows.length > 0 ? String(sellingRows.length) : '',
+            recentSellingListingCount: rows.length > 0 ? String(recentSellingRows.length) : '',
+            medianMonthlySales: monthlySales.length > 0 ? String(median(monthlySales)) : '',
+            medianMonthlyRevenue: revenues.length > 0 ? String(median(revenues)) : '',
+            totalVisibleMonthlySales: totalVisibleMonthlySales === null ? '' : String(totalVisibleMonthlySales),
+            topSalesShare: totalVisibleMonthlySales && bestSales >= 0 ? String(bestSales / totalVisibleMonthlySales) : '',
+            medianListingAgeMonths: listingAges.length > 0 ? String(median(listingAges)) : '',
+            notes: rows.length > 0
+                ? `EverBee visible rows=${rows.length}; picked=${picked.source}; marketMaxRevenue=${bestRevenue}; marketMaxSales=${bestSales}; maxRevenueAge=${bestRevenueAge}; maxSalesAge=${bestSalesAge}`
+                : '',
+        }
+    }
+
     function extractVisibleProductAnalyticsMetrics(rawBodyText: string) {
         const rows: VisibleAnalyticsRow[] = []
         const lines = rawBodyText
@@ -379,24 +508,7 @@
             index = cursor + 1
         }
 
-        const picked = pickBestRows(rows)
-        const representativeRow = picked.opportunity ?? picked.bySales ?? picked.byRevenue
-        const revenues = rows.map((row) => row.revenue)
-        const prices = rows.map((row) => row.price)
-        const bestRevenue = picked.byRevenue?.revenue ?? 0
-        const bestSales = picked.bySales?.monthlySales ?? 0
-        const bestRevenueAge = picked.byRevenue?.listingAge ?? ''
-        const bestSalesAge = picked.bySales?.listingAge ?? ''
-
-        return {
-            topMonthlySales: representativeRow ? String(representativeRow.monthlySales) : '',
-            topRevenue: representativeRow ? String(representativeRow.revenue) : '',
-            averagePrice: prices.length > 0 ? (prices.reduce((sum, value) => sum + value, 0) / prices.length).toFixed(2) : '',
-            listingAge: representativeRow?.listingAge ?? rows[0]?.listingAge ?? '',
-            notes: rows.length > 0
-                ? `EverBee visible rows=${rows.length}; picked=${picked.source}; marketMaxRevenue=${bestRevenue}; marketMaxSales=${bestSales}; maxRevenueAge=${bestRevenueAge}; maxSalesAge=${bestSalesAge}`
-                : '',
-        }
+        return summarizeVisibleProductAnalyticsRows(rows)
     }
 
     function looksLikeMetricText(value: string) {
@@ -480,12 +592,22 @@
     function extractMetrics(keyword: string): EverbeeResult {
         const rawBodyText = document.body.innerText || ''
         const bodyText = normalizeText(rawBodyText)
-        const visibleTableMetrics = extractVisibleProductAnalyticsMetrics(rawBodyText)
+        const productRows = extractEverbeeProductRows()
+        const visibleTableMetrics = productRows.length > 0
+            ? summarizeVisibleProductAnalyticsRows(productRows.map((row) => ({
+                totalSales: row.totalSales,
+                monthlySales: row.monthlySales,
+                revenue: row.monthlyRevenue,
+                listingAge: row.listingAge,
+                price: row.price,
+            })))
+            : extractVisibleProductAnalyticsMetrics(rawBodyText)
         const listingsAnalyzed = numberLike(/listings\s+analyzed\s*[:\-]?\s*(\d[\d,.]*[kKmM]?)/i, bodyText)
         const topMonthlySales = visibleTableMetrics.topMonthlySales || parseTopSalesFromVisibleRows()
         const topRevenue = visibleTableMetrics.topRevenue
         const averagePrice = visibleTableMetrics.averagePrice
         const listingAge = visibleTableMetrics.listingAge
+        const everbeeCheckedAt = new Date().toISOString()
 
         const notes = listingsAnalyzed || topMonthlySales || topRevenue
             ? `Extracted from EverBee screen${visibleTableMetrics.notes ? ` / ${visibleTableMetrics.notes}` : ''}`
@@ -498,8 +620,18 @@
             topRevenue,
             averagePrice,
             listingAge,
+            visibleListingCount: visibleTableMetrics.visibleListingCount,
+            sellingListingCount: visibleTableMetrics.sellingListingCount,
+            recentSellingListingCount: visibleTableMetrics.recentSellingListingCount,
+            medianMonthlySales: visibleTableMetrics.medianMonthlySales,
+            medianMonthlyRevenue: visibleTableMetrics.medianMonthlyRevenue,
+            totalVisibleMonthlySales: visibleTableMetrics.totalVisibleMonthlySales,
+            topSalesShare: visibleTableMetrics.topSalesShare,
+            medianListingAgeMonths: visibleTableMetrics.medianListingAgeMonths,
+            everbeeCheckedAt,
             notes,
-            listingSnippets: extractListingSnippets(keyword),
+            listingSnippets: productRows.length > 0 ? productRows.map((row) => row.title) : extractListingSnippets(keyword),
+            productRows,
             rawText: bodyText.slice(0, 1500),
         }
     }
@@ -524,6 +656,11 @@
         await waitForLikelyResults(keyword)
         return extractMetrics(keyword)
     }
+
+    const testHooks = (globalThis as typeof globalThis & {
+        __ETSY_MIRAI_TEST_HOOKS__?: Record<string, unknown>
+    }).__ETSY_MIRAI_TEST_HOOKS__
+    if (testHooks) testHooks.extractEverbeeProductRows = extractEverbeeProductRows
 
     chrome.runtime.onMessage.addListener((request: EverbeeRunRequest, _sender, sendResponse) => {
         if (request.action !== 'EVERBEE_RUN_KEYWORD') return false
