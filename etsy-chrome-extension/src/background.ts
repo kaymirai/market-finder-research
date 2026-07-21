@@ -27,6 +27,7 @@
         erankKeywordDifficulty?: string
         erankTrend?: string
         erankCheckedAt?: string
+        erankAttemptedAt?: string
         etsySearches30d?: string
         etsyListings?: string
         etsyRelatedTerms?: string[]
@@ -1397,7 +1398,11 @@
             )
             if (!marketActive || runId !== marketRunId) return
             if (response.ok && response.result) {
-                marketResults.push(sanitizeMarketResult(response.result))
+                const result = sanitizeMarketResult(response.result)
+                if (marketMode === 'erank' && !result.erankAttemptedAt) {
+                    result.erankAttemptedAt = result.erankCheckedAt || new Date().toISOString()
+                }
+                marketResults.push(result)
             } else {
                 marketResults.push(buildFailedMarketResult(keyword, response.error || `${marketMode === 'erank' ? 'eRank' : 'EverBee'}調査に失敗しました。`))
             }
@@ -1420,6 +1425,7 @@
     }
 
     function buildFailedMarketResult(keyword: string, error: string): MarketResult {
+        const attemptedAt = new Date().toISOString()
         return {
             keyword,
             listingsAnalyzed: '',
@@ -1444,6 +1450,7 @@
             erankKeywordDifficulty: '',
             erankTrend: '',
             erankCheckedAt: '',
+            erankAttemptedAt: marketMode === 'erank' ? attemptedAt : '',
             notes: error,
             error,
         }

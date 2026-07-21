@@ -106,7 +106,7 @@ test('shows product-level EverBee sales in monthly-sales order with recent winne
   assert.doesNotMatch(app, /sales: result\.topMonthlySales/)
 })
 
-test('automatically routes cross-niche candidates before releasing final results', () => {
+test('automatically routes cross-niche candidates while preserving earlier results', () => {
   assert.match(html, /id="crossNicheSection"/)
   assert.match(html, /id="crossNicheList"/)
   assert.match(html, /id="crossNicheStatus"/)
@@ -121,11 +121,14 @@ test('automatically routes cross-niche candidates before releasing final results
   assert.match(app, /isCrossNicheWorkflowPending/)
   assert.match(app, /state\.crossNicheWorkflow/)
   assert.match(app, /const needsAdaptiveMigration = !isCrossNicheWorkflowPending\(state\.crossNicheWorkflow\)/)
-  assert.match(app, /再調査が終わるまで最終おすすめを確定しません/)
-  assert.match(app, /if \(isCrossNicheWorkflowPending\(state\.crossNicheWorkflow\)\)/)
+  assert.doesNotMatch(app, /再調査が終わるまで最終おすすめを確定しません/)
+  assert.match(app, /初回結果は下に残しています/)
+  assert.match(html, /id="researchRoundTabs"/)
+  assert.match(html, /id="researchRoundSummary"/)
+  assert.match(app, /state\.researchRounds\.selectedRoundId = 'all'/)
   assert.match(app, /preserveCrossNicheResearch/)
   assert.match(app, /if \(!isCrossNicheWorkflowPending\(state\.crossNicheWorkflow\)\) \{\s*if \(added > 0\) generateCandidates/)
-  assert.match(app, /candidate\.queryStrategy === 'cross-niche'\s*\? candidate\.keyword\s*:\s*erankProbeKeyword\(candidate\.keyword\)/)
+  assert.match(app, /buildErankQueryPlan/)
   assert.match(app, /setFlowMode\('auto'\)/)
   assert.match(app, /document\.querySelector\('\.candidates-panel'\)\?\.scrollIntoView/)
   assert.match(app, /crossNicheParent/)
@@ -145,13 +148,11 @@ test('explains when a safe eRank hold candidate is being rechecked on Etsy', () 
   assert.match(app, /officialProbe/)
 })
 
-test('separates event-specific results from evergreen markets and shows cross-event history', () => {
+test('keeps event track metadata and shows cross-event history', () => {
   assert.match(app, /researchedMarketHistory/)
   assert.match(app, /classifyEventMarketTrack/)
   assert.match(app, /prioritizeEventCandidates/)
-  assert.match(app, /splitResearchRowsByEventTrack/)
-  assert.match(app, /イベント固有候補/)
-  assert.match(app, /通年クロスニッチ候補/)
+  assert.match(app, /market-track-pill/)
   assert.match(app, /別イベントで調査済み/)
   assert.match(app, /'Market Track'/)
   assert.match(app, /'Research Event'/)
@@ -159,11 +160,32 @@ test('separates event-specific results from evergreen markets and shows cross-ev
   assert.match(styles, /\.result-track-group/)
 })
 
+test('shows direct and base eRank provenance including failed captures', () => {
+  assert.match(html, /id="erankQueryPlanSummary"/)
+  assert.match(html, /id="candidateRoundTabs"/)
+  assert.match(app, /if \(!preserveMarketplacePlan\) beginInitialResearchRound\(\)/)
+  assert.match(app, /完全語句/)
+  assert.match(app, /基底語/)
+  assert.match(app, /検索済み・数値取得失敗/)
+  assert.match(app, /erankCaptureStateRows/)
+})
+
+test('separates product tests, exploration candidates, and exclusions', () => {
+  assert.match(html, /調査結果と商品化候補/)
+  assert.match(app, /title: '商品化テスト候補'/)
+  assert.match(app, /title: '追加探索候補'/)
+  assert.match(app, /title: '除外候補'/)
+  assert.match(app, /collapsible: true/)
+  assert.doesNotMatch(html, /<h2>おすすめキーワード<\/h2>/)
+})
+
 test('persists extension results and restores completed results explicitly', () => {
   assert.match(app, /extensionResultsImportMode/)
   assert.match(app, /const importMode = extensionResultsImportMode/)
   assert.match(app, /addResearchRows\(importedRows\)/)
   assert.match(app, /persistMarketFinderState\(\)/)
+  assert.match(app, /function migrateLegacyResearchRounds\(\)/)
+  assert.match(app, /旧形式の保存結果から初回ラウンドを復元/)
 })
 
 test('separates restored results from the current research run', () => {

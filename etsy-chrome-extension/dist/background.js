@@ -1257,7 +1257,11 @@
             if (!marketActive || runId !== marketRunId)
                 return;
             if (response.ok && response.result) {
-                marketResults.push(sanitizeMarketResult(response.result));
+                const result = sanitizeMarketResult(response.result);
+                if (marketMode === 'erank' && !result.erankAttemptedAt) {
+                    result.erankAttemptedAt = result.erankCheckedAt || new Date().toISOString();
+                }
+                marketResults.push(result);
             }
             else {
                 marketResults.push(buildFailedMarketResult(keyword, response.error || `${marketMode === 'erank' ? 'eRank' : 'EverBee'}調査に失敗しました。`));
@@ -1281,6 +1285,7 @@
         return runKeywordInEverbeeTab(tabId, keyword);
     }
     function buildFailedMarketResult(keyword, error) {
+        const attemptedAt = new Date().toISOString();
         return {
             keyword,
             listingsAnalyzed: '',
@@ -1305,6 +1310,7 @@
             erankKeywordDifficulty: '',
             erankTrend: '',
             erankCheckedAt: '',
+            erankAttemptedAt: marketMode === 'erank' ? attemptedAt : '',
             notes: error,
             error,
         };

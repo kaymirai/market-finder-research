@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { runInNewContext } from 'node:vm'
 
 const backgroundSource = await readFile(new URL('../dist/background.js', import.meta.url), 'utf8')
+const backgroundTypeScriptSource = await readFile(new URL('../src/background.ts', import.meta.url), 'utf8')
 const bridgeSource = await readFile(new URL('../dist/marketFinderBridge.js', import.meta.url), 'utf8')
 const everbeeSource = await readFile(new URL('../dist/everbeeContent.js', import.meta.url), 'utf8')
 
@@ -17,6 +18,11 @@ function createChromeMock() {
     },
   }
 }
+
+test('records eRank attempts even when metric capture fails', () => {
+  assert.match(backgroundTypeScriptSource, /erankAttemptedAt\?: string/)
+  assert.match(backgroundTypeScriptSource, /erankAttemptedAt: marketMode === 'erank' \? attemptedAt : ''/)
+})
 
 function visibleElement(innerText = '') {
   return {

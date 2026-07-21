@@ -11,6 +11,7 @@ import {
   buildKeywordClusterKey,
   buildSeoPlanFromBuckets,
   clusterKeywordCandidates,
+  classifyBuyerIntentPhrase,
   classifyKeywordBucket,
   explainEverbeeScore,
   generateBroadEventCandidates,
@@ -201,6 +202,21 @@ test('round-trips event market track metadata through the research CSV parser', 
   assert.equal(rows[0].historyClusterKey, 'teacher')
 })
 
+test('parses research round, eRank provenance, and buyer intent CSV columns', () => {
+  const [row] = parseEverbeeRows([
+    'Keyword,Research Round,Round Type,Round Depth,Round Status,eRank Query,eRank Query Kind,eRank Source Keywords JSON,eRank Capture Status,eRank Attempted At,Buyer Intent Axes JSON,Wearer Intent,Recipient Role,Giver Role,Occasion,Personalization',
+    'librarian gift from students shirt,cross-niche-1,cross-niche,1,complete,librarian gift from students shirt,direct,"[""librarian shirt""]",captured,2026-07-22T10:00:00.000Z,"[""Occupation"",""Relationship/recipient"",""Style/product""]",recipient,librarian,students,appreciation,name',
+  ].join('\n'))
+
+  assert.equal(row.researchRoundId, 'cross-niche-1')
+  assert.equal(row.queryKind, 'direct')
+  assert.deepEqual(row.sourceKeywords, ['librarian shirt'])
+  assert.deepEqual(row.buyerIntentAxes, ['Occupation', 'Relationship/recipient', 'Style/product'])
+  assert.equal(row.wearerIntent, 'recipient')
+  assert.equal(row.recipientRole, 'librarian')
+  assert.equal(row.giverRole, 'students')
+})
+
 test('keeps a saturated multi-seller market as a cross-niche exploration parent', () => {
   const parents = selectCrossNicheParentMarkets([{
     keyword: 'cat shirt',
@@ -325,6 +341,52 @@ test('builds cross-niche candidates from repeated recent selling-title phrases',
   assert.equal(candidate.depth, 1)
   assert.ok(candidate.sources.includes('everbee-title'))
   assert.equal(candidate.verdict, 'needs-research')
+})
+
+test('filters title noise and one-off names from cross-niche candidates', () => {
+  const drilldown = buildCrossNicheDrilldown([{
+    keyword: 'teacher shirt',
+    listingsAnalyzed: 50000,
+    productRows: [
+      { title: 'Comfort Colors Teacher Shirt', monthlySales: 40, listingAgeMonths: 6 },
+      { title: 'Colors Teacher Shirt', monthlySales: 25, listingAgeMonths: 8 },
+      { title: 'Carl Teacher Shirt', monthlySales: 18, listingAgeMonths: 5 },
+      { title: 'Math Teacher Shirt', monthlySales: 16, listingAgeMonths: 7 },
+    ],
+  }], SCORE_OPTIONS)
+
+  assert.equal(drilldown.candidates.some((row) => /\b(?:comfort|colors|carl)\b/.test(row.keyword)), false)
+  assert.equal(drilldown.candidates.some((row) => row.keyword === 'math teacher shirt'), false)
+})
+
+test('keeps repeated sold-title modifiers and Etsy-confirmed recipient intent', () => {
+  const drilldown = buildCrossNicheDrilldown([{
+    keyword: 'librarian shirt',
+    listingsAnalyzed: 50000,
+    etsyRelatedTerms: 'school librarian retirement shirt, librarian gift from students shirt',
+    productRows: [
+      { title: 'Book Club Librarian Shirt', monthlySales: 40, listingAgeMonths: 6 },
+      { title: 'Retro Book Club Librarian Shirt', monthlySales: 25, listingAgeMonths: 8 },
+    ],
+  }], SCORE_OPTIONS)
+
+  assert.ok(drilldown.candidates.some((row) => row.keyword === 'book club librarian shirt'))
+  const retirement = drilldown.candidates.find((row) => row.keyword === 'school librarian retirement shirt')
+  assert.ok(retirement)
+  assert.deepEqual(retirement.buyerIntentAxes, ['Occupation', 'Life transition', 'Style/product'])
+  assert.equal(retirement.wearerIntent, 'self')
+
+  const gift = drilldown.candidates.find((row) => row.keyword === 'librarian gift from students shirt')
+  assert.ok(gift)
+  assert.equal(gift.wearerIntent, 'recipient')
+  assert.equal(gift.recipientRole, 'librarian')
+  assert.equal(gift.giverRole, 'students')
+})
+
+test('rejects generic gift intent without a specific recipient', () => {
+  assert.equal(classifyBuyerIntentPhrase('gift for her shirt').eligible, false)
+  assert.equal(classifyBuyerIntentPhrase('birthday gift shirt').eligible, false)
+  assert.equal(classifyBuyerIntentPhrase('teacher retirement gift shirt').eligible, true)
 })
 
 test('stops cross-niche expansion at depth two', () => {

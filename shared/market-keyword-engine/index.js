@@ -1111,6 +1111,27 @@ const FIELD_ALIASES = {
   expectedOpportunity: ['expected opportunity'],
   expectedConfidence: ['expected confidence'],
   sourceKeyword: ['source keyword', 'erank source keyword', 'source', '派生元'],
+  sourceKeywords: ['erank source keywords json', 'source keywords json', 'source keywords'],
+  query: ['erank query'],
+  queryKind: ['erank query kind', 'query kind'],
+  erankCaptureStatus: ['erank capture status', 'capture status'],
+  erankAttemptedAt: ['erank attempted at', 'erank searched at'],
+  researchRoundId: ['research round', 'research round id'],
+  researchRoundType: ['round type', 'research round type'],
+  researchRoundDepth: ['round depth', 'research round depth'],
+  researchRoundStatus: ['round status', 'research round status', 'research status'],
+  buyerIntentAxes: ['buyer intent axes json', 'buyer intent axes'],
+  wearerIntent: ['wearer intent', 'buyer intent mode'],
+  recipientRole: ['recipient role', 'recipient'],
+  giverRole: ['giver role', 'giver'],
+  occasion: ['occasion', 'gift occasion'],
+  personalization: ['personalization', 'personalization type'],
+  roundACount: ['round a count'],
+  roundBCount: ['round b count'],
+  roundCCount: ['round c count'],
+  roundDCount: ['round d count'],
+  roundStartReason: ['round start reason'],
+  roundStopReason: ['round stop reason'],
   notes: ['notes', 'note', 'memo', 'メモ'],
 }
 
@@ -2832,6 +2853,76 @@ function crossNicheProductTerms(category) {
   ].flatMap((term) => phraseTokens(term)))
 }
 
+const CROSS_NICHE_TITLE_NOISE = new Set([
+  'blank',
+  'canvas',
+  'color',
+  'colors',
+  'comfort',
+  'gildan',
+  'mockup',
+  'shipping',
+  'softstyle',
+])
+
+const BUYER_INTENT_VOCABULARY = {
+  Identity: ['bride', 'groom', 'student', 'veteran', 'survivor', 'dog mom', 'dog dad', 'cat mom', 'cat dad', 'book lover'],
+  Occupation: ['teacher', 'nurse', 'librarian', 'principal', 'firefighter', 'realtor', 'barber', 'accountant', 'mechanic', 'coach'],
+  'Hobby/action': ['reading', 'book club', 'pickleball', 'camping', 'fishing', 'gardening', 'baking', 'running'],
+  'Relationship/recipient': ['mom', 'dad', 'grandma', 'grandpa', 'coworker', 'friend', 'sister', 'brother', 'daughter', 'son', 'wife', 'husband'],
+  'Life transition': ['retirement', 'graduation', 'new mom', 'new dad', 'mom to be', 'dad to be', 'first time mom', 'first time dad'],
+  'Emotion/context': ['appreciation', 'birthday', 'reunion', 'memorial', 'support', 'proud'],
+  Personalization: ['personalized', 'custom', 'name', 'year', 'team name', 'group name'],
+  'Style/product': [...STYLE_ONLY_WORDS, ...Object.values(PRODUCT_FAMILY_TERMS).flat()],
+}
+
+const GROUP_INTENT_PHRASES = ['book club', 'family reunion', 'team', 'crew', 'squad', 'matching']
+const GIVER_ROLES = ['students', 'student', 'daughter', 'son', 'team member', 'coworker', 'coworkers', 'family', 'friend']
+const OCCASION_PHRASES = ['retirement', 'graduation', 'appreciation', 'birthday', 'reunion', 'wedding', 'baby shower', 'bridal shower']
+
+function phraseAppears(source, phrase) {
+  return ` ${normalizePhrase(source)} `.includes(` ${normalizePhrase(phrase)} `)
+}
+
+function firstMatchingPhrase(source, phrases) {
+  return phrases.find((phrase) => phraseAppears(source, phrase)) ?? ''
+}
+
+export function classifyBuyerIntentPhrase(keyword) {
+  const normalized = normalizePhrase(keyword)
+  const buyerIntentAxes = Object.entries(BUYER_INTENT_VOCABULARY)
+    .filter(([, phrases]) => phrases.some((phrase) => phraseAppears(normalized, phrase)))
+    .map(([axis]) => axis)
+  const rolePhrases = [
+    ...BUYER_INTENT_VOCABULARY.Occupation,
+    ...BUYER_INTENT_VOCABULARY['Relationship/recipient'],
+    ...BUYER_INTENT_VOCABULARY.Identity,
+  ]
+  const recipientRole = firstMatchingPhrase(normalized, rolePhrases)
+  const fromMatch = normalized.match(/\bfrom\s+([a-z]+(?:\s+[a-z]+)?)/)
+  const giverRole = firstMatchingPhrase(fromMatch?.[1] ?? '', GIVER_ROLES)
+  const occasion = firstMatchingPhrase(normalized, OCCASION_PHRASES)
+  const personalization = firstMatchingPhrase(normalized, BUYER_INTENT_VOCABULARY.Personalization)
+  const hasGiftIntent = /\bgifts?\b/.test(normalized)
+  const genericRecipient = /\bgift\s+for\s+(?:her|him|women|men)\b/.test(normalized)
+  const wearerIntent = hasGiftIntent || giverRole
+    ? 'recipient'
+    : GROUP_INTENT_PHRASES.some((phrase) => phraseAppears(normalized, phrase))
+      ? 'group'
+      : 'self'
+  const eligible = !genericRecipient && !(hasGiftIntent && !recipientRole)
+
+  return {
+    eligible,
+    buyerIntentAxes,
+    wearerIntent,
+    recipientRole,
+    giverRole,
+    occasion,
+    personalization,
+  }
+}
+
 function crossNicheModifier(value, parentCoreTokens, productTokens) {
   const parentSet = new Set(parentCoreTokens)
   const productSet = new Set(productTokens)
@@ -2840,7 +2931,9 @@ function crossNicheModifier(value, parentCoreTokens, productTokens) {
     .filter((token) => !productSet.has(token))
     .filter((token) => !/^(?:19|20)\d{2}$/.test(token))
     .filter((token) => !GENERIC_WORDS.has(token))
+    .filter((token) => !CROSS_NICHE_TITLE_NOISE.has(token))
   if (tokens.length === 0 || tokens.length > 3) return ''
+  if (tokens.some((token) => CROSS_NICHE_TITLE_NOISE.has(token))) return ''
   if (tokens.every((token) => STYLE_ONLY_WORDS.has(token))) return ''
   return unique(tokens).join(' ')
 }
@@ -2868,6 +2961,7 @@ function isCrossNicheCandidateSafe(keyword, parentKeyword, category, options) {
   if (classifyCandidateKeyword(keyword, options).action !== 'candidate') return false
   if (hasDuplicateGarmentProductTerms(keyword)) return false
   if (hasConflictingRecipientRoles(keyword)) return false
+  if (!classifyBuyerIntentPhrase(keyword).eligible) return false
   return detectRiskTerms(keyword, splitSeedText(options.customRiskTerms)).length === 0
 }
 
@@ -2887,6 +2981,7 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
     const addCandidate = ({ keyword, modifier, source, hint = null, row = null }) => {
       const normalized = normalizePhrase(keyword)
       if (!isCrossNicheCandidateSafe(normalized, parent.keyword, category, options)) return
+      const buyerIntent = classifyBuyerIntentPhrase(normalized)
       const existing = candidateMap.get(normalized) ?? {
         keyword: normalized,
         parentKeyword: parent.keyword,
@@ -2899,6 +2994,7 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
         comparison: null,
         verdict: 'needs-research',
         priorityScore: 0,
+        ...buyerIntent,
       }
       existing.sources = unique([...existing.sources, source])
       existing.listingCount = Math.max(existing.listingCount, Number(hint?.listingCount) || 0)
@@ -2948,6 +3044,11 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
     }
 
     const candidates = Array.from(candidateMap.values())
+      .filter((candidate) => (
+        candidate.sources.includes('etsy-related')
+        || candidate.sources.includes('measured-child')
+        || candidate.listingCount >= 2
+      ))
       .map((candidate) => {
         const verdictPoints = candidate.verdict === 'promising'
           ? 45
@@ -4487,12 +4588,14 @@ export function parseEverbeeRows(text) {
     const row = {}
     values.forEach((value, index) => {
       const field = fields[index]
-      if (field === 'productRows') {
+      if (field === 'productRows' || field === 'sourceKeywords' || field === 'buyerIntentAxes') {
         try {
           const parsed = JSON.parse(value)
           row[field] = Array.isArray(parsed) ? parsed : []
         } catch {
-          row[field] = []
+          row[field] = field === 'productRows'
+            ? []
+            : splitSeedText(value)
         }
       } else if (field) {
         row[field] = value

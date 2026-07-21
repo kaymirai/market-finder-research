@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260720-12">
+    <link rel="stylesheet" href="./styles.css?v=20260722-1">
   </head>
   <body>
     <main class="app-shell">
@@ -216,6 +216,8 @@
             <span class="count-badge"><strong id="candidateCount">0</strong><small>候補</small></span>
           </div>
 
+          <div id="candidateRoundTabs" class="research-round-tabs candidate-round-tabs" role="tablist" aria-label="候補ラウンド"></div>
+
           <section id="broadEventDiscovery" class="broad-event-discovery" hidden>
             <div class="mini-heading">
               <span>大型イベント分解</span>
@@ -239,6 +241,7 @@
           </div>
           <div class="step-primary-action">
             <div class="mini-guide">候補を確認したら、eRankで検索数・クリック・競合・KDを調べます。</div>
+            <div id="erankQueryPlanSummary" class="inline-status">初回候補の完全語句と基底語を確認します。</div>
             <button id="candidateErankBtn" type="button" class="primary-btn full-width">eRankで検索数を見る</button>
           </div>
         </section>
@@ -260,7 +263,7 @@
               <li>Chrome拡張を読み込み済み</li>
               <li>このページを 127.0.0.1:4173 で開いている</li>
               <li>EverBeeにログイン済み</li>
-              <li>拡張バージョン 1.26</li>
+              <li>拡張バージョン 1.27</li>
             </ul>
 
             <label class="field">
@@ -488,8 +491,8 @@
         <div class="results-heading">
           <div>
             <p class="section-kicker">5 / 5</p>
-            <h2>おすすめキーワード</h2>
-            <p class="panel-help">eRank、Etsy公式、EverBeeの根拠をまとめた最終結果です。優先順位と主役名詞を確認できます。</p>
+            <h2>調査結果と商品化候補</h2>
+            <p class="panel-help">A/Bは商品化テスト候補、Cは追加探索候補、Dは除外候補として分けて確認します。</p>
           </div>
           <div class="heading-actions">
             <div class="legend">
@@ -501,6 +504,9 @@
             <button id="downloadStep4CsvBtn" type="button" class="ghost-btn" data-optional="保存">結果CSV保存</button>
           </div>
         </div>
+        <div id="researchRoundProgress" class="research-round-progress" hidden></div>
+        <div id="researchRoundTabs" class="research-round-tabs" role="tablist" aria-label="調査ラウンド"></div>
+        <div id="researchRoundSummary" class="research-round-summary"></div>
         <div class="metric-glossary">
           <span><strong>Opportunity</strong> A-Dのテスト優先度</span>
           <span><strong>Confidence</strong> 根拠の完全性と鮮度</span>
@@ -649,6 +655,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260720-34"></script>
+    <script type="module" src="./src/app.js?v=20260722-1"></script>
   </body>
 </html>

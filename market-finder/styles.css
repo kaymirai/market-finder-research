@@ -14,6 +14,107 @@
   --shadow: 0 16px 40px rgba(30, 41, 59, 0.08);
 }
 
+.research-round-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  border-left: 4px solid var(--teal);
+  padding: 12px 14px;
+  background: #ecfdf5;
+  color: #115e59;
+}
+
+.research-round-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.research-round-tabs button {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 10px 16px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.research-round-tabs button.is-active {
+  border-bottom-color: var(--teal);
+  color: var(--ink);
+}
+
+.research-round-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.research-round-summary-item {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.research-round-summary-item span,
+.research-round-summary-item small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.result-track-group.is-test-ready .result-track-heading {
+  border-left-color: #15803d;
+}
+
+.result-track-group.is-exploration .result-track-heading {
+  border-left-color: #2563eb;
+}
+
+.result-track-group.is-excluded .result-track-heading {
+  border-left-color: #be123c;
+}
+
+.result-opportunity-collapsed > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.result-opportunity-collapsed .result-track-group {
+  margin-top: 12px;
+}
+
+.erank-capture-state-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.erank-capture-state {
+  display: grid;
+  grid-template-columns: 170px minmax(220px, .8fr) minmax(360px, 1.4fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: #fff;
+}
+
+.erank-capture-state small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 * {
   box-sizing: border-box;
 }
