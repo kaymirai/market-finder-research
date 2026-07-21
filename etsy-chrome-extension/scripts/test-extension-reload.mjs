@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm'
 
 const backgroundSource = await readFile(new URL('../dist/background.js', import.meta.url), 'utf8')
 const backgroundTypeScriptSource = await readFile(new URL('../src/background.ts', import.meta.url), 'utf8')
+const erankContentTypeScriptSource = await readFile(new URL('../src/erankContent.ts', import.meta.url), 'utf8')
 const bridgeSource = await readFile(new URL('../dist/marketFinderBridge.js', import.meta.url), 'utf8')
 const everbeeSource = await readFile(new URL('../dist/everbeeContent.js', import.meta.url), 'utf8')
 
@@ -22,6 +23,15 @@ function createChromeMock() {
 test('records eRank attempts even when metric capture fails', () => {
   assert.match(backgroundTypeScriptSource, /erankAttemptedAt\?: string/)
   assert.match(backgroundTypeScriptSource, /erankAttemptedAt: marketMode === 'erank' \? attemptedAt : ''/)
+})
+
+test('waits for slow eRank metric columns before timing out the keyword', () => {
+  const metricWait = Number(erankContentTypeScriptSource.match(/ERANK_METRICS_READY_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
+  const keywordWait = Number(backgroundTypeScriptSource.match(/MARKET_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
+
+  assert.ok(metricWait >= 180000, `expected metric wait >= 180000ms, received ${metricWait}`)
+  assert.ok(keywordWait >= metricWait + 30000, `expected outer timeout to exceed metric wait, received ${keywordWait}`)
+  assert.match(erankContentTypeScriptSource, /Date\.now\(\) - startedAt < ERANK_METRICS_READY_TIMEOUT_MS/)
 })
 
 function visibleElement(innerText = '') {

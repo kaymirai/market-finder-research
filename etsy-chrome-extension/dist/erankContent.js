@@ -14,6 +14,7 @@
         '[contenteditable="true"]',
     ];
     const SEARCH_BUTTON_WORDS = ['search', 'lookup', 'submit', 'go', 'find', 'analyze'];
+    const ERANK_METRICS_READY_TIMEOUT_MS = 180000;
     let erankRunActive = false;
     function wait(ms) {
         return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -237,7 +238,7 @@
         const startedAt = Date.now();
         let lastText = '';
         let stableCount = 0;
-        while (Date.now() - startedAt < 60000) {
+        while (Date.now() - startedAt < ERANK_METRICS_READY_TIMEOUT_MS) {
             await wait(1000);
             if (pageHasNoDataMessage())
                 return;
@@ -266,7 +267,7 @@
                 return;
         }
         const latest = keywordIdeasMetricSnapshot(keyword);
-        throw new Error(`eRankのKD表示を60秒待ちましたが、数字として確認できませんでした。CompetitionはUnknownでもOKですが、KDが未表示または読み込み途中のため、このキーワードで停止しました。rows=${latest.rows} kd=${latest.withKd} partial=${latest.partial}`);
+        throw new Error(`eRankのKD表示を3分待ちましたが、数字として確認できませんでした。CompetitionはUnknownでもOKですが、KDが未表示または読み込み途中のため、このキーワードで停止しました。rows=${latest.rows} kd=${latest.withKd} partial=${latest.partial}`);
     }
     function describeElement(element) {
         var _a;

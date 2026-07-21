@@ -21,7 +21,7 @@
     let marketDelayMs = 4500;
     let marketTimerId = null;
     let marketRunId = 0;
-    const MARKET_KEYWORD_TIMEOUT_MS = 95000;
+    const MARKET_KEYWORD_TIMEOUT_MS = 240000;
     const trendSourceConfigs = {
         erank: {
             id: 'erank',
