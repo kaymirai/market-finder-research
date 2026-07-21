@@ -105,6 +105,32 @@ stopReason
 
 イベント語は独立した需要証明として加点せず、具体的な買い手意図へ付く時期・用途の修飾語として扱う。
 
+### 贈り手・受け手のドリルダウン
+
+同じ商品でも、着る本人が探す場合と、誰かへ贈る人が探す場合では検索意図が異なる。候補ごとに次の文脈を分けて保持する。
+
+```text
+wearerIntent: self | recipient | group
+recipientRole: teacher | nurse | librarian | mom | grandma | coworker ...
+giverRole: students | daughter | team member ...
+occasion: retirement | graduation | appreciation | birthday | reunion ...
+personalization: name | year | group name | member count ...
+```
+
+検索候補は次の順で広げる。
+
+1. 商品そのもの: `school librarian shirt`
+2. 受け手の役割: `school librarian gift shirt`
+3. 節目を伴う受け手: `school librarian retirement shirt`
+4. 贈り手から受け手: `librarian gift from students`
+5. パーソナライズ: `personalized school librarian retirement shirt`
+
+ただし、2から5を機械的にすべて組み合わせない。Etsy関連語、eRank関連語、ユーザー入力、または複数の販売反応があるEverBee商品タイトルで観測した完全フレーズを最優先する。観測された役割語と節目語を組み合わせる場合も、受け手1軸と節目またはパーソナライズ1軸までに制限する。
+
+`gift for her`、`gift for him`、`birthday gift`のように受け手が具体化されていない語は自動候補にしない。`teacher gift`のように商品カテゴリが曖昧な語は、`shirt`または`tee`を含む自然な完全フレーズとして確認する。`from students`のように検索語よりデザイン文言として使われやすい表現は、Marketplace InsightsかeRankで検索反応が確認できるまで低優先候補に留める。
+
+クロスニッチでは、売れ筋タイトルの単語断片より先に、親市場と整合する受け手・職業・趣味・節目を探す。例えば`teacher shirt`からは、実測された`math teacher shirt`、`kindergarten teacher shirt`、`teacher retirement shirt`を優先し、`colors teacher shirt`のように買い手像が具体化しない候補は除外する。
+
 ### 候補生成ルール
 
 1. 語彙の取得元は、ユーザー入力、Etsy関連語、eRank関連語、EverBeeで販売反応がある商品タイトルに限定する。
@@ -115,6 +141,8 @@ stopReason
 6. `comfort colors`、`comfort`、`colors`のようなボディー・商品属性語はクロスニッチ軸から除外する。
 7. 人名らしい単語、作品・キャラクター・ブランドの可能性がある単語は自動採用せず、IP確認待ちにする。
 8. 子候補には、親語、追加軸、取得元、買い手意図軸を保存する。
+9. 着る本人向けと贈答向けを別の検索意図として保存し、同じ語句へ統合しない。
+10. 贈答候補には、具体的な受け手または節目のどちらかを必須とする。
 
 ### 相対比較
 
@@ -187,6 +215,10 @@ stopReason
 11. 各ラウンドの候補、A/B/C/D件数、開始理由、停止理由をCSVへ出せる。
 12. 深度2で探索が終了し、初回と全クロスニッチ実測結果を合算した総合順位を表示する。
 13. 既存のIP除外、データ鮮度、Marketplace Insights段階探索、EverBee販売分布の判定を維持する。
+14. `school librarian retirement shirt`をOccupationとLife transitionの候補として分類できる。
+15. `gift for her`のように受け手が曖昧な語を自動候補にしない。
+16. 観測済みの`librarian gift from students`を、受け手と贈り手を保持した候補として扱える。
+17. 本人向け検索と贈答向け検索を、画面とCSVで区別できる。
 
 ## 対象外
 
@@ -196,4 +228,3 @@ stopReason
 - Etsy Statsの出品後学習ループ
 - 3階層以上のクロスニッチ探索
 - 販売保証や月200枚の予測
-
