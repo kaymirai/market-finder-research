@@ -2156,9 +2156,15 @@ function friendlyErankCaptureError(error) {
 
 function renderErankCaptureStates(rows) {
   if (rows.length === 0) return ''
+  const failedCount = rows.filter((row) => row.status === 'failed').length
   return `
     <details class="erank-group erank-group-collapsed" open>
       <summary>数値を取得できていない検索 ${rows.length}件</summary>
+      ${failedCount > 0 ? `
+        <div class="erank-capture-actions">
+          <button type="button" class="ghost-btn" data-retry-erank-failures>取得失敗だけ再確認（${failedCount}件）</button>
+        </div>
+      ` : ''}
       <div class="erank-capture-state-list">
         ${rows.map((row) => `
           <div class="erank-capture-state is-${escapeHtml(row.status)}">
@@ -3737,7 +3743,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     queryKind: String(row.queryKind ?? existingRow?.queryKind ?? ''),
     erankCaptureStatus: incomingErankCaptureStatus || String(existingRow?.erankCaptureStatus ?? ''),
     erankAttemptedAt: String(row.erankAttemptedAt ?? existingRow?.erankAttemptedAt ?? ''),
-    error: String(row.error ?? existingRow?.error ?? ''),
+    error: incomingErankChecked ? String(row.error ?? '') : String(row.error ?? existingRow?.error ?? ''),
     researchRoundId: String(row.researchRoundId ?? existingRow?.researchRoundId ?? currentResearchRound()?.id ?? ''),
     researchRoundType: String(row.researchRoundType ?? existingRow?.researchRoundType ?? currentResearchRound()?.type ?? ''),
     researchRoundDepth: String(row.researchRoundDepth ?? existingRow?.researchRoundDepth ?? currentResearchRound()?.depth ?? ''),
@@ -5130,6 +5136,38 @@ async function startErankResearch() {
   }
 }
 
+async function retryFailedErankResearch() {
+  const failedRows = erankCaptureStateRows().filter((row) => row.status === 'failed')
+  const keywords = cleanKeywordList(failedRows.map((row) => row.query))
+  if (keywords.length === 0) {
+    setSimpleStatus('再確認が必要なeRank取得失敗はありません。')
+    return
+  }
+  state.acceptExtensionResults = true
+
+  try {
+    openProgressModal({
+      mode: 'erank',
+      title: 'eRank取得失敗の再確認',
+      total: keywords.length,
+      message: `${keywords.length}件の取得失敗だけを再確認しています。`,
+    })
+    await requestExtension('CLEAR_MARKET_RESULTS')
+    const startResponse = await requestExtension('START_ERANK_RESEARCH', {
+      keywords,
+      erankUrl: 'https://erank.com/tools/keyword-tool',
+      delayMs: Math.max(3000, Math.min(Number(elements.delayInput.value) * 1000 || 5000, 20000)),
+    })
+    ensureExtensionStarted(startResponse, 'eRankの再確認を開始できませんでした。')
+    setSimpleStatus(`${keywords.length}件の取得失敗だけを再確認しています。既存の取得済み結果は保持します。`)
+    pollExtensionState()
+  } catch (error) {
+    const message = friendlyExtensionError(error)
+    setSimpleStatus(message)
+    failProgress(message)
+  }
+}
+
 async function startBroadEverbeeResearch() {
   const keywords = broadQueryList()
   if (keywords.length === 0) {
@@ -5497,6 +5535,10 @@ function bindEvents() {
   elements.erankSummary.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return
     if (event.target.closest('[data-use-restored-results]')) acceptRestoredResearchResults()
+  })
+  elements.erankResultsList.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    if (event.target.closest('[data-retry-erank-failures]')) retryFailedErankResearch()
   })
   elements.marketplaceModeControl.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return

@@ -99,6 +99,17 @@
   margin-top: 10px;
 }
 
+.erank-capture-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.erank-capture-actions .ghost-btn {
+  min-height: 34px;
+  padding-inline: 12px;
+}
+
 .erank-capture-state {
   display: grid;
   grid-template-columns: 170px minmax(0, 1fr);

@@ -148,6 +148,15 @@ test('executes eRank capture UI states from extension progress without changing 
   }), 'completed')
 })
 
+test('retries only failed eRank captures and clears their stale errors after a checked result', () => {
+  assert.match(app, /data-retry-erank-failures/)
+  assert.match(app, /async function retryFailedErankResearch\(\)/)
+  assert.match(app, /erankCaptureStateRows\(\)\.filter\(\(row\) => row\.status === 'failed'\)/)
+  assert.match(app, /START_ERANK_RESEARCH[\s\S]{0,300}keywords/)
+  assert.match(app, /elements\.erankResultsList\.addEventListener\('click'[\s\S]{0,300}retryFailedErankResearch\(\)/)
+  assert.match(app, /error: incomingErankChecked \? String\(row\.error \?\? ''\)/)
+})
+
 test('keeps stage visibility ownership and rail render caching centralized', () => {
   assert.doesNotMatch(app, /marketplaceInsightPanel\.hidden/)
   assert.match(app, /renderHtmlIfChanged\(elements\.researchQueueFilters, filtersHtml\)/)
@@ -1038,5 +1047,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260722-8')
+  assert.equal(stylesheetVersion, '20260723-1')
 })
