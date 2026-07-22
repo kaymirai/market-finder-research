@@ -82,6 +82,20 @@ test('renders the five-stage research console', () => {
   }
 })
 
+test('renders queue rows and inspector details without starting research', () => {
+  assert.match(app, /function researchQueueRows\(stageId = state\.consoleUi\.activeStage\)/)
+  assert.match(app, /function renderResearchQueue\(\)/)
+  assert.match(app, /function renderResearchInspector\(\)/)
+  assert.match(app, /data-console-keyword=/)
+  assert.match(app, /elements\.researchQueueList\.addEventListener\('click', \(event\) => \{[\s\S]{0,500}state\.consoleUi = \{ \.\.\.state\.consoleUi, selectedKeyword:/)
+  assert.doesNotMatch(app, /elements\.researchQueueList\.addEventListener\('click', \(event\) => \{[\s\S]{0,800}(startMarketplaceInsight|runMarketplaceInsightAutomation|simpleStartErankResearch|simpleStartResearch)\(/)
+})
+
+test('normalizes eRank queue rows so completed results suppress duplicate capture states', () => {
+  assert.match(app, /const completedKeys = new Set\(completed\.map\(\(row\) => normalizePhrase\(row\.keyword\)\)\)/)
+  assert.match(app, /!completedKeys\.has\(normalizePhrase\(row\.keyword\)\)/)
+})
+
 test('keeps extension and action DOM contracts unique', () => {
   const allIds = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1])
   assert.equal(new Set(allIds).size, allIds.length, 'all DOM IDs must be unique')

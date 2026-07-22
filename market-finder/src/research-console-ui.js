@@ -44,6 +44,12 @@ export function selectResearchQueueFilter(ui, queueFilter) {
   return { ...ui, queueFilter }
 }
 
+export function filterResearchQueueRows(rows = [], filter = 'all') {
+  const normalizedFilter = String(filter ?? 'all').trim().toLowerCase()
+  if (normalizedFilter === 'all') return [...rows]
+  return rows.filter((row) => String(row?.status ?? '').trim().toLowerCase() === normalizedFilter)
+}
+
 export function bindResearchStageTabs(tabContainer, onStageSelect) {
   if (!tabContainer?.addEventListener) return
   tabContainer.addEventListener('click', (event) => {

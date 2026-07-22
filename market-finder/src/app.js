@@ -69,9 +69,11 @@ import {
   bindResearchStageTabs,
   createResearchConsoleUi,
   deriveResearchStageStates,
+  filterResearchQueueRows,
   renderResearchStageView,
   restoreResearchConsoleUiFromPayload,
   restoreResearchConsoleUiFromStorage,
+  selectResearchQueueFilter,
   selectResearchStage,
 } from './research-console-ui.js?v=20260722-1'
 
@@ -317,6 +319,9 @@ const elements = {
   flowSeoBtn: document.querySelector('#flowSeoBtn'),
   researchConsole: document.querySelector('#researchConsole'),
   researchStageTabs: document.querySelector('#researchStageTabs'),
+  researchQueueFilters: document.querySelector('#researchQueueFilters'),
+  researchQueueList: document.querySelector('#researchQueueList'),
+  researchInspector: document.querySelector('#researchInspector'),
   simpleCsvInput: document.querySelector('#simpleCsvInput'),
   simpleImportCsvBtn: document.querySelector('#simpleImportCsvBtn'),
   simpleSeoKeywordsInput: document.querySelector('#simpleSeoKeywordsInput'),
@@ -3118,6 +3123,155 @@ function renderTrendScoutStatus() {
   setTrendStatus(message, variant)
 }
 
+const RESEARCH_QUEUE_FILTERS = [
+  ['all', 'すべて'],
+  ['pending', '未検索'],
+  ['active', '進行中'],
+  ['completed', '完了'],
+  ['failed', '失敗'],
+  ['hold', '保留'],
+]
+
+function researchQueueRows(stageId = state.consoleUi.activeStage) {
+  if (stageId === 'conditions') {
+    return state.researchedMarketHistory.slice(0, 40).map((row) => ({
+      keyword: row.keyword,
+      status: 'completed',
+      detail: `${row.eventLabel || row.eventId || '条件'} / ${formatDateTime(row.checkedAt) || '日時不明'}`,
+    }))
+  }
+
+  if (stageId === 'candidates') {
+    const ready = new Set(readyKeywords().map(normalizePhrase))
+    return state.candidates.map((row) => ({
+      keyword: row.keyword,
+      status: ready.has(normalizePhrase(row.keyword)) ? 'completed' : 'hold',
+      detail: row.sourceLabel ?? '',
+    }))
+  }
+
+  if (stageId === 'erank') {
+    const completed = erankResultRows().map((row) => ({
+      keyword: row.keyword,
+      status: 'completed',
+      detail: row.queryKind ?? '',
+    }))
+    const completedKeys = new Set(completed.map((row) => normalizePhrase(row.keyword)))
+    const captureStates = erankCaptureStateRows()
+      .map((row) => ({
+        keyword: row.query,
+        status: row.status === 'failed' ? 'failed' : 'pending',
+        detail: row.error ?? row.queryKind ?? '',
+      }))
+      .filter((row) => !completedKeys.has(normalizePhrase(row.keyword)))
+    return [...completed, ...captureStates]
+  }
+
+  if (stageId === 'etsy') {
+    return (state.marketplaceInsightPlan?.items ?? []).map((row) => ({
+      keyword: row.query,
+      status: row.status === 'error'
+        ? 'failed'
+        : row.status === 'opened'
+          ? 'active'
+          : row.status === 'completed'
+            ? 'completed'
+            : row.status === 'skipped'
+              ? 'hold'
+              : 'pending',
+      detail: row.error ?? row.stage ?? '',
+    }))
+  }
+
+  return everbeeResultRows().map((row) => ({
+    keyword: row.score?.normalized?.keyword ?? row.keyword,
+    status: row.score?.opportunityLabel === 'D' ? 'hold' : 'completed',
+    detail: `${row.score?.score ?? '-'}/100`,
+  }))
+}
+
+function researchInspectorDisplay() {
+  if (!elements.researchInspector) return null
+  let display = elements.researchInspector.querySelector('[data-research-inspector-display]')
+  if (display) return display
+
+  display = document.createElement('section')
+  display.dataset.researchInspectorDisplay = 'true'
+  display.className = 'research-inspector-display'
+  elements.researchInspector.prepend(display)
+  return display
+}
+
+function renderResearchQueue() {
+  if (!elements.researchQueueFilters || !elements.researchQueueList) return
+
+  const rows = researchQueueRows()
+  const visibleRows = filterResearchQueueRows(rows, state.consoleUi.queueFilter)
+  elements.researchQueueFilters.innerHTML = RESEARCH_QUEUE_FILTERS.map(([filter, label]) => {
+    const count = filterResearchQueueRows(rows, filter).length
+    const selected = state.consoleUi.queueFilter === filter
+    return `<button type="button" data-research-queue-filter="${filter}" aria-pressed="${String(selected)}" class="${selected ? 'is-active' : ''}">${label} ${count}</button>`
+  }).join('')
+
+  elements.researchQueueList.innerHTML = visibleRows.length > 0
+    ? visibleRows.map((row) => {
+      const selected = normalizePhrase(row.keyword) === normalizePhrase(state.consoleUi.selectedKeyword)
+      return `
+        <button type="button" data-console-keyword="${escapeHtml(row.keyword)}" aria-pressed="${String(selected)}" class="research-queue-row is-${escapeHtml(row.status)}${selected ? ' is-selected' : ''}">
+          <strong>${escapeHtml(row.keyword)}</strong>
+          <span>${escapeHtml(row.detail || '')}</span>
+          <small>${escapeHtml(row.status)}</small>
+        </button>
+      `
+    }).join('')
+    : '<div class="empty-state small">この状態のキーワードはありません。</div>'
+}
+
+function renderResearchInspector() {
+  const display = researchInspectorDisplay()
+  if (!display) return
+
+  const keyword = normalizePhrase(state.consoleUi.selectedKeyword)
+  const queueRow = researchQueueRows().find((row) => normalizePhrase(row.keyword) === keyword)
+  if (!keyword || !queueRow) {
+    display.innerHTML = '<div class="empty-state small">キーワードを選択すると詳細を表示します</div>'
+    return
+  }
+
+  const researchRow = findResearchRow(keyword)
+  const erankRow = erankResultRows().find((row) => normalizePhrase(row.keyword) === keyword)
+  const erankCapture = erankCaptureStateRows().find((row) => normalizePhrase(row.query) === keyword)
+  const marketplaceRow = (state.marketplaceInsightPlan?.items ?? []).find((row) => normalizePhrase(row.query) === keyword)
+  const everbeeRow = everbeeResultRows().find((row) => normalizePhrase(row.score?.normalized?.keyword ?? row.keyword) === keyword)
+  const normalized = everbeeRow?.score?.normalized ?? {}
+  const metrics = [
+    ['eRank Search', erankRow?.erankSearchVolume ?? researchRow?.erankSearchVolume],
+    ['eRank Clicks', erankRow?.erankClicks ?? researchRow?.erankClicks],
+    ['eRank Competition', erankRow?.erankCompetition ?? researchRow?.erankCompetition],
+    ['eRank KD', erankRow?.erankKeywordDifficulty ?? researchRow?.erankKeywordDifficulty],
+    ['Etsy Searches', marketplaceRow?.result?.etsySearches30d ?? researchRow?.etsySearches30d],
+    ['Etsy Listings', marketplaceRow?.result?.etsyListings ?? researchRow?.etsyListings],
+    ['EverBee Listings', normalized.listingsAnalyzed ?? researchRow?.listingsAnalyzed],
+    ['Monthly Sales', normalized.topMonthlySales ?? researchRow?.topMonthlySales],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== '')
+  const source = researchRow?.sourceLabel || queueRow.detail || '調査キュー'
+  const errors = [erankCapture?.error, marketplaceRow?.error, researchRow?.error].filter(Boolean)
+  const verdicts = [
+    everbeeRow?.score?.label,
+    ...(everbeeRow?.score?.exclusionReasons ?? []),
+    erankRow?.erankOpportunity?.label,
+  ].filter(Boolean)
+
+  display.innerHTML = `
+    <div class="panel-heading"><p class="section-kicker">選択中</p><h2>${escapeHtml(queueRow.keyword)}</h2></div>
+    <p class="panel-help">由来: ${escapeHtml(source)}</p>
+    <p class="panel-help">状態: ${escapeHtml(queueRow.status)}</p>
+    ${metrics.length > 0 ? `<div class="metric-grid">${metrics.map(([label, value]) => `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(displayMetricValue(value))}</strong></div>`).join('')}</div>` : ''}
+    ${errors.length > 0 ? `<p class="panel-help">失敗内容: ${escapeHtml(errors.join(' / '))}</p>` : ''}
+    ${verdicts.length > 0 ? `<p class="panel-help">判定: ${escapeHtml(verdicts.join(' / '))}</p>` : ''}
+  `
+}
+
 function researchConsoleMetrics() {
   const captureStates = erankCaptureStateRows()
   const marketplaceItems = state.marketplaceInsightPlan?.items ?? []
@@ -3143,6 +3297,8 @@ function researchConsoleMetrics() {
 function setActiveResearchStage(stageId, { persist = true } = {}) {
   state.consoleUi = selectResearchStage(state.consoleUi, stageId)
   renderResearchStageTabs()
+  renderResearchQueue()
+  renderResearchInspector()
   if (typeof renderActiveResearchStage === 'function') renderActiveResearchStage()
   if (persist) persistMarketFinderState()
 }
@@ -3162,6 +3318,8 @@ function renderResearchStageTabs() {
 
 function renderAll() {
   renderResearchStageTabs()
+  renderResearchQueue()
+  renderResearchInspector()
   renderTrendScoutStatus()
   renderBroadHints()
   renderSearchSeedRows()
@@ -5135,6 +5293,24 @@ function bindEvents() {
   elements.broadApplyBtn.addEventListener('click', applyBroadHintsToSeeds)
   elements.broadSampleBtn.addEventListener('click', fillBroadSample)
   bindResearchStageTabs(elements.researchStageTabs, setActiveResearchStage)
+  elements.researchQueueFilters.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    const button = event.target.closest('[data-research-queue-filter]')
+    if (!button) return
+    state.consoleUi = selectResearchQueueFilter(state.consoleUi, button.dataset.researchQueueFilter)
+    renderResearchQueue()
+    renderResearchInspector()
+    persistMarketFinderState()
+  })
+  elements.researchQueueList.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    const button = event.target.closest('[data-console-keyword]')
+    if (!button) return
+    state.consoleUi = { ...state.consoleUi, selectedKeyword: button.dataset.consoleKeyword }
+    renderResearchQueue()
+    renderResearchInspector()
+    persistMarketFinderState()
+  })
   elements.discoveryLaneTabs.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return
     const button = event.target.closest('[data-discovery-lane]')

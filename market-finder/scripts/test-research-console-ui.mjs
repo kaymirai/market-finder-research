@@ -4,6 +4,7 @@ import {
   bindResearchStageTabs,
   createResearchConsoleUi,
   deriveResearchStageStates,
+  filterResearchQueueRows,
   renderResearchStageView,
   restoreResearchConsoleUiFromStorage,
   selectResearchQueueFilter,
@@ -83,6 +84,17 @@ test('selects stage and queue filter without mutating input', () => {
   const selected = selectResearchQueueFilter(selectResearchStage(initial, 'erank'), 'completed')
   assert.equal(initial.activeStage, 'conditions')
   assert.deepEqual(selected, { activeStage: 'erank', queueFilter: 'completed', selectedKeyword: '' })
+})
+
+test('filters queue rows by normalized status', () => {
+  const rows = [
+    { keyword: 'a', status: 'pending' },
+    { keyword: 'b', status: 'completed' },
+    { keyword: 'c', status: 'failed' },
+  ]
+
+  assert.deepEqual(filterResearchQueueRows(rows, 'failed').map((row) => row.keyword), ['c'])
+  assert.equal(filterResearchQueueRows(rows, 'all').length, 3)
 })
 
 test('clicking a research stage tab shows only its panel', () => {
