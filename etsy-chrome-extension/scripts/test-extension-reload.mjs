@@ -263,10 +263,8 @@ test('reloads open Market Finder tabs when an unpacked extension is reloaded', (
   assert.equal(typeof installedListener, 'function')
   installedListener({ reason: 'update' })
   assert.deepEqual(Array.from(queryOptions.url), [
-    'http://localhost:3021/*',
-    'http://127.0.0.1:3021/*',
-    'http://localhost:4173/*',
-    'http://127.0.0.1:4173/*',
+    'http://localhost/*',
+    'http://127.0.0.1/*',
   ])
   assert.deepEqual(reloadedTabIds, [17, 29])
 })
