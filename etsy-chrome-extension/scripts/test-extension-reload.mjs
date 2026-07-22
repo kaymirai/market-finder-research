@@ -34,6 +34,13 @@ test('waits for slow eRank metric columns before timing out the keyword', () => 
   assert.match(erankContentTypeScriptSource, /Date\.now\(\) - startedAt < ERANK_METRICS_READY_TIMEOUT_MS/)
 })
 
+test('finishes stable eRank rows whose demand metrics are explicitly unavailable', () => {
+  assert.match(erankContentTypeScriptSource, /targetDemandNoData/)
+  assert.match(erankContentTypeScriptSource, /targetDemandResolved/)
+  assert.match(erankContentTypeScriptSource, /erankCaptureStatus/)
+  assert.match(erankContentTypeScriptSource, /no-data/)
+})
+
 test('wakes on eRank DOM changes and retains a finite safety timeout', () => {
   const metricWait = Number(erankContentTypeScriptSource.match(/ERANK_METRICS_READY_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
   const keywordWait = Number(backgroundTypeScriptSource.match(/MARKET_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
