@@ -16,6 +16,24 @@ export function createResearchConsoleUi(saved = {}) {
   }
 }
 
+export function restoreResearchConsoleUiFromPayload(savedState = {}) {
+  return createResearchConsoleUi(savedState?.consoleUi)
+}
+
+export function restoreResearchConsoleUiFromStorage(storage, persistenceKey, persistenceVersion, rawValue) {
+  if (!storage?.getItem) return createResearchConsoleUi()
+
+  try {
+    const raw = rawValue ?? storage.getItem(persistenceKey)
+    if (!raw) return createResearchConsoleUi()
+    const parsed = JSON.parse(raw)
+    if (parsed?.version !== persistenceVersion) return createResearchConsoleUi()
+    return restoreResearchConsoleUiFromPayload(parsed.marketState)
+  } catch {
+    return createResearchConsoleUi()
+  }
+}
+
 export function selectResearchStage(ui, activeStage) {
   if (!RESEARCH_STAGE_IDS.includes(activeStage)) return { ...ui }
   return { ...ui, activeStage, queueFilter: 'all' }
@@ -24,6 +42,33 @@ export function selectResearchStage(ui, activeStage) {
 export function selectResearchQueueFilter(ui, queueFilter) {
   if (!QUEUE_FILTERS.has(queueFilter)) return { ...ui }
   return { ...ui, queueFilter }
+}
+
+export function bindResearchStageTabs(tabContainer, onStageSelect) {
+  if (!tabContainer?.addEventListener) return
+  tabContainer.addEventListener('click', (event) => {
+    const button = event.target?.closest?.('[data-research-stage]')
+    const stageId = button?.dataset?.researchStage
+    if (stageId) onStageSelect(stageId)
+  })
+}
+
+export function renderResearchStageView({ consoleElement, tabContainer, panels = [], stages = [], activeStage }) {
+  if (!consoleElement || !tabContainer) return
+
+  const stageById = new Map(stages.map((stage) => [stage.id, stage]))
+  consoleElement.dataset.activeStage = activeStage
+  tabContainer.querySelectorAll('[data-research-stage]').forEach((button) => {
+    const stage = stageById.get(button.dataset.researchStage)
+    const active = stage?.id === activeStage
+    button.setAttribute('aria-selected', String(active))
+    button.dataset.status = stage?.status ?? 'locked'
+    const status = button.querySelector('small')
+    if (status) status.textContent = stage?.count ? `${stage.count}件` : stage?.message ?? '未開始'
+  })
+  panels.forEach((panel) => {
+    panel.hidden = panel.dataset.researchPanel !== activeStage
+  })
 }
 
 function stage(id, label, status, count, message) {

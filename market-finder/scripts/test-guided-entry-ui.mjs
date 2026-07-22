@@ -270,12 +270,12 @@ test('persists extension results and restores completed results explicitly', () 
 test('persists and restores research console UI state', () => {
   assert.match(app, /createResearchConsoleUi/)
   assert.match(app, /consoleUi: state\.consoleUi/)
-  assert.match(app, /state\.consoleUi = createResearchConsoleUi\(savedState\.consoleUi\)/)
+  assert.match(app, /state\.consoleUi = restoreResearchConsoleUiFromPayload\(savedState\)/)
 })
 
 test('switches stages without clearing research data', () => {
   assert.match(app, /function setActiveResearchStage\(/)
-  assert.match(app, /data-research-stage/)
+  assert.match(app, /bindResearchStageTabs\(elements\.researchStageTabs, setActiveResearchStage\)/)
   assert.doesNotMatch(app, /function setActiveResearchStage[\s\S]{0,500}state\.researchRows = \[\]/)
 })
 

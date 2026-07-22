@@ -66,9 +66,12 @@ import {
   prioritizeEventCandidates,
 } from './event-market-tracks.js?v=20260720-1'
 import {
+  bindResearchStageTabs,
   createResearchConsoleUi,
   deriveResearchStageStates,
-  selectResearchQueueFilter,
+  renderResearchStageView,
+  restoreResearchConsoleUiFromPayload,
+  restoreResearchConsoleUiFromStorage,
   selectResearchStage,
 } from './research-console-ui.js?v=20260722-1'
 
@@ -426,6 +429,10 @@ function readPersistedState() {
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (parsed?.version !== PERSISTENCE_VERSION) return null
+    parsed.marketState = {
+      ...(parsed.marketState ?? {}),
+      consoleUi: restoreResearchConsoleUiFromStorage(storage, PERSISTENCE_KEY, PERSISTENCE_VERSION, raw),
+    }
     return parsed
   } catch {
     return null
@@ -534,7 +541,7 @@ function restorePersistedState() {
   state.researchedMarketHistory = normalizeResearchMarketHistory(savedState.researchedMarketHistory)
   state.selectedResultKey = String(savedState.selectedResultKey ?? '')
   state.seoPlan = savedState.seoPlan ?? null
-  state.consoleUi = createResearchConsoleUi(savedState.consoleUi)
+  state.consoleUi = restoreResearchConsoleUiFromPayload(savedState)
 
   return persisted
 }
@@ -3144,16 +3151,12 @@ function renderResearchStageTabs() {
   if (!elements.researchConsole || !elements.researchStageTabs) return
 
   const stages = deriveResearchStageStates(researchConsoleMetrics())
-  elements.researchConsole.dataset.activeStage = state.consoleUi.activeStage
-  elements.researchStageTabs.querySelectorAll('[data-research-stage]').forEach((button) => {
-    const stage = stages.find((item) => item.id === button.dataset.researchStage)
-    const active = stage?.id === state.consoleUi.activeStage
-    button.setAttribute('aria-selected', String(active))
-    button.dataset.status = stage?.status ?? 'locked'
-    button.querySelector('small').textContent = stage?.count ? `${stage.count}件` : stage?.message ?? '未開始'
-  })
-  document.querySelectorAll('[data-research-panel]').forEach((panel) => {
-    panel.hidden = panel.dataset.researchPanel !== state.consoleUi.activeStage
+  renderResearchStageView({
+    consoleElement: elements.researchConsole,
+    tabContainer: elements.researchStageTabs,
+    panels: document.querySelectorAll('[data-research-panel]'),
+    stages,
+    activeStage: state.consoleUi.activeStage,
   })
 }
 
@@ -5131,12 +5134,7 @@ function bindEvents() {
   elements.broadExtractBtn.addEventListener('click', extractBroadMarketHints)
   elements.broadApplyBtn.addEventListener('click', applyBroadHintsToSeeds)
   elements.broadSampleBtn.addEventListener('click', fillBroadSample)
-  elements.researchStageTabs.addEventListener('click', (event) => {
-    if (!(event.target instanceof Element)) return
-    const button = event.target.closest('[data-research-stage]')
-    if (!button) return
-    setActiveResearchStage(button.dataset.researchStage)
-  })
+  bindResearchStageTabs(elements.researchStageTabs, setActiveResearchStage)
   elements.discoveryLaneTabs.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return
     const button = event.target.closest('[data-discovery-lane]')
