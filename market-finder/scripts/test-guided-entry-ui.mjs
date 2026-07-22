@@ -191,6 +191,32 @@ test('dispatches only the selected stage detail renderers', () => {
   }
 })
 
+test('routes extension state notifications through the active stage renderer', () => {
+  const marketStateStart = app.indexOf("if (data.action === 'MARKET_STATE')")
+  const marketStateEnd = app.indexOf('  if (!pending) return', marketStateStart)
+  const pollStart = app.indexOf('async function pollExtensionState()')
+  const pollSuccessStart = app.indexOf('  try {', pollStart)
+  const pollSuccessEnd = app.indexOf('  } catch (error) {', pollSuccessStart)
+  const importStart = app.indexOf('function importExtensionResults(extensionState)')
+  const importEnd = app.indexOf('async function copyText', importStart)
+  const marketStateHandler = app.slice(marketStateStart, marketStateEnd)
+  const pollSuccessHandler = app.slice(pollSuccessStart, pollSuccessEnd)
+  const importHandler = app.slice(importStart, importEnd)
+
+  assert.notEqual(marketStateStart, -1, 'MARKET_STATE notification handler must exist')
+  assert.notEqual(marketStateEnd, -1, 'MARKET_STATE notification handler must end before pending handling')
+  assert.notEqual(pollSuccessStart, -1, 'extension polling success handler must exist')
+  assert.notEqual(pollSuccessEnd, -1, 'extension polling success handler must end before error handling')
+  assert.notEqual(importStart, -1, 'extension import handler must exist')
+  assert.notEqual(importEnd, -1, 'extension import handler must end before copy helpers')
+  assert.match(marketStateHandler, /importExtensionResults\(data\.state\)[\s\S]{0,200}renderExtensionState\(\)/)
+  assert.match(pollSuccessHandler, /importExtensionResults\(response\.state\)[\s\S]{0,200}renderExtensionState\(\)/)
+  assert.match(importHandler, /persistMarketFinderState\(\)[\s\S]{0,120}renderAll\(\)/)
+  assert.doesNotMatch(marketStateHandler, /renderMarketplaceInsightPlan\(\)/)
+  assert.doesNotMatch(pollSuccessHandler, /renderMarketplaceInsightPlan\(\)/)
+  assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
+})
+
 test('renders the two entry routes as one radio group', () => {
   assert.match(html, /<fieldset class="flow-choice-grid"/)
   assert.match(html, /id="flowAutoBtn"[^>]*type="radio"[^>]*name="flowChoice"[^>]*value="auto"/)

@@ -4840,7 +4840,6 @@ function handleExtensionMessage(event) {
     state.extensionState = data.state
     importExtensionResults(data.state)
     renderExtensionState()
-    renderMarketplaceInsightPlan()
   }
 
   if (!pending) return
@@ -4904,7 +4903,6 @@ async function pollExtensionState() {
     state.extensionState = response.state
     importExtensionResults(response.state)
     renderExtensionState()
-    renderMarketplaceInsightPlan()
     if (response.state?.active) window.setTimeout(pollExtensionState, 2000)
   } catch (error) {
     const message = friendlyExtensionError(error)
