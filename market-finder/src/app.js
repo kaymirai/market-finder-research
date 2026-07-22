@@ -321,6 +321,7 @@ const elements = {
   flowSeoBtn: document.querySelector('#flowSeoBtn'),
   researchConsole: document.querySelector('#researchConsole'),
   researchStageTabs: document.querySelector('#researchStageTabs'),
+  researchQueue: document.querySelector('#researchQueue'),
   researchQueueFilters: document.querySelector('#researchQueueFilters'),
   researchQueueList: document.querySelector('#researchQueueList'),
   researchInspector: document.querySelector('#researchInspector'),
@@ -334,6 +335,10 @@ const elements = {
   openAdvancedModalBtn: document.querySelector('#openAdvancedModalBtn'),
   closeAdvancedModalBtn: document.querySelector('#closeAdvancedModalBtn'),
   advancedModal: document.querySelector('#advancedModal'),
+}
+
+if (elements.researchConsole && elements.researchInspector) {
+  elements.researchConsole.append(elements.researchInspector)
 }
 
 function escapeHtml(value) {

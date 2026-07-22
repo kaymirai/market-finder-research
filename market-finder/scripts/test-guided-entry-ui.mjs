@@ -126,6 +126,8 @@ test('copies only A and B final keywords in their result order', () => {
 })
 
 test('sets the results console state and hides non-result rails', () => {
+  assert.match(app, /researchQueue:\s*document\.querySelector\('#researchQueue'\)/)
+  assert.match(app, /elements\.researchConsole\.append\(elements\.researchInspector\)/)
   assert.match(app, /elements\.researchConsole\.dataset\.activeStage = state\.consoleUi\.activeStage/)
   assert.match(app, /elements\.researchQueue\.hidden = state\.consoleUi\.activeStage === 'results'/)
   assert.match(app, /elements\.researchInspector\.hidden = state\.consoleUi\.activeStage === 'results'/)
@@ -514,4 +516,30 @@ test('uses action names instead of legacy Step labels in user-facing copy', () =
   assert.doesNotMatch(html, /Step [1-5]/)
   assert.doesNotMatch(app, /Step [1-5]/)
   assert.doesNotMatch(html, /<button[^>]*>\s*[1-5]\s/)
+})
+
+test('styles a desktop research console without mobile stacking', () => {
+  assert.match(styles, /body\s*\{[^}]*min-width:\s*1280px/)
+  assert.match(styles, /\.research-console\s*\{[^}]*grid-template-columns:\s*220px\s+minmax\(720px,\s*1fr\)\s+320px/)
+  assert.match(styles, /\.research-stage-tabs/)
+  assert.match(styles, /\.final-result-toolbar/)
+  assert.match(styles, /\.research-console-queue,\s*\.research-console-inspector\s*\{[^}]*overflow:\s*auto/)
+  assert.match(styles, /\.research-console-workspace\s*\{[^}]*overflow:\s*auto/)
+  assert.match(styles, /\.research-console\[data-active-stage="results"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
+  assert.match(styles, /\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-queue,[\s\S]{0,300}\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-inspector\s*\{[^}]*display:\s*none/)
+  assert.match(styles, /\.research-console\[data-active-stage="erank"\][\s\S]{0,300}\.research-console\[data-active-stage="etsy"\][\s\S]{0,300}\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-workspace > \.workspace-grid\s*\{[^}]*display:\s*none/)
+  assert.match(styles, /\.final-result-toolbar\s*\{[^}]*position:\s*sticky/)
+  assert.match(styles, /\.final-result-actions \.primary-btn\s*\{[^}]*width:\s*auto/)
+  assert.doesNotMatch(styles, /font-size:\s*[^;]*(?:vw|vh|vmin|vmax)/)
+  assert.doesNotMatch(styles, /border-radius:\s*(?:9|[1-9]\d+)px/)
+  assert.doesNotMatch(styles, /@media[^{}]*max-width[^{}]*\{[\s\S]{0,800}\.research-console[^}]*grid-template-columns:\s*1fr/)
+})
+
+test('uses one current cache version for the console stylesheet and module', () => {
+  const stylesheetVersion = html.match(/styles\.css\?v=([^"']+)/)?.[1]
+  const moduleVersion = html.match(/src\/app\.js\?v=([^"']+)/)?.[1]
+
+  assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
+  assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
+  assert.equal(stylesheetVersion, '20260722-4')
 })
