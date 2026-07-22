@@ -222,7 +222,7 @@ test('joins EverBee product and metric rows by data-id and sorts by monthly sale
   ])
 })
 
-test('reloads open Market Finder tabs when an unpacked extension is reloaded', () => {
+test('reloads open Market Finder and research tabs when an unpacked extension is reloaded', () => {
   let installedListener = null
   let queryOptions = null
   const reloadedTabIds = []
@@ -265,6 +265,9 @@ test('reloads open Market Finder tabs when an unpacked extension is reloaded', (
   assert.deepEqual(Array.from(queryOptions.url), [
     'http://localhost/*',
     'http://127.0.0.1/*',
+    'https://erank.com/*',
+    'https://*.erank.com/*',
+    'https://*.everbee.io/*',
   ])
   assert.deepEqual(reloadedTabIds, [17, 29])
 })

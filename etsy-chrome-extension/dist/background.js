@@ -44,17 +44,20 @@
             url: 'https://trends.google.com/trending?geo=US',
         },
     };
-    const marketFinderUrlPatterns = [
+    const extensionWorkflowUrlPatterns = [
         'http://localhost/*',
         'http://127.0.0.1/*',
+        'https://erank.com/*',
+        'https://*.erank.com/*',
+        'https://*.everbee.io/*',
     ];
     chrome.runtime.onInstalled.addListener((details) => {
         if (details.reason !== 'install' && details.reason !== 'update')
             return;
-        reloadOpenMarketFinderTabs();
+        reloadOpenExtensionWorkflowTabs();
     });
-    function reloadOpenMarketFinderTabs() {
-        chrome.tabs.query({ url: marketFinderUrlPatterns }, (tabs) => {
+    function reloadOpenExtensionWorkflowTabs() {
+        chrome.tabs.query({ url: extensionWorkflowUrlPatterns }, (tabs) => {
             if (chrome.runtime.lastError)
                 return;
             tabs.forEach((tab) => {
