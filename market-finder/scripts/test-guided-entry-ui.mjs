@@ -15,6 +15,16 @@ function position(id) {
   return index
 }
 
+function attributePositions(attribute, value) {
+  return [...html.matchAll(new RegExp(`${attribute}="${value}"`, 'g'))].map((match) => match.index)
+}
+
+function panelOpeningTag(stage) {
+  const match = html.match(new RegExp(`<[^>]*data-research-panel="${stage}"[^>]*>`))
+  assert.ok(match, `${stage} panel must exist`)
+  return match[0]
+}
+
 test('uses one set of five numbered workflow steps', () => {
   assert.doesNotMatch(html, /class="workflow-strip"/)
   for (let step = 1; step <= 5; step += 1) {
@@ -24,16 +34,58 @@ test('uses one set of five numbered workflow steps', () => {
 
 test('renders the five-stage research console', () => {
   assert.match(html, /id="researchStageTabs"/)
-  for (const stage of ['conditions', 'candidates', 'erank', 'etsy', 'results']) {
-    assert.match(html, new RegExp(`data-research-stage="${stage}"`))
-    assert.match(html, new RegExp(`data-research-panel="${stage}"`))
+  const stages = ['conditions', 'candidates', 'erank', 'etsy', 'results']
+  let previousStagePosition = -1
+  let previousPanelPosition = -1
+
+  for (const stage of stages) {
+    const stagePositions = attributePositions('data-research-stage', stage)
+    const panelPositions = attributePositions('data-research-panel', stage)
+
+    assert.equal(stagePositions.length, 1, `${stage} stage tab must be unique`)
+    assert.equal(panelPositions.length, 1, `${stage} panel must be unique`)
+    assert.ok(stagePositions[0] > previousStagePosition, 'stage tabs must preserve workflow order')
+    assert.ok(panelPositions[0] > previousPanelPosition, 'research panels must preserve workflow order')
+
+    previousStagePosition = stagePositions[0]
+    previousPanelPosition = panelPositions[0]
   }
   assert.match(html, /id="researchQueue"/)
   assert.match(html, /id="researchWorkspace"/)
   assert.match(html, /id="researchInspector"/)
+
+  const consoleHtml = html.match(/<section id="researchConsole"[^>]*>([\s\S]*)<\/section>\s*<\/main>/)?.[1]
+  assert.ok(consoleHtml, 'research console must contain the console structure')
+  const workspaceHtml = consoleHtml.match(/<div id="researchWorkspace"[^>]*>([\s\S]*)<\/div>\s*<\/section>/)?.[1]
+  assert.ok(workspaceHtml, 'research workspace must be inside the research console')
+  for (const stage of stages) {
+    assert.match(workspaceHtml, new RegExp(`data-research-panel="${stage}"`))
+  }
+
+  const quickStartPosition = html.indexOf('class="quick-start"')
+  const simpleRunnerPosition = html.indexOf('class="simple-runner"')
+  assert.notEqual(quickStartPosition, -1, 'quick-start must exist')
+  assert.notEqual(simpleRunnerPosition, -1, 'simple-runner must exist')
+  assert.ok(quickStartPosition < position('researchConsole'))
+  assert.ok(simpleRunnerPosition < position('researchConsole'))
+  assert.doesNotMatch(consoleHtml, /class="quick-start"/)
+  assert.doesNotMatch(consoleHtml, /class="simple-runner"/)
+
+  assert.match(
+    html,
+    /<aside id="researchInspector"[^>]*>[\s\S]*?<details class="advanced-research-input advanced-only">[\s\S]*?<aside class="panel research-panel">[\s\S]*?<\/aside>\s*<\/div>\s*<\/details>\s*<\/aside>/,
+  )
+
+  assert.doesNotMatch(panelOpeningTag('conditions'), /\shidden(?:\s|>|=)/)
+  for (const stage of stages.slice(1)) {
+    assert.match(panelOpeningTag(stage), /\shidden(?:\s|>|=)/)
+  }
 })
 
 test('keeps extension and action DOM contracts unique', () => {
+  const allIds = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1])
+  assert.equal(new Set(allIds).size, allIds.length, 'all DOM IDs must be unique')
+
   for (const id of [
     'trendAutoBtn', 'candidateErankBtn', 'marketplaceStartBtn',
     'erankToEverbeeBtn', 'resultsList', 'downloadStep4CsvBtn',
