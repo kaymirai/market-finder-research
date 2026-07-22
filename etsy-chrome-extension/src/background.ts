@@ -386,7 +386,7 @@
     function normalizeErankUrl(value: string) {
         try {
             const url = new URL(value)
-            if (/(^|\.)erank\.com$/i.test(url.hostname)) return url.toString()
+            if (isErankKeywordToolUrl(url.toString())) return url.toString()
             return 'https://erank.com/tools/keyword-tool'
         } catch {
             return 'https://erank.com/tools/keyword-tool'
@@ -1267,6 +1267,16 @@
         }
     }
 
+    function isErankKeywordToolUrl(value?: string) {
+        if (!isUsableErankUrl(value)) return false
+        try {
+            const url = new URL(value as string)
+            return /keyword[-_]?tool/i.test(url.pathname)
+        } catch {
+            return false
+        }
+    }
+
     function getMarketState(): MarketState {
         return {
             active: marketActive,
@@ -1593,7 +1603,7 @@
             if (erankTabId !== null) {
                 chrome.tabs.get(erankTabId, (tab) => {
                     if (!chrome.runtime.lastError && tab?.id) {
-                        activateTab(tab.id).then(() => resolve(tab.id as number))
+                        prepareErankTab(tab.id).then(resolve).catch(reject)
                         return
                     }
 
@@ -1607,7 +1617,7 @@
                 .then((tabId) => {
                     if (tabId !== null) {
                         erankTabId = tabId
-                        activateTab(tabId).then(() => resolve(tabId))
+                        prepareErankTab(tabId).then(resolve).catch(reject)
                         return
                     }
 
@@ -1617,18 +1627,51 @@
         })
     }
 
+    async function prepareErankTab(tabId: number): Promise<number> {
+        const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
+            chrome.tabs.get(tabId, (currentTab) => {
+                if (chrome.runtime.lastError || !currentTab?.id) {
+                    resolve(null)
+                    return
+                }
+                resolve(currentTab)
+            })
+        })
+        if (!tab?.id) throw new Error('eRankタブを確認できませんでした。')
+
+        if (isErankKeywordToolUrl(tab.url)) {
+            await activateTab(tab.id)
+            return tab.id
+        }
+
+        await updateTabUrlAndActivate(tabId, marketErankUrl)
+        await waitForTabComplete(tabId)
+        return tabId
+    }
+
     function findOpenErankTab(): Promise<number | null> {
         return new Promise((resolve) => {
             chrome.tabs.query({ active: true, currentWindow: true }, (activeTabs) => {
                 const activeTab = activeTabs[0]
-                if (activeTab?.id && isUsableErankUrl(activeTab.url)) {
+                if (activeTab?.id && isErankKeywordToolUrl(activeTab.url)) {
                     resolve(activeTab.id)
                     return
                 }
 
                 chrome.tabs.query({}, (tabs) => {
-                    const tab = tabs.find((item) => item.id && isUsableErankUrl(item.url))
-                    resolve(tab?.id ?? null)
+                    const keywordToolTab = tabs.find((item) => item.id && isErankKeywordToolUrl(item.url))
+                    if (keywordToolTab?.id) {
+                        resolve(keywordToolTab.id)
+                        return
+                    }
+
+                    if (activeTab?.id && isUsableErankUrl(activeTab.url)) {
+                        resolve(activeTab.id)
+                        return
+                    }
+
+                    const anyErankTab = tabs.find((item) => item.id && isUsableErankUrl(item.url))
+                    resolve(anyErankTab?.id ?? null)
                 })
             })
         })

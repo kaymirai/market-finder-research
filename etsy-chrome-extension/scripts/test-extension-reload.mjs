@@ -42,6 +42,14 @@ test('starts the eRank fail-safe timeout when the search request is sent', () =>
   assert.doesNotMatch(backgroundTypeScriptSource, /runKeywordInErankTab\(await ensureErankTab\(\), keyword\)/)
 })
 
+test('redirects an eRank dashboard tab to Keyword Tool before searching', () => {
+  assert.match(backgroundTypeScriptSource, /function isErankKeywordToolUrl\(/)
+  assert.match(backgroundTypeScriptSource, /async function prepareErankTab\(/)
+  assert.match(backgroundTypeScriptSource, /updateTabUrlAndActivate\(tabId, marketErankUrl\)/)
+  assert.match(backgroundTypeScriptSource, /await waitForTabComplete\(tabId\)/)
+  assert.ok((backgroundTypeScriptSource.match(/prepareErankTab\(/g) ?? []).length >= 3)
+})
+
 function visibleElement(innerText = '') {
   return {
     innerText,

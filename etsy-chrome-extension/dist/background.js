@@ -268,7 +268,7 @@
     function normalizeErankUrl(value) {
         try {
             const url = new URL(value);
-            if (/(^|\.)erank\.com$/i.test(url.hostname))
+            if (isErankKeywordToolUrl(url.toString()))
                 return url.toString();
             return 'https://erank.com/tools/keyword-tool';
         }
@@ -1140,6 +1140,17 @@
             return false;
         }
     }
+    function isErankKeywordToolUrl(value) {
+        if (!isUsableErankUrl(value))
+            return false;
+        try {
+            const url = new URL(value);
+            return /keyword[-_]?tool/i.test(url.pathname);
+        }
+        catch (_a) {
+            return false;
+        }
+    }
     function getMarketState() {
         return {
             active: marketActive,
@@ -1445,7 +1456,7 @@
             if (erankTabId !== null) {
                 chrome.tabs.get(erankTabId, (tab) => {
                     if (!chrome.runtime.lastError && (tab === null || tab === void 0 ? void 0 : tab.id)) {
-                        activateTab(tab.id).then(() => resolve(tab.id));
+                        prepareErankTab(tab.id).then(resolve).catch(reject);
                         return;
                     }
                     erankTabId = null;
@@ -1457,7 +1468,7 @@
                 .then((tabId) => {
                 if (tabId !== null) {
                     erankTabId = tabId;
-                    activateTab(tabId).then(() => resolve(tabId));
+                    prepareErankTab(tabId).then(resolve).catch(reject);
                     return;
                 }
                 createErankTab(resolve, reject);
@@ -1465,18 +1476,47 @@
                 .catch(() => createErankTab(resolve, reject));
         });
     }
+    async function prepareErankTab(tabId) {
+        const tab = await new Promise((resolve) => {
+            chrome.tabs.get(tabId, (currentTab) => {
+                if (chrome.runtime.lastError || !(currentTab === null || currentTab === void 0 ? void 0 : currentTab.id)) {
+                    resolve(null);
+                    return;
+                }
+                resolve(currentTab);
+            });
+        });
+        if (!(tab === null || tab === void 0 ? void 0 : tab.id))
+            throw new Error('eRankタブを確認できませんでした。');
+        if (isErankKeywordToolUrl(tab.url)) {
+            await activateTab(tab.id);
+            return tab.id;
+        }
+        await updateTabUrlAndActivate(tabId, marketErankUrl);
+        await waitForTabComplete(tabId);
+        return tabId;
+    }
     function findOpenErankTab() {
         return new Promise((resolve) => {
             chrome.tabs.query({ active: true, currentWindow: true }, (activeTabs) => {
                 const activeTab = activeTabs[0];
-                if ((activeTab === null || activeTab === void 0 ? void 0 : activeTab.id) && isUsableErankUrl(activeTab.url)) {
+                if ((activeTab === null || activeTab === void 0 ? void 0 : activeTab.id) && isErankKeywordToolUrl(activeTab.url)) {
                     resolve(activeTab.id);
                     return;
                 }
                 chrome.tabs.query({}, (tabs) => {
                     var _a;
-                    const tab = tabs.find((item) => item.id && isUsableErankUrl(item.url));
-                    resolve((_a = tab === null || tab === void 0 ? void 0 : tab.id) !== null && _a !== void 0 ? _a : null);
+                    const keywordToolTab = tabs.find((item) => item.id && isErankKeywordToolUrl(item.url));
+                    if (keywordToolTab === null || keywordToolTab === void 0 ? void 0 : keywordToolTab.id) {
+                        resolve(keywordToolTab.id);
+                        return;
+                    }
+                    if ((activeTab === null || activeTab === void 0 ? void 0 : activeTab.id) && isUsableErankUrl(activeTab.url)) {
+                        resolve(activeTab.id);
+                        return;
+                    }
+                    const anyErankTab = tabs.find((item) => item.id && isUsableErankUrl(item.url));
+                    resolve((_a = anyErankTab === null || anyErankTab === void 0 ? void 0 : anyErankTab.id) !== null && _a !== void 0 ? _a : null);
                 });
             });
         });
