@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   bindResearchStageTabs,
+  createRenderSignatureTracker,
   createResearchConsoleUi,
   deriveErankCaptureUiState,
   deriveResearchHeaderState,
@@ -12,6 +13,7 @@ import {
   restoreResearchConsoleUiFromStorage,
   selectResearchQueueFilter,
   selectResearchStage,
+  stableRenderSignature,
 } from '../src/research-console-ui.js'
 
 class FakeButton {
@@ -153,6 +155,18 @@ test('does not rebuild unchanged rail HTML but refreshes changed visible content
   assert.equal(assignments, 1, 'an unchanged extension poll must not rebuild the rail')
   assert.equal(renderHtmlIfChanged(element, '<button>active</button>'), true)
   assert.equal(assignments, 2, 'a changed active row must refresh')
+})
+
+test('tracks stable render signatures independent of object key and Set order', () => {
+  const shouldRender = createRenderSignatureTracker()
+  const first = stableRenderSignature({ rows: [{ keyword: 'ghost shirt', search: 120 }], tags: new Set(['b', 'a']) })
+  const same = stableRenderSignature({ tags: new Set(['a', 'b']), rows: [{ search: 120, keyword: 'ghost shirt' }] })
+  const changed = stableRenderSignature({ rows: [{ keyword: 'ghost shirt', search: 121 }], tags: new Set(['a', 'b']) })
+
+  assert.equal(shouldRender(first), true)
+  assert.equal(shouldRender(same), false)
+  assert.equal(shouldRender(changed), true)
+  assert.equal(shouldRender(changed, { force: true }), true)
 })
 
 test('derives bridge-ready and active extension header states', () => {

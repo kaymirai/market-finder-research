@@ -15,6 +15,37 @@ const ERANK_EXPECTED_METRICS = Object.freeze([
 ])
 const renderedHtmlByElement = new WeakMap()
 
+function normalizeRenderSignatureValue(value) {
+  if (value instanceof Set) {
+    return [...value]
+      .map(normalizeRenderSignatureValue)
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  }
+  if (Array.isArray(value)) return value.map(normalizeRenderSignatureValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, normalizeRenderSignatureValue(value[key])]),
+    )
+  }
+  return value
+}
+
+export function stableRenderSignature(value) {
+  return JSON.stringify(normalizeRenderSignatureValue(value)) ?? ''
+}
+
+export function createRenderSignatureTracker() {
+  let previousSignature
+  return (signature, options = {}) => {
+    const nextSignature = String(signature ?? '')
+    if (!options.force && nextSignature === previousSignature) return false
+    previousSignature = nextSignature
+    return true
+  }
+}
+
 function hasMetricValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== ''
 }

@@ -67,6 +67,7 @@ import {
 } from './event-market-tracks.js?v=20260720-1'
 import {
   bindResearchStageTabs,
+  createRenderSignatureTracker,
   createResearchConsoleUi,
   deriveErankCaptureUiState,
   deriveResearchHeaderState,
@@ -78,7 +79,8 @@ import {
   restoreResearchConsoleUiFromStorage,
   selectResearchQueueFilter,
   selectResearchStage,
-} from './research-console-ui.js?v=20260722-2'
+  stableRenderSignature,
+} from './research-console-ui.js?v=20260722-3'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -176,6 +178,7 @@ const ERANK_UI_STATUS_LABELS = {
 }
 
 const pendingExtensionRequests = new Map()
+const trackActiveWorkspaceRender = createRenderSignatureTracker()
 const MONTH_LABELS = [
   '月未設定',
   '1月',
@@ -3430,27 +3433,42 @@ function renderResearchStageTabs() {
   })
 }
 
-function renderActiveResearchStage() {
-  switch (state.consoleUi.activeStage) {
-    case 'conditions':
-      renderTrendScoutStatus()
-      renderBroadHints()
-      renderSearchSeedRows()
-      break
-    case 'candidates':
-      renderCandidates()
-      break
-    case 'erank':
-      renderErankResults()
-      break
-    case 'etsy':
-      renderMarketplaceInsightPlan()
-      break
-    case 'results':
-      renderResultsTable()
-      renderCrossNicheDrilldown()
-      renderSeoPlan()
-      break
+function activeWorkspaceRenderFingerprint() {
+  const { consoleUi, ...workspaceState } = state
+  return stableRenderSignature({
+    activeStage: consoleUi.activeStage,
+    workspaceState,
+  })
+}
+
+function shouldRenderActiveWorkspace(options = {}) {
+  return trackActiveWorkspaceRender(activeWorkspaceRenderFingerprint(), options)
+}
+
+function renderActiveResearchStage(options = {}) {
+  const renderWorkspace = shouldRenderActiveWorkspace({ force: !options.skipUnchangedWorkspace })
+  if (renderWorkspace) {
+    switch (state.consoleUi.activeStage) {
+      case 'conditions':
+        renderTrendScoutStatus()
+        renderBroadHints()
+        renderSearchSeedRows()
+        break
+      case 'candidates':
+        renderCandidates()
+        break
+      case 'erank':
+        renderErankResults()
+        break
+      case 'etsy':
+        renderMarketplaceInsightPlan()
+        break
+      case 'results':
+        renderResultsTable()
+        renderCrossNicheDrilldown()
+        renderSeoPlan()
+        break
+    }
   }
   if (state.consoleUi.activeStage !== 'results') {
     renderResearchQueue()
@@ -3957,7 +3975,7 @@ function renderExtensionStateUpdate() {
   renderExtensionState()
   renderGlobalResearchStatus()
   renderResearchStageTabs()
-  renderActiveResearchStage()
+  renderActiveResearchStage({ skipUnchangedWorkspace: true })
 }
 
 async function copyText(text, button, doneLabel, defaultLabel) {
@@ -5020,9 +5038,6 @@ async function pollExtensionState() {
   if (!state.extensionConnected) return
   try {
     const response = await requestExtension('GET_MARKET_STATE', {}, 3000)
-    state.extensionState = response.state
-    importExtensionResults(response.state)
-    renderExtensionStateUpdate()
     if (response.state?.active) window.setTimeout(pollExtensionState, 2000)
   } catch (error) {
     const message = friendlyExtensionError(error)

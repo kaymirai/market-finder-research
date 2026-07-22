@@ -192,23 +192,24 @@ test('sets the results console state and hides non-result rails', () => {
 })
 
 test('renders only the active research stage details', () => {
-  assert.match(app, /function renderActiveResearchStage\(\)/)
+  assert.match(app, /function renderActiveResearchStage\(options = \{\}\)/)
   assert.match(app, /switch \(state\.consoleUi\.activeStage\)/)
   assert.match(app, /case 'conditions':[\s\S]{0,300}renderTrendScoutStatus\(\)[\s\S]{0,300}renderBroadHints\(\)[\s\S]{0,300}renderSearchSeedRows\(\)/)
   assert.match(app, /case 'candidates':[\s\S]{0,160}renderCandidates\(\)/)
   assert.match(app, /case 'erank':[\s\S]{0,160}renderErankResults\(\)/)
   assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
   assert.match(app, /case 'results':[\s\S]{0,300}renderResultsTable\(\)[\s\S]{0,300}renderCrossNicheDrilldown\(\)[\s\S]{0,300}renderSeoPlan\(\)/)
-  assert.match(app, /function renderActiveResearchStage\(\)[\s\S]{0,1800}renderResearchQueue\(\)[\s\S]{0,300}renderResearchInspector\(\)/)
+  assert.match(app, /function renderActiveResearchStage\(options = \{\}\)[\s\S]{0,2200}renderResearchQueue\(\)[\s\S]{0,300}renderResearchInspector\(\)/)
   assert.match(app, /function renderAll\(\) \{\s*renderGlobalResearchStatus\(\)\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
 })
 
 test('dispatches only the selected stage detail renderers', () => {
-  const body = app.match(/function renderActiveResearchStage\(\) \{([\s\S]*?)\n\}\n\nfunction renderAll\(\)/)?.[1]
+  const body = app.match(/function renderActiveResearchStage\([^)]*\) \{([\s\S]*?)\n\}\n\nfunction renderAll\(\)/)?.[1]
   assert.ok(body, 'active stage renderer must be extractable')
 
   const createDispatcher = new Function(
     'state',
+    'shouldRenderActiveWorkspace',
     'renderTrendScoutStatus',
     'renderBroadHints',
     'renderSearchSeedRows',
@@ -220,7 +221,7 @@ test('dispatches only the selected stage detail renderers', () => {
     'renderSeoPlan',
     'renderResearchQueue',
     'renderResearchInspector',
-    `return function renderActiveResearchStage() {${body}\n}`,
+    `return function renderActiveResearchStage(options = {}) {${body}\n}`,
   )
   const expected = {
     conditions: ['trend', 'broad', 'seeds', 'queue', 'inspector'],
@@ -235,6 +236,7 @@ test('dispatches only the selected stage detail renderers', () => {
     const render = (name) => () => rendered.push(name)
     const dispatch = createDispatcher(
       { consoleUi: { activeStage: stage } },
+      () => true,
       render('trend'),
       render('broad'),
       render('seeds'),
@@ -322,11 +324,188 @@ test('routes extension state notifications through the active stage renderer', (
   assert.notEqual(importStart, -1, 'extension import handler must exist')
   assert.notEqual(importEnd, -1, 'extension import handler must end before copy helpers')
   assert.match(marketStateHandler, /importExtensionResults\(data\.state\)[\s\S]{0,200}renderExtensionStateUpdate\(\)/)
-  assert.match(pollSuccessHandler, /importExtensionResults\(response\.state\)[\s\S]{0,200}renderExtensionStateUpdate\(\)/)
+  assert.doesNotMatch(pollSuccessHandler, /importExtensionResults\(response\.state\)|renderExtensionStateUpdate\(\)/)
+  assert.match(pollSuccessHandler, /response\.state\?\.active[\s\S]{0,120}setTimeout\(pollExtensionState, 2000\)/)
   assert.doesNotMatch(importHandler, /renderAll\(\)/)
   assert.doesNotMatch(marketStateHandler, /renderMarketplaceInsightPlan\(\)/)
   assert.doesNotMatch(pollSuccessHandler, /renderMarketplaceInsightPlan\(\)/)
   assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
+})
+
+test('pending MARKET_STATE polls write a changed Workspace once and an unchanged Workspace zero times', async () => {
+  const activeBody = app.match(/function renderActiveResearchStage\([^)]*\) \{([\s\S]*?)\n\}\n\nfunction renderAll\(\)/)?.[1]
+  const refreshBody = app.match(/function renderExtensionStateUpdate\(\) \{([\s\S]*?)\n\}/)?.[1]
+  const handlerBody = app.match(/function handleExtensionMessage\(event\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction updateExtensionBadge/)?.[1]
+  const pollBody = app.match(/async function pollExtensionState\(\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nasync function startExtensionResearch/)?.[1]
+  assert.ok(activeBody, 'active Workspace renderer must be extractable')
+  assert.ok(refreshBody, 'extension refresh function must be extractable')
+  assert.ok(handlerBody, 'extension response handler must be extractable')
+  assert.ok(pollBody, 'extension poll caller must be extractable')
+
+  const createActiveRenderer = new Function(
+    'state',
+    'shouldRenderActiveWorkspace',
+    'renderTrendScoutStatus',
+    'renderBroadHints',
+    'renderSearchSeedRows',
+    'renderCandidates',
+    'renderErankResults',
+    'renderMarketplaceInsightPlan',
+    'renderResultsTable',
+    'renderCrossNicheDrilldown',
+    'renderSeoPlan',
+    'renderResearchQueue',
+    'renderResearchInspector',
+    `return function renderActiveResearchStage(options) {${activeBody}\n}`,
+  )
+  const createRefresh = new Function(
+    'renderExtensionState',
+    'renderGlobalResearchStatus',
+    'renderResearchStageTabs',
+    'renderActiveResearchStage',
+    `return function renderExtensionStateUpdate() {${refreshBody}\n}`,
+  )
+  const createHandler = new Function(
+    'state',
+    'window',
+    'EXTENSION_SOURCE',
+    'updateExtensionBadge',
+    'renderMarketplaceInsightPlan',
+    'pollExtensionState',
+    'pendingExtensionRequests',
+    'importExtensionResults',
+    'renderExtensionStateUpdate',
+    'friendlyExtensionError',
+    `return function handleExtensionMessage(event) {${handlerBody}\n}`,
+  )
+  const createPoll = new Function(
+    'state',
+    'requestExtension',
+    'importExtensionResults',
+    'renderExtensionStateUpdate',
+    'window',
+    'friendlyExtensionError',
+    'releaseRunningControls',
+    'elements',
+    'failProgress',
+    `return async function pollExtensionState() {${pollBody}\n}`,
+  )
+
+  const appState = {
+    extensionConnected: true,
+    extensionState: null,
+    consoleUi: { activeStage: 'erank' },
+    researchRows: [],
+  }
+  const pendingRequests = new Map()
+  const workspaceWrites = []
+  const chromeRenders = []
+  let previousWorkspaceSignature = ''
+  let activeRequestId = ''
+  let requestSequence = 0
+  const windowObject = {
+    clearTimeout() {},
+    setTimeout() {},
+  }
+  const shouldRenderActiveWorkspace = ({ force = false } = {}) => {
+    const nextSignature = JSON.stringify({
+      stage: appState.consoleUi.activeStage,
+      extensionState: appState.extensionState,
+      researchRows: appState.researchRows,
+    })
+    if (!force && nextSignature === previousWorkspaceSignature) return false
+    previousWorkspaceSignature = nextSignature
+    return true
+  }
+  const noRender = () => {}
+  const renderActiveResearchStage = createActiveRenderer(
+    appState,
+    shouldRenderActiveWorkspace,
+    noRender,
+    noRender,
+    noRender,
+    noRender,
+    () => workspaceWrites.push('erank'),
+    noRender,
+    noRender,
+    noRender,
+    noRender,
+    noRender,
+    noRender,
+  )
+  const renderExtensionStateUpdate = createRefresh(
+    () => chromeRenders.push('extension'),
+    () => chromeRenders.push('header'),
+    () => chromeRenders.push('tabs'),
+    renderActiveResearchStage,
+  )
+  const importExtensionResults = (extensionState) => {
+    appState.researchRows = extensionState.results.map((row) => ({ ...row }))
+  }
+  const requestExtension = (action) => {
+    assert.equal(action, 'GET_MARKET_STATE')
+    activeRequestId = `poll-${++requestSequence}`
+    return new Promise((resolve, reject) => {
+      pendingRequests.set(activeRequestId, { resolve, reject, timeoutId: activeRequestId })
+    })
+  }
+  let pollExtensionState
+  const handler = createHandler(
+    appState,
+    windowObject,
+    'market-finder-extension',
+    noRender,
+    noRender,
+    () => pollExtensionState(),
+    pendingRequests,
+    importExtensionResults,
+    renderExtensionStateUpdate,
+    (error) => String(error),
+  )
+  pollExtensionState = createPoll(
+    appState,
+    requestExtension,
+    importExtensionResults,
+    renderExtensionStateUpdate,
+    windowObject,
+    (error) => String(error),
+    noRender,
+    { extensionStatus: { textContent: '' } },
+    noRender,
+  )
+
+  const deliverPoll = async (extensionState) => {
+    const writesBefore = workspaceWrites.length
+    const pendingPoll = pollExtensionState()
+    await Promise.resolve()
+    handler({
+      source: windowObject,
+      data: {
+        source: 'market-finder-extension',
+        action: 'MARKET_STATE',
+        requestId: activeRequestId,
+        ok: true,
+        state: extensionState,
+      },
+    })
+    await pendingPoll
+    return workspaceWrites.length - writesBefore
+  }
+
+  const changedState = {
+    active: true,
+    mode: 'erank',
+    currentKeyword: 'ghost shirt',
+    remaining: 1,
+    results: [{ keyword: 'ghost shirt', erankSearchVolume: 120 }],
+  }
+  assert.equal(await deliverPoll(changedState), 1, 'one changed pending response may write the Workspace once')
+  assert.equal(
+    await deliverPoll(JSON.parse(JSON.stringify(changedState))),
+    0,
+    'the next semantically identical pending response must not write the Workspace',
+  )
+  assert.deepEqual(chromeRenders, ['extension', 'header', 'tabs', 'extension', 'header', 'tabs'])
 })
 
 test('refreshes the active stage once for every extension import outcome', () => {
@@ -859,5 +1038,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260722-7')
+  assert.equal(stylesheetVersion, '20260722-8')
 })
