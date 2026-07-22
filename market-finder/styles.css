@@ -158,7 +158,8 @@ button:disabled {
 }
 
 .app-shell {
-  width: min(1760px, calc(100% - 24px));
+  width: min(1760px, calc(100% - 20px));
+  min-width: 1260px;
   margin: 0 auto;
   padding: 12px 0 24px;
 }
@@ -182,8 +183,79 @@ button:disabled {
 }
 
 .topbar {
+  display: grid;
+  grid-template-columns: minmax(360px, .72fr) minmax(700px, 1.28fr);
+  align-items: center;
   min-height: 76px;
   margin-bottom: 18px;
+}
+
+.research-status-bar {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 86px minmax(190px, 1.1fr) minmax(132px, auto);
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.research-status-item,
+.research-global-stop {
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.research-status-item + .research-status-item,
+.research-global-stop {
+  border-left: 1px solid var(--line);
+}
+
+.research-status-item {
+  display: grid;
+  gap: 3px;
+}
+
+.research-status-item small,
+.research-global-stop small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.research-status-item strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.research-status-item strong[data-connected="true"] {
+  color: #166534;
+}
+
+.research-status-item strong[data-connected="false"] {
+  color: var(--rose);
+}
+
+.research-global-stop {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.research-global-stop .danger-btn {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.research-global-stop small {
+  overflow-wrap: anywhere;
 }
 
 .eyebrow,
@@ -2916,8 +2988,8 @@ button.research-table-row {
   display: grid;
   grid-template-columns: 220px minmax(720px, 1fr) 320px;
   min-width: 1260px;
-  height: calc(100vh - 176px);
-  min-height: 640px;
+  height: calc(100vh - 358px);
+  min-height: 480px;
   border: 1px solid var(--line);
   border-top: 0;
   background: var(--panel);
@@ -3062,8 +3134,18 @@ button.research-table-row {
 }
 
 .research-queue-row.is-active small,
-.research-queue-row.is-pending small {
+.research-queue-row.is-pending small,
+.research-queue-row.is-unsearched small {
   color: #1d4ed8;
+}
+
+.research-queue-row.is-partial {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.research-queue-row.is-partial small {
+  color: var(--amber);
 }
 
 .research-queue-row.is-hold small {

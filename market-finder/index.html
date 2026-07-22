@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260722-5">
+    <link rel="stylesheet" href="./styles.css?v=20260722-7">
   </head>
   <body>
     <main class="app-shell">
@@ -17,6 +17,26 @@
           <h1>売れそうなEtsy商品を探す</h1>
           <p class="top-summary">商品を選んで、検索されている言葉と売れている商品を順番に確認します。</p>
         </div>
+        <section id="researchStatusBar" class="research-status-bar" aria-label="現在の調査状態">
+          <div class="research-status-item">
+            <small>調査条件</small>
+            <strong id="researchGlobalCondition">読み込み中</strong>
+          </div>
+          <div class="research-status-item">
+            <small>接続</small>
+            <strong id="researchGlobalConnection">確認中</strong>
+          </div>
+          <div class="research-status-item research-status-activity">
+            <small>実行中</small>
+            <strong id="researchGlobalActivity" aria-live="polite">待機中</strong>
+          </div>
+          <div class="research-global-stop">
+            <button id="researchGlobalStopBtn" type="button" class="danger-btn" disabled aria-describedby="researchGlobalStopReason">
+              <span aria-hidden="true">■</span><span>停止</span>
+            </button>
+            <small id="researchGlobalStopReason">停止できる調査はありません</small>
+          </div>
+        </section>
         <div class="top-actions advanced-only">
           <button id="copyKeywordsBtn" type="button" class="ghost-btn" data-optional="予備">候補リストをコピー</button>
           <button id="downloadJobBtn" type="button" class="dark-btn" data-optional="予備">接続できない時のJSON</button>
@@ -689,6 +709,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260722-5"></script>
+    <script type="module" src="./src/app.js?v=20260722-7"></script>
   </body>
 </html>

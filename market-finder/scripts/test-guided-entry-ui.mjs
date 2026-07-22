@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { extensionResultsImportMode } from '../src/research-flow.js'
+import { deriveErankCaptureUiState } from '../src/research-console-ui.js'
 
 const root = new URL('../', import.meta.url)
 const [html, app, styles] = await Promise.all([
@@ -83,6 +84,21 @@ test('renders the five-stage research console', () => {
   }
 })
 
+test('renders one global research status bar above quick start', () => {
+  assert.ok(position('researchStatusBar') < position('researchConsole'))
+  assert.ok(position('researchStatusBar') < html.indexOf('class="quick-start"'))
+  for (const id of [
+    'researchGlobalCondition',
+    'researchGlobalConnection',
+    'researchGlobalActivity',
+    'researchGlobalStopBtn',
+    'researchGlobalStopReason',
+  ]) {
+    assert.equal(html.match(new RegExp(`id="${id}"`, 'g'))?.length, 1)
+  }
+  assert.match(html, /id="researchGlobalStopBtn"[^>]*disabled[^>]*aria-describedby="researchGlobalStopReason"/)
+})
+
 test('renders queue rows and inspector details without starting research', () => {
   assert.match(app, /function researchQueueRows\(stageId = state\.consoleUi\.activeStage\)/)
   assert.match(app, /function renderResearchQueue\(\)/)
@@ -95,6 +111,48 @@ test('renders queue rows and inspector details without starting research', () =>
 test('normalizes eRank queue rows so completed results suppress duplicate capture states', () => {
   assert.match(app, /const completedKeys = new Set\(completed\.map\(\(row\) => normalizePhrase\(row\.keyword\)\)\)/)
   assert.match(app, /!completedKeys\.has\(normalizePhrase\(row\.keyword\)\)/)
+})
+
+test('executes eRank capture UI states from extension progress without changing research rows', () => {
+  const body = app.match(/function erankCaptureStateRows\(\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction friendlyErankCaptureError/)?.[1]
+  assert.ok(body, 'eRank capture state function must be extractable')
+  const createCaptureRows = new Function(
+    'state',
+    'normalizePhrase',
+    'deriveErankCaptureUiState',
+    `return function erankCaptureStateRows() {${body}\n}`,
+  )
+  const plan = [{ query: 'ghost shirt', queryKind: 'direct', sourceKeywords: ['ghost shirt'] }]
+  const statusFor = ({ researchRow, extensionState }) => createCaptureRows(
+    {
+      erankQueryPlan: plan,
+      researchRows: researchRow ? [researchRow] : [],
+      extensionState,
+    },
+    (value) => String(value ?? '').trim().toLowerCase(),
+    deriveErankCaptureUiState,
+  )()[0]?.status ?? 'completed'
+
+  assert.equal(statusFor({}), 'unsearched')
+  assert.equal(statusFor({ extensionState: { active: true, mode: 'erank', currentKeyword: 'ghost shirt' } }), 'active')
+  assert.equal(statusFor({ researchRow: { keyword: 'ghost shirt', erankSearchVolume: 120 } }), 'partial')
+  assert.equal(statusFor({ researchRow: { keyword: 'ghost shirt', erankAttemptedAt: '2026-07-22T10:00:00Z' } }), 'failed')
+  assert.equal(statusFor({
+    researchRow: {
+      keyword: 'ghost shirt',
+      erankSearchVolume: 0,
+      erankClicks: 0,
+      erankCompetition: 0,
+      erankKeywordDifficulty: 0,
+    },
+  }), 'completed')
+})
+
+test('keeps stage visibility ownership and rail render caching centralized', () => {
+  assert.doesNotMatch(app, /marketplaceInsightPanel\.hidden/)
+  assert.match(app, /renderHtmlIfChanged\(elements\.researchQueueFilters, filtersHtml\)/)
+  assert.match(app, /renderHtmlIfChanged\(elements\.researchQueueList, listHtml\)/)
+  assert.match(app, /renderHtmlIfChanged\(display,/)
 })
 
 test('keeps extension and action DOM contracts unique', () => {
@@ -142,7 +200,7 @@ test('renders only the active research stage details', () => {
   assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
   assert.match(app, /case 'results':[\s\S]{0,300}renderResultsTable\(\)[\s\S]{0,300}renderCrossNicheDrilldown\(\)[\s\S]{0,300}renderSeoPlan\(\)/)
   assert.match(app, /function renderActiveResearchStage\(\)[\s\S]{0,1800}renderResearchQueue\(\)[\s\S]{0,300}renderResearchInspector\(\)/)
-  assert.match(app, /function renderAll\(\) \{\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
+  assert.match(app, /function renderAll\(\) \{\s*renderGlobalResearchStatus\(\)\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
 })
 
 test('dispatches only the selected stage detail renderers', () => {
@@ -169,7 +227,7 @@ test('dispatches only the selected stage detail renderers', () => {
     candidates: ['candidates', 'queue', 'inspector'],
     erank: ['erank', 'queue', 'inspector'],
     etsy: ['etsy', 'queue', 'inspector'],
-    results: ['results', 'cross-niche', 'seo', 'queue', 'inspector'],
+    results: ['results', 'cross-niche', 'seo'],
   }
 
   for (const [stage, calls] of Object.entries(expected)) {
@@ -192,6 +250,57 @@ test('dispatches only the selected stage detail renderers', () => {
     dispatch()
     assert.deepEqual(rendered, calls, `${stage} must not render another stage's detail view`)
   }
+})
+
+test('BRIDGE_READY refresh cannot reveal Etsy while another stage is active', () => {
+  const body = app.match(/function handleExtensionMessage\(event\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction updateExtensionBadge/)?.[1]
+  assert.ok(body, 'extension message handler must be extractable')
+  const createHandler = new Function(
+    'state',
+    'window',
+    'EXTENSION_SOURCE',
+    'updateExtensionBadge',
+    'renderMarketplaceInsightPlan',
+    'pollExtensionState',
+    'pendingExtensionRequests',
+    'importExtensionResults',
+    'renderExtensionStateUpdate',
+    'friendlyExtensionError',
+    `return function handleExtensionMessage(event) {${body}\n}`,
+  )
+  const windowObject = { clearTimeout() {} }
+  const state = { consoleUi: { activeStage: 'candidates' }, extensionConnected: false }
+  const panels = {
+    candidates: { hidden: false },
+    etsy: { hidden: true },
+  }
+  let refreshes = 0
+  const handler = createHandler(
+    state,
+    windowObject,
+    'market-finder-extension',
+    () => {},
+    () => { panels.etsy.hidden = false },
+    () => {},
+    new Map(),
+    () => {},
+    () => {
+      refreshes += 1
+      panels.candidates.hidden = false
+      panels.etsy.hidden = true
+    },
+    (error) => String(error),
+  )
+
+  handler({
+    source: windowObject,
+    data: { source: 'market-finder-extension', action: 'BRIDGE_READY' },
+  })
+
+  assert.equal(state.extensionConnected, true)
+  assert.equal(refreshes, 1)
+  assert.equal(panels.etsy.hidden, true)
+  assert.equal(panels.candidates.hidden, false)
 })
 
 test('routes extension state notifications through the active stage renderer', () => {
@@ -253,6 +362,7 @@ test('refreshes the active stage once for every extension import outcome', () =>
   )
   const createRefresh = new Function(
     'renderExtensionState',
+    'renderGlobalResearchStatus',
     'renderResearchStageTabs',
     'renderActiveResearchStage',
     `return function renderExtensionStateUpdate() {${refreshBody}\n}`,
@@ -291,6 +401,7 @@ test('refreshes the active stage once for every extension import outcome', () =>
     const rendered = []
     const refresh = createRefresh(
       () => rendered.push('extension'),
+      () => rendered.push('header'),
       () => rendered.push('tabs'),
       () => rendered.push('active'),
     )
@@ -298,7 +409,7 @@ test('refreshes the active stage once for every extension import outcome', () =>
     assert.equal(importResults(scenario.state), scenario.expectedImport, scenario.label)
     refresh()
     assert.equal(persistCount, scenario.expectedPersists, scenario.label)
-    assert.deepEqual(rendered, ['extension', 'tabs', 'active'], scenario.label)
+    assert.deepEqual(rendered, ['extension', 'header', 'tabs', 'active'], scenario.label)
   }
 })
 
@@ -604,6 +715,36 @@ test('keeps research stage tabs auto-route-only and ignores CSV stage selection'
   }
 })
 
+test('routes the global stop action to the existing active service stop behavior', () => {
+  const body = app.match(/function stopActiveResearch\(\) \{([\s\S]*?)\n\}/)?.[1]
+  assert.ok(body, 'global stop router must be extractable')
+  const createStop = new Function(
+    'researchHeaderState',
+    'stopMarketplaceInsightAutomation',
+    'stopExtensionResearch',
+    `return function stopActiveResearch() {${body}\n}`,
+  )
+  const calls = []
+
+  createStop(
+    () => ({ stopKind: 'marketplace' }),
+    () => calls.push('marketplace'),
+    () => calls.push('extension'),
+  )()
+  createStop(
+    () => ({ stopKind: 'extension' }),
+    () => calls.push('marketplace'),
+    () => calls.push('extension'),
+  )()
+  createStop(
+    () => ({ stopKind: '' }),
+    () => calls.push('marketplace'),
+    () => calls.push('extension'),
+  )()
+
+  assert.deepEqual(calls, ['marketplace', 'extension'])
+})
+
 test('derives every final-result toolbar action from one state function', () => {
   const body = app.match(/function finalResultToolbarState\(\) \{([\s\S]*?)\n\}/)?.[1]
   assert.ok(body, 'finalResultToolbarState must be extractable')
@@ -668,7 +809,19 @@ test('uses action names instead of legacy Step labels in user-facing copy', () =
 
 test('styles a desktop research console without mobile stacking', () => {
   assert.match(styles, /body\s*\{[^}]*min-width:\s*1280px/)
+  assert.match(styles, /\.app-shell\s*\{[^}]*width:\s*min\(1760px,\s*calc\(100% - 20px\)\)[^}]*min-width:\s*1260px/)
   assert.match(styles, /\.research-console\s*\{[^}]*grid-template-columns:\s*220px\s+minmax\(720px,\s*1fr\)\s+320px/)
+  const consoleHeightMatch = styles.match(/\.research-console\s*\{[^}]*min-width:\s*1260px[^}]*height:\s*calc\(100vh - (\d+)px\)[^}]*min-height:\s*480px/)
+  assert.ok(consoleHeightMatch, 'desktop console keeps its fixed three-column width and viewport height budget')
+  const consoleViewportOffset = Number(consoleHeightMatch[1])
+  for (const viewportHeight of [900, 1080]) {
+    const consoleTop = 334
+    const shellBottomPadding = 24
+    assert.ok(
+      consoleTop + (viewportHeight - consoleViewportOffset) + shellBottomPadding <= viewportHeight,
+      `console and shell padding must fit a ${viewportHeight}px desktop viewport`,
+    )
+  }
   assert.match(styles, /\.research-stage-tabs/)
   assert.match(styles, /\.final-result-toolbar/)
   assert.match(styles, /\.research-console-queue,\s*\.research-console-inspector\s*\{[^}]*overflow:\s*auto/)
@@ -706,5 +859,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260722-5')
+  assert.equal(stylesheetVersion, '20260722-7')
 })

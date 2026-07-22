@@ -7,6 +7,76 @@ export const RESEARCH_STAGE_IDS = Object.freeze([
 ])
 
 const QUEUE_FILTERS = new Set(['all', 'pending', 'active', 'completed', 'failed', 'hold'])
+const ERANK_EXPECTED_METRICS = Object.freeze([
+  ['erankSearchVolume', 'Search'],
+  ['erankClicks', 'Clicks'],
+  ['erankCompetition', 'Competition'],
+  ['erankKeywordDifficulty', 'KD'],
+])
+const renderedHtmlByElement = new WeakMap()
+
+function hasMetricValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== ''
+}
+
+export function deriveErankCaptureUiState(row = {}, capture = {}) {
+  const missingColumns = ERANK_EXPECTED_METRICS
+    .filter(([key]) => !hasMetricValue(row[key]))
+    .map(([, label]) => label)
+  const presentCount = ERANK_EXPECTED_METRICS.length - missingColumns.length
+  const attempted = Boolean(row.erankAttemptedAt || row.erankCheckedAt || row.error)
+  const status = capture.active
+    ? 'active'
+    : presentCount === ERANK_EXPECTED_METRICS.length
+      ? 'completed'
+      : presentCount > 0
+        ? 'partial'
+        : attempted
+          ? 'failed'
+          : 'unsearched'
+
+  return {
+    status,
+    missingColumns,
+    nextDestination: status === 'completed' ? 'Etsy Marketplace Insights' : 'eRank Keyword Tool',
+  }
+}
+
+export function renderHtmlIfChanged(element, html) {
+  if (!element) return false
+  const nextHtml = String(html ?? '')
+  if (renderedHtmlByElement.get(element) === nextHtml) return false
+  element.innerHTML = nextHtml
+  renderedHtmlByElement.set(element, nextHtml)
+  return true
+}
+
+export function deriveResearchHeaderState(input = {}) {
+  const connected = Boolean(input.connected)
+  const extensionActive = Boolean(input.extensionState?.active)
+  const marketplaceActive = Boolean(input.marketplaceActive)
+  const extensionMode = String(input.extensionState?.mode ?? '').toLowerCase()
+  const extensionService = extensionMode.includes('erank') ? 'eRank' : 'EverBee'
+  const service = marketplaceActive ? 'Etsy公式' : extensionActive ? extensionService : ''
+  const keyword = marketplaceActive
+    ? String(input.marketplaceKeyword ?? '').trim()
+    : String(input.extensionState?.currentKeyword ?? '').trim()
+  const canStop = marketplaceActive || extensionActive
+  const stopKind = marketplaceActive ? 'marketplace' : extensionActive ? 'extension' : ''
+
+  return {
+    condition: String(input.condition ?? '').trim() || '条件未設定',
+    connection: connected ? '接続済み' : '未接続',
+    activity: service ? `${service} / ${keyword || '次のキーワードを準備中'}` : '待機中',
+    canStop,
+    stopKind,
+    stopReason: marketplaceActive
+      ? 'Etsy公式の自動確認を停止します'
+      : extensionActive
+        ? `${extensionService}調査を停止します`
+        : '停止できる調査はありません',
+  }
+}
 
 export function createResearchConsoleUi(saved = {}) {
   return {
@@ -47,6 +117,9 @@ export function selectResearchQueueFilter(ui, queueFilter) {
 export function filterResearchQueueRows(rows = [], filter = 'all') {
   const normalizedFilter = String(filter ?? 'all').trim().toLowerCase()
   if (normalizedFilter === 'all') return [...rows]
+  if (normalizedFilter === 'pending') {
+    return rows.filter((row) => ['pending', 'unsearched', 'partial'].includes(String(row?.status ?? '').trim().toLowerCase()))
+  }
   return rows.filter((row) => String(row?.status ?? '').trim().toLowerCase() === normalizedFilter)
 }
 
