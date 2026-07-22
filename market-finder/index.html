@@ -81,8 +81,22 @@
         <div class="simple-status" id="simpleStatus">まず商品を選んで「候補を自動で探す」を押してください。</div>
       </section>
 
-      <section class="workspace-grid">
-        <aside class="panel controls-panel">
+      <nav id="researchStageTabs" class="research-stage-tabs" aria-label="調査ステージ">
+        <button type="button" data-research-stage="conditions" aria-selected="true"><span>1</span><strong>条件</strong><small id="researchStageConditionsStatus">未着手</small></button>
+        <button type="button" data-research-stage="candidates" aria-selected="false"><span>2</span><strong>候補</strong><small id="researchStageCandidatesStatus">未着手</small></button>
+        <button type="button" data-research-stage="erank" aria-selected="false"><span>3</span><strong>eRank</strong><small id="researchStageErankStatus">未着手</small></button>
+        <button type="button" data-research-stage="etsy" aria-selected="false"><span>4</span><strong>Etsy公式</strong><small id="researchStageEtsyStatus">未着手</small></button>
+        <button type="button" data-research-stage="results" aria-selected="false"><span>5</span><strong>最終結果</strong><small id="researchStageResultsStatus">未着手</small></button>
+      </nav>
+
+      <section id="researchConsole" class="research-console flow-auto-only">
+        <aside id="researchQueue" class="research-console-queue" aria-label="調査キュー">
+          <div id="researchQueueFilters" class="research-queue-filters"></div>
+          <div id="researchQueueList" class="research-queue-list"></div>
+        </aside>
+        <div id="researchWorkspace" class="research-console-workspace">
+          <section class="workspace-grid">
+        <aside class="panel controls-panel" data-research-panel="conditions">
           <div class="panel-heading">
             <p class="section-kicker">1 / 5</p>
             <h2>条件を決めて候補を作る</h2>
@@ -206,7 +220,7 @@
           </div>
         </aside>
 
-        <section class="panel candidates-panel">
+        <section class="panel candidates-panel" data-research-panel="candidates" hidden>
           <div class="panel-heading row-heading">
             <div>
               <p class="section-kicker">2 / 5</p>
@@ -246,6 +260,10 @@
           </div>
         </section>
 
+        <aside id="researchInspector" class="research-console-inspector" aria-label="選択キーワードの詳細">
+          <details class="advanced-research-input advanced-only">
+            <summary>詳細入力</summary>
+            <div id="researchInspectorContent" class="research-inspector-content">
         <aside class="panel research-panel">
           <div class="panel-heading">
             <p class="section-kicker">予備入力</p>
@@ -402,9 +420,12 @@
             <button id="importCsvBtn" type="button" class="ghost-btn full-width" data-optional="CSV">貼り付けを読み込む</button>
           </div>
         </aside>
-      </section>
+            </div>
+          </details>
+        </aside>
+          </section>
 
-      <section class="erank-section">
+      <section class="erank-section" data-research-panel="erank" hidden>
         <div class="results-heading">
           <div>
             <p class="section-kicker">3 / 5</p>
@@ -441,7 +462,7 @@
         </div>
       </section>
 
-      <section id="marketplaceInsightPanel" class="marketplace-section">
+      <section id="marketplaceInsightPanel" class="marketplace-section" data-research-panel="etsy" hidden>
         <div class="results-heading">
           <div>
             <p class="section-kicker">4 / 5</p>
@@ -487,6 +508,7 @@
         </div>
       </section>
 
+      <section data-research-panel="results" hidden>
       <section class="results-section">
         <div class="results-heading">
           <div>
@@ -589,6 +611,9 @@
 
         <ul id="seoWarnings" class="seo-warnings"></ul>
         <div id="seoStatus" class="inline-status">eRank/EverBeeの結果を入れたあと、ここでタイトルとタグに整えます。</div>
+      </section>
+      </section>
+        </div>
       </section>
     </main>
 

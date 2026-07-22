@@ -22,6 +22,26 @@ test('uses one set of five numbered workflow steps', () => {
   }
 })
 
+test('renders the five-stage research console', () => {
+  assert.match(html, /id="researchStageTabs"/)
+  for (const stage of ['conditions', 'candidates', 'erank', 'etsy', 'results']) {
+    assert.match(html, new RegExp(`data-research-stage="${stage}"`))
+    assert.match(html, new RegExp(`data-research-panel="${stage}"`))
+  }
+  assert.match(html, /id="researchQueue"/)
+  assert.match(html, /id="researchWorkspace"/)
+  assert.match(html, /id="researchInspector"/)
+})
+
+test('keeps extension and action DOM contracts unique', () => {
+  for (const id of [
+    'trendAutoBtn', 'candidateErankBtn', 'marketplaceStartBtn',
+    'erankToEverbeeBtn', 'resultsList', 'downloadStep4CsvBtn',
+  ]) {
+    assert.equal(html.match(new RegExp(`id="${id}"`, 'g'))?.length, 1)
+  }
+})
+
 test('renders the two entry routes as one radio group', () => {
   assert.match(html, /<fieldset class="flow-choice-grid"/)
   assert.match(html, /id="flowAutoBtn"[^>]*type="radio"[^>]*name="flowChoice"[^>]*value="auto"/)
