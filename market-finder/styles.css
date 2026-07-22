@@ -3323,4 +3323,51 @@ button.research-table-row {
   .summary-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .research-console .two-col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .research-console .results-heading {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .research-console .research-table-head {
+    display: grid;
+  }
+
+  .research-console .erank-table {
+    min-width: 800px;
+  }
+
+  .research-console .everbee-table {
+    min-width: 780px;
+  }
+
+  .research-console .erank-table-head,
+  .research-console .erank-table-row {
+    grid-template-columns: 74px minmax(220px, 1.4fr) minmax(72px, .45fr) minmax(72px, .45fr) minmax(92px, .55fr) minmax(70px, .35fr) minmax(190px, .9fr);
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .research-console .everbee-table-head,
+  .research-console .everbee-table-row {
+    grid-template-columns: 82px minmax(220px, 1.6fr) repeat(5, minmax(72px, .45fr));
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .research-console .keyword-cell,
+  .research-console .reason-cell,
+  .research-console .action-cell {
+    grid-column: auto;
+  }
+
+  .research-console .table-cell::before {
+    display: none;
+  }
 }

@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260722-4">
+    <link rel="stylesheet" href="./styles.css?v=20260722-5">
   </head>
   <body>
     <main class="app-shell">
@@ -81,7 +81,7 @@
         <div class="simple-status" id="simpleStatus">まず商品を選んで「候補を自動で探す」を押してください。</div>
       </section>
 
-      <nav id="researchStageTabs" class="research-stage-tabs" aria-label="調査ステージ">
+      <nav id="researchStageTabs" class="research-stage-tabs flow-auto-only" aria-label="調査ステージ">
         <button type="button" data-research-stage="conditions" aria-selected="true"><span>1</span><strong>条件</strong><small id="researchStageConditionsStatus">未着手</small></button>
         <button type="button" data-research-stage="candidates" aria-selected="false"><span>2</span><strong>候補</strong><small id="researchStageCandidatesStatus">未着手</small></button>
         <button type="button" data-research-stage="erank" aria-selected="false"><span>3</span><strong>eRank</strong><small id="researchStageErankStatus">未着手</small></button>
@@ -530,9 +530,9 @@
             <span id="finalResultFreshness">最新の確認日時を表示します</span>
           </div>
           <div class="final-result-actions">
-            <button id="copyFinalKeywordsBtn" type="button" class="ghost-btn">キーワードをコピー</button>
-            <button id="downloadErankCsvBtn" type="button" class="ghost-btn" data-optional="保存">参考用eRank CSV</button>
-            <button id="downloadStep4CsvBtn" type="button" class="primary-btn" data-optional="保存">未来デザイナー用CSV</button>
+            <button id="copyFinalKeywordsBtn" type="button" class="ghost-btn" aria-describedby="finalResultFreshness">キーワードをコピー</button>
+            <button id="downloadErankCsvBtn" type="button" class="ghost-btn" data-optional="保存" aria-describedby="finalResultFreshness">参考用eRank CSV</button>
+            <button id="downloadStep4CsvBtn" type="button" class="primary-btn" data-optional="保存" aria-describedby="finalResultFreshness">未来デザイナー用CSV</button>
           </div>
         </div>
         <div id="researchRoundProgress" class="research-round-progress" hidden></div>
@@ -689,6 +689,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260722-4"></script>
+    <script type="module" src="./src/app.js?v=20260722-5"></script>
   </body>
 </html>

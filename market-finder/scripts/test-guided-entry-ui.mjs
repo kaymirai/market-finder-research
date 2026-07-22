@@ -507,6 +507,90 @@ test('synchronizes radio checked state in setFlowMode', () => {
   assert.match(app, /choice\.closest\('\.flow-choice'\)/)
 })
 
+test('keeps research stage tabs auto-route-only and ignores CSV stage selection', () => {
+  assert.match(html, /<nav id="researchStageTabs" class="research-stage-tabs flow-auto-only"/)
+
+  const body = app.match(/function setActiveResearchStage\(stageId, \{ persist = true \} = \{\}\) \{([\s\S]*?)\n\}/)?.[1]
+  assert.ok(body, 'setActiveResearchStage must be extractable')
+  const createSetter = new Function(
+    'state',
+    'selectResearchStage',
+    'renderResearchStageTabs',
+    'renderActiveResearchStage',
+    'persistMarketFinderState',
+    'document',
+    `return function setActiveResearchStage(stageId, { persist = true } = {}) {${body}\n}`,
+  )
+  for (const flowMode of ['csv', 'seo']) {
+    const state = { consoleUi: { activeStage: 'conditions' } }
+    const rendered = []
+    const setActiveResearchStage = createSetter(
+      state,
+      (ui, stageId) => ({ ...ui, activeStage: stageId }),
+      () => rendered.push('tabs'),
+      () => rendered.push('stage'),
+      () => rendered.push('persist'),
+      { body: { classList: { contains: (className) => className === `flow-${flowMode}` } } },
+    )
+
+    setActiveResearchStage('results')
+
+    assert.equal(state.consoleUi.activeStage, 'conditions', `${flowMode} must not change the active stage`)
+    assert.deepEqual(rendered, [], `${flowMode} must not render a stage change`)
+  }
+})
+
+test('derives every final-result toolbar action from one state function', () => {
+  const body = app.match(/function finalResultToolbarState\(\) \{([\s\S]*?)\n\}/)?.[1]
+  assert.ok(body, 'finalResultToolbarState must be extractable')
+  const createState = new Function(
+    'everbeeResultRows',
+    'erankResultRows',
+    'erankCaptureStateRows',
+    'latestResearchCheckedAt',
+    'formatDateTime',
+    `return function finalResultToolbarState() {${body}\n}`,
+  )
+  const rows = {
+    final: [],
+    erank: [],
+    captures: [],
+  }
+  const finalResultToolbarState = createState(
+    () => rows.final,
+    () => rows.erank,
+    () => rows.captures,
+    () => '2026-07-22T12:34:00.000Z',
+    () => '2026/07/22 12:34',
+  )
+
+  const empty = finalResultToolbarState()
+  assert.equal(empty.canCopyFinalKeywords, false)
+  assert.equal(empty.canDownloadStep4Csv, false)
+  assert.equal(empty.canDownloadErankCsv, false)
+  assert.match(empty.statusMessage, /A\/B/)
+  assert.match(empty.statusMessage, /最終結果/)
+  assert.match(empty.statusMessage, /eRank/)
+
+  rows.erank = [{ keyword: 'erank only' }]
+  const erankOnly = finalResultToolbarState()
+  assert.equal(erankOnly.canCopyFinalKeywords, false)
+  assert.equal(erankOnly.canDownloadStep4Csv, false)
+  assert.equal(erankOnly.canDownloadErankCsv, true)
+
+  rows.final = [{ score: { opportunityLabel: 'A' } }]
+  const ready = finalResultToolbarState()
+  assert.equal(ready.canCopyFinalKeywords, true)
+  assert.equal(ready.canDownloadStep4Csv, true)
+  assert.equal(ready.canDownloadErankCsv, true)
+
+  assert.match(app, /function renderFinalResultToolbar\(\)[\s\S]{0,600}elements\.copyFinalKeywordsBtn\.disabled = !toolbarState\.canCopyFinalKeywords/)
+  assert.match(app, /function renderResultsTable\(\) \{\s*renderFinalResultToolbar\(\)/)
+  assert.match(html, /id="copyFinalKeywordsBtn"[^>]*aria-describedby="finalResultFreshness"/)
+  assert.match(html, /id="downloadErankCsvBtn"[^>]*aria-describedby="finalResultFreshness"/)
+  assert.match(html, /id="downloadStep4CsvBtn"[^>]*aria-describedby="finalResultFreshness"/)
+})
+
 test('styles native radio controls and no longer styles the removed workflow strip', () => {
   assert.match(styles, /\.flow-choice input\[type="radio"\]/)
   assert.doesNotMatch(styles, /\.workflow-strip/)
@@ -535,11 +619,28 @@ test('styles a desktop research console without mobile stacking', () => {
   assert.doesNotMatch(styles, /@media[^{}]*max-width[^{}]*\{[\s\S]{0,800}\.research-console[^}]*grid-template-columns:\s*1fr/)
 })
 
+test('preserves desktop console layouts after the 780px mobile cascade', () => {
+  const mobileCascade = styles.slice(styles.indexOf('@media (max-width: 780px)'))
+  assert.notEqual(mobileCascade, styles, 'the 780px media query must exist')
+  const mobileStackingIndex = mobileCascade.indexOf('.two-col,')
+  const consoleOverrideIndex = mobileCascade.indexOf('.research-console .two-col')
+
+  assert.ok(consoleOverrideIndex > mobileStackingIndex, 'console override must follow the mobile stacking rule')
+  assert.match(mobileCascade, /\.research-console \.two-col\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/)
+  assert.match(mobileCascade, /\.research-console \.results-heading\s*\{[^}]*flex-direction:\s*row/)
+  assert.match(mobileCascade, /\.research-console \.research-table-head\s*\{[^}]*display:\s*grid/)
+  assert.match(mobileCascade, /\.research-console \.erank-table\s*\{[^}]*min-width:\s*800px/)
+  assert.match(mobileCascade, /\.research-console \.everbee-table\s*\{[^}]*min-width:\s*780px/)
+  assert.match(mobileCascade, /\.research-console \.erank-table-head,[\s\S]{0,220}\.research-console \.erank-table-row\s*\{[^}]*grid-template-columns:\s*74px/)
+  assert.match(mobileCascade, /\.research-console \.everbee-table-head,[\s\S]{0,220}\.research-console \.everbee-table-row\s*\{[^}]*grid-template-columns:\s*82px/)
+  assert.match(mobileCascade, /\.research-console \.table-cell::before\s*\{[^}]*display:\s*none/)
+})
+
 test('uses one current cache version for the console stylesheet and module', () => {
   const stylesheetVersion = html.match(/styles\.css\?v=([^"']+)/)?.[1]
   const moduleVersion = html.match(/src\/app\.js\?v=([^"']+)/)?.[1]
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260722-4')
+  assert.equal(stylesheetVersion, '20260722-5')
 })

@@ -2356,7 +2356,7 @@ function renderErankResults() {
   const ranked = erankResultRows()
   const captureStates = erankCaptureStateRows()
   elements.erankCount.textContent = String(ranked.length + captureStates.filter((row) => row.status === 'failed').length)
-  elements.downloadErankCsvBtn.disabled = ranked.length === 0 && captureStates.length === 0
+  renderFinalResultToolbar()
   elements.erankToEverbeeBtn.disabled = ranked.length === 0
   renderErankSummary(ranked)
 
@@ -2695,13 +2695,38 @@ function renderOpportunityResultGroup({ title, description, items, emptyMessage,
   return `<details class="result-opportunity-collapsed"><summary>${escapeHtml(title)} ${items.length}件を見る</summary>${group}</details>`
 }
 
+function finalResultToolbarState() {
+  const finalRows = everbeeResultRows()
+  const erankRows = erankResultRows()
+  const captureStates = erankCaptureStateRows()
+  const canCopyFinalKeywords = finalRows.some((row) => ['A', 'B'].includes(row.score.opportunityLabel))
+  const canDownloadStep4Csv = finalRows.length > 0
+  const canDownloadErankCsv = erankRows.length > 0 || captureStates.length > 0
+  const unavailableReasons = []
+  if (!canCopyFinalKeywords) unavailableReasons.push('A/B候補がないため、キーワードをコピーできません')
+  if (!canDownloadStep4Csv) unavailableReasons.push('最終結果がないため、未来デザイナー用CSVを保存できません')
+  if (!canDownloadErankCsv) unavailableReasons.push('eRankデータがないため、参考用eRank CSVを保存できません')
+  const freshness = formatDateTime(latestResearchCheckedAt(finalRows))
+  return {
+    canCopyFinalKeywords,
+    canDownloadStep4Csv,
+    canDownloadErankCsv,
+    statusMessage: [freshness || '結果なし', ...unavailableReasons].join(' / '),
+  }
+}
+
+function renderFinalResultToolbar() {
+  const toolbarState = finalResultToolbarState()
+  elements.copyFinalKeywordsBtn.disabled = !toolbarState.canCopyFinalKeywords
+  elements.downloadStep4CsvBtn.disabled = !toolbarState.canDownloadStep4Csv
+  elements.downloadErankCsvBtn.disabled = !toolbarState.canDownloadErankCsv
+  elements.finalResultFreshness.textContent = toolbarState.statusMessage
+}
+
 function renderResultsTable() {
+  renderFinalResultToolbar()
   renderResearchRoundControls()
   const ranked = selectedRoundEverbeeRows()
-  const finalRows = everbeeResultRows()
-  elements.downloadStep4CsvBtn.disabled = finalRows.length === 0
-  elements.copyFinalKeywordsBtn.disabled = !finalRows.some((row) => ['A', 'B'].includes(row.score.opportunityLabel))
-  elements.finalResultFreshness.textContent = formatDateTime(latestResearchCheckedAt(finalRows)) || '結果なし'
 
   if (ranked.length === 0) {
     state.selectedResultKey = ''
@@ -3305,6 +3330,7 @@ function researchConsoleMetrics() {
 }
 
 function setActiveResearchStage(stageId, { persist = true } = {}) {
+  if (!document.body.classList.contains('flow-auto')) return
   state.consoleUi = selectResearchStage(state.consoleUi, stageId)
   renderResearchStageTabs()
   renderActiveResearchStage()
@@ -4467,7 +4493,7 @@ function setSimpleStatus(message) {
 }
 
 function setFlowMode(mode, options = {}) {
-  const activeMode = mode === 'csv' ? 'csv' : 'auto'
+  const activeMode = ['auto', 'csv', 'seo'].includes(mode) ? mode : 'auto'
   document.body.classList.remove('flow-auto', 'flow-csv', 'flow-seo')
   document.body.classList.add(`flow-${activeMode}`)
   ;[elements.flowAutoBtn, elements.flowCsvBtn, elements.flowSeoBtn].forEach((choice) => {
@@ -4478,9 +4504,12 @@ function setFlowMode(mode, options = {}) {
   if (activeMode === 'auto') {
     elements.simpleSeoStepNumber.textContent = '4'
     setSimpleStatus('商品と条件を選んで「候補を自動で探す」を押してください。')
-  } else {
+  } else if (activeMode === 'csv') {
     elements.simpleSeoStepNumber.textContent = '2'
     setSimpleStatus('CSVを貼って、1「CSVを読み込む」を押してください。')
+  } else {
+    elements.simpleSeoStepNumber.textContent = '2'
+    setSimpleStatus('キーワードを入れて、「SEO用に入れる」を押してください。')
   }
 
   if (options.persist !== false) persistMarketFinderState()
