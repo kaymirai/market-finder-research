@@ -507,6 +507,70 @@ test('synchronizes radio checked state in setFlowMode', () => {
   assert.match(app, /choice\.closest\('\.flow-choice'\)/)
 })
 
+test('persists and restores every selected flow mode', () => {
+  const selectedFlowModeBody = app.match(/function selectedFlowMode\(\) \{([\s\S]*?)\n\}/)?.[1]
+  const setFlowModeBody = app.match(/function setFlowMode\(mode, options = \{\}\) \{([\s\S]*?)\n\}/)?.[1]
+  assert.ok(selectedFlowModeBody, 'selectedFlowMode must be extractable')
+  assert.ok(setFlowModeBody, 'setFlowMode must be extractable')
+  const createSelectedFlowMode = new Function('document', `return function selectedFlowMode() {${selectedFlowModeBody}\n}`)
+  const createSetFlowMode = new Function(
+    'document',
+    'elements',
+    'setSimpleStatus',
+    'persistMarketFinderState',
+    `return function setFlowMode(mode, options = {}) {${setFlowModeBody}\n}`,
+  )
+  const createDocument = () => {
+    const classes = new Set()
+    return {
+      body: {
+        classList: {
+          add: (...names) => names.forEach((name) => classes.add(name)),
+          remove: (...names) => names.forEach((name) => classes.delete(name)),
+          contains: (name) => classes.has(name),
+        },
+      },
+    }
+  }
+  const createElements = () => {
+    const choice = (flowChoice) => ({
+      checked: false,
+      dataset: { flowChoice },
+      closest: () => ({ classList: { toggle: () => {} } }),
+    })
+    return {
+      flowAutoBtn: choice('auto'),
+      flowCsvBtn: choice('csv'),
+      flowSeoBtn: choice('seo'),
+      simpleSeoStepNumber: { textContent: '' },
+    }
+  }
+
+  for (const flowMode of ['auto', 'csv', 'seo']) {
+    const firstDocument = createDocument()
+    const selectBeforeReload = createSelectedFlowMode(firstDocument)
+    const firstElements = createElements()
+    let savedFlowMode = ''
+    const setBeforeReload = createSetFlowMode(
+      firstDocument,
+      firstElements,
+      () => {},
+      () => { savedFlowMode = selectBeforeReload() },
+    )
+
+    setBeforeReload(flowMode)
+    assert.equal(savedFlowMode, flowMode, `${flowMode} selection must persist its own value`)
+
+    const reloadedDocument = createDocument()
+    const reloadedElements = createElements()
+    const setAfterReload = createSetFlowMode(reloadedDocument, reloadedElements, () => {}, () => {})
+    setAfterReload(savedFlowMode, { persist: false })
+
+    assert.equal(reloadedDocument.body.classList.contains(`flow-${flowMode}`), true, `${flowMode} must be restored after reload`)
+    assert.equal(reloadedElements[`flow${flowMode[0].toUpperCase()}${flowMode.slice(1)}Btn`].checked, true)
+  }
+})
+
 test('keeps research stage tabs auto-route-only and ignores CSV stage selection', () => {
   assert.match(html, /<nav id="researchStageTabs" class="research-stage-tabs flow-auto-only"/)
 

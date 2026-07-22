@@ -417,6 +417,7 @@ function safeStorage() {
 
 function selectedFlowMode() {
   if (document.body.classList.contains('flow-csv')) return 'csv'
+  if (document.body.classList.contains('flow-seo')) return 'seo'
   return 'auto'
 }
 
