@@ -30,7 +30,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-market-finder.ps1 -N
 開くURL:
 
 ```text
-http://127.0.0.1:4173/market-finder/
+http://127.0.0.1:ポート番号/market-finder/
 ```
 
 ## Chrome拡張連携
