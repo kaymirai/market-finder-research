@@ -1801,7 +1801,7 @@ function renderMarketplaceInsightPlan() {
       : eligibleCandidates.length === 0
         ? 'eRank結果はありますが、Etsy公式へ進める基準を通った候補は0件です。上の「今回は保留した候補」を確認してください。'
       : !state.extensionConnected
-        ? 'eRank確認は完了しています。実Chromeで開き、Chrome拡張1.28をReloadしてから押してください。'
+        ? 'eRank確認は完了しています。実Chromeで開き、Chrome拡張1.29をReloadしてから押してください。'
         : officialProbeCount > 0
           ? `eRank保留のうち需要数値がある安全な上位${officialProbeCount}件を、Etsy公式データで再確認します。`
         : `eRankで絞った${eligibleCandidates.length}件をEtsy公式で順番に自動確認します。`
@@ -4107,7 +4107,7 @@ async function collectTrendScoutTerms() {
       const made = state.candidates.length
       const message = made > 0
         ? `候補作成は完了しました。外部サイトの自動取得は未接続ですが、入口ワード${searchSeedAdded}件と商品条件から調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`
-        : '候補を作れませんでした。外部サイトの自動取得も使う場合は、実Chromeで開き、Chrome拡張1.28をReloadしてください。Market Finderページは自動で再読み込みされます。'
+        : '候補を作れませんでした。外部サイトの自動取得も使う場合は、実Chromeで開き、Chrome拡張1.29をReloadしてください。Market Finderページは自動で再読み込みされます。'
       updateProgressModal({
         current: made > 0 ? '調査候補を反映' : '候補なし',
         done: 2,
@@ -4272,16 +4272,16 @@ function closeAdvancedModal() {
 function friendlyExtensionError(error) {
   const message = error instanceof Error ? error.message : String(error ?? '')
   if (/activeTab.*permission is required|either the .*activeTab.*permission is required/i.test(message)) {
-    return 'Chrome拡張の画面キャプチャ権限が不足しています。実Chromeで開き、拡張をReloadしてバージョン1.28になっているか確認してください。'
+    return 'Chrome拡張の画面キャプチャ権限が不足しています。実Chromeで開き、拡張をReloadしてバージョン1.29になっているか確認してください。'
   }
   if (/extension context invalidated/i.test(message)) {
-    return 'Chrome拡張の旧接続が残っています。実Chromeで拡張1.28をReloadすると、開いているMarket Finderも自動で再読み込みされます。'
+    return 'Chrome拡張の旧接続が残っています。実Chromeで拡張1.29をReloadすると、開いているMarket Finderも自動で再読み込みされます。'
   }
   if (/receiving end does not exist|could not establish connection/i.test(message)) {
-    return 'Chrome拡張とページがつながっていません。Market Finderを実Chromeで開き、Chrome拡張1.28をReloadしてください。ページは自動で再読み込みされます。'
+    return 'Chrome拡張とページがつながっていません。Market Finderを実Chromeで開き、Chrome拡張1.29をReloadしてください。ページは自動で再読み込みされます。'
   }
   if (/応答がありません/.test(message)) {
-    return 'Chrome拡張から応答がありません。Market Finderを実Chromeで開き、Chrome拡張1.28をReloadしてください。'
+    return 'Chrome拡張から応答がありません。Market Finderを実Chromeで開き、Chrome拡張1.29をReloadしてください。'
   }
   return message || 'Chrome拡張の処理に失敗しました。'
 }
@@ -4609,7 +4609,7 @@ function renderExtensionState() {
     if (elements.quickExtensionStatus) {
       elements.quickExtensionStatus.textContent = state.extensionConnected
         ? '接続済みです。eRankやEverBeeの自動取得を使えます。'
-        : '未接続です。実Chromeで開き、Chrome拡張1.28をReloadしてください。ページは自動で再読み込みされます。'
+        : '未接続です。実Chromeで開き、Chrome拡張1.29をReloadしてください。ページは自動で再読み込みされます。'
     }
     renderProgressModal(extensionState)
     return

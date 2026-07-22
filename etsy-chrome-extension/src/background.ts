@@ -1389,13 +1389,17 @@
         saveMarketState()
 
         try {
-            const response = await withTimeout(
-                marketMode === 'erank'
-                    ? runKeywordInErankTab(await ensureErankTab(), keyword)
-                    : runEverbeeKeyword(keyword),
-                MARKET_KEYWORD_TIMEOUT_MS,
-                `${marketMode === 'erank' ? 'eRank' : 'EverBee'} timed out for "${keyword}". Skipped this keyword.`
-            )
+            let response: ErankTabResponse | EverbeeTabResponse
+            if (marketMode === 'erank') {
+                const tabId = await ensureErankTab()
+                response = await runKeywordInErankTab(tabId, keyword)
+            } else {
+                response = await withTimeout(
+                    runEverbeeKeyword(keyword),
+                    MARKET_KEYWORD_TIMEOUT_MS,
+                    `EverBee timed out for "${keyword}". Skipped this keyword.`
+                )
+            }
             if (!marketActive || runId !== marketRunId) return
             if (response.ok && response.result) {
                 const result = sanitizeMarketResult(response.result)
@@ -1702,8 +1706,12 @@
     }
 
     async function runKeywordInErankTab(tabId: number, keyword: string): Promise<ErankTabResponse> {
-        await activateTab(tabId)
-        const firstTry = await sendErankMessage(tabId, keyword)
+        const timeoutMessage = `eRank timed out for "${keyword}". Skipped this keyword.`
+        const firstTry = await withTimeout(
+            sendErankMessage(tabId, keyword),
+            MARKET_KEYWORD_TIMEOUT_MS,
+            timeoutMessage
+        )
         if (firstTry.ok || !firstTry.error?.includes('Receiving end does not exist')) return firstTry
 
         await chrome.scripting.executeScript({
@@ -1712,7 +1720,11 @@
         })
 
         await activateTab(tabId)
-        return sendErankMessage(tabId, keyword)
+        return withTimeout(
+            sendErankMessage(tabId, keyword),
+            MARKET_KEYWORD_TIMEOUT_MS,
+            timeoutMessage
+        )
     }
 
     function sendEverbeeMessage(tabId: number, keyword: string): Promise<EverbeeTabResponse> {

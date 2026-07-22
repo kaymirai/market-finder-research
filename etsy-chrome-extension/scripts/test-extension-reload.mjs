@@ -34,6 +34,14 @@ test('waits for slow eRank metric columns before timing out the keyword', () => 
   assert.match(erankContentTypeScriptSource, /Date\.now\(\) - startedAt < ERANK_METRICS_READY_TIMEOUT_MS/)
 })
 
+test('starts the eRank fail-safe timeout when the search request is sent', () => {
+  const runner = backgroundTypeScriptSource.match(/async function runKeywordInErankTab[\s\S]*?(?=\n    function sendEverbeeMessage)/)?.[0] ?? ''
+
+  assert.doesNotMatch(runner, /await activateTab\(tabId\)\s+const firstTry/)
+  assert.match(runner, /withTimeout\(\s*sendErankMessage\(tabId, keyword\)/)
+  assert.doesNotMatch(backgroundTypeScriptSource, /runKeywordInErankTab\(await ensureErankTab\(\), keyword\)/)
+})
+
 function visibleElement(innerText = '') {
   return {
     innerText,
