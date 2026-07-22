@@ -130,6 +130,67 @@ test('sets the results console state and hides non-result rails', () => {
   assert.match(app, /elements\.researchInspector\.hidden = state\.consoleUi\.activeStage === 'results'/)
 })
 
+test('renders only the active research stage details', () => {
+  assert.match(app, /function renderActiveResearchStage\(\)/)
+  assert.match(app, /switch \(state\.consoleUi\.activeStage\)/)
+  assert.match(app, /case 'conditions':[\s\S]{0,300}renderTrendScoutStatus\(\)[\s\S]{0,300}renderBroadHints\(\)[\s\S]{0,300}renderSearchSeedRows\(\)/)
+  assert.match(app, /case 'candidates':[\s\S]{0,160}renderCandidates\(\)/)
+  assert.match(app, /case 'erank':[\s\S]{0,160}renderErankResults\(\)/)
+  assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
+  assert.match(app, /case 'results':[\s\S]{0,300}renderResultsTable\(\)[\s\S]{0,300}renderCrossNicheDrilldown\(\)[\s\S]{0,300}renderSeoPlan\(\)/)
+  assert.match(app, /function renderActiveResearchStage\(\)[\s\S]{0,1800}renderResearchQueue\(\)[\s\S]{0,300}renderResearchInspector\(\)/)
+  assert.match(app, /function renderAll\(\) \{\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
+})
+
+test('dispatches only the selected stage detail renderers', () => {
+  const body = app.match(/function renderActiveResearchStage\(\) \{([\s\S]*?)\n\}\n\nfunction renderAll\(\)/)?.[1]
+  assert.ok(body, 'active stage renderer must be extractable')
+
+  const createDispatcher = new Function(
+    'state',
+    'renderTrendScoutStatus',
+    'renderBroadHints',
+    'renderSearchSeedRows',
+    'renderCandidates',
+    'renderErankResults',
+    'renderMarketplaceInsightPlan',
+    'renderResultsTable',
+    'renderCrossNicheDrilldown',
+    'renderSeoPlan',
+    'renderResearchQueue',
+    'renderResearchInspector',
+    `return function renderActiveResearchStage() {${body}\n}`,
+  )
+  const expected = {
+    conditions: ['trend', 'broad', 'seeds', 'queue', 'inspector'],
+    candidates: ['candidates', 'queue', 'inspector'],
+    erank: ['erank', 'queue', 'inspector'],
+    etsy: ['etsy', 'queue', 'inspector'],
+    results: ['results', 'cross-niche', 'seo', 'queue', 'inspector'],
+  }
+
+  for (const [stage, calls] of Object.entries(expected)) {
+    const rendered = []
+    const render = (name) => () => rendered.push(name)
+    const dispatch = createDispatcher(
+      { consoleUi: { activeStage: stage } },
+      render('trend'),
+      render('broad'),
+      render('seeds'),
+      render('candidates'),
+      render('erank'),
+      render('etsy'),
+      render('results'),
+      render('cross-niche'),
+      render('seo'),
+      render('queue'),
+      render('inspector'),
+    )
+    dispatch()
+    assert.deepEqual(rendered, calls, `${stage} must not render another stage's detail view`)
+  }
+})
+
 test('renders the two entry routes as one radio group', () => {
   assert.match(html, /<fieldset class="flow-choice-grid"/)
   assert.match(html, /id="flowAutoBtn"[^>]*type="radio"[^>]*name="flowChoice"[^>]*value="auto"/)

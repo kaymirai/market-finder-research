@@ -3302,9 +3302,7 @@ function researchConsoleMetrics() {
 function setActiveResearchStage(stageId, { persist = true } = {}) {
   state.consoleUi = selectResearchStage(state.consoleUi, stageId)
   renderResearchStageTabs()
-  renderResearchQueue()
-  renderResearchInspector()
-  if (typeof renderActiveResearchStage === 'function') renderActiveResearchStage()
+  renderActiveResearchStage()
   if (persist) persistMarketFinderState()
 }
 
@@ -3324,19 +3322,35 @@ function renderResearchStageTabs() {
   })
 }
 
-function renderAll() {
-  renderResearchStageTabs()
+function renderActiveResearchStage() {
+  switch (state.consoleUi.activeStage) {
+    case 'conditions':
+      renderTrendScoutStatus()
+      renderBroadHints()
+      renderSearchSeedRows()
+      break
+    case 'candidates':
+      renderCandidates()
+      break
+    case 'erank':
+      renderErankResults()
+      break
+    case 'etsy':
+      renderMarketplaceInsightPlan()
+      break
+    case 'results':
+      renderResultsTable()
+      renderCrossNicheDrilldown()
+      renderSeoPlan()
+      break
+  }
   renderResearchQueue()
   renderResearchInspector()
-  renderTrendScoutStatus()
-  renderBroadHints()
-  renderSearchSeedRows()
-  renderCandidates()
-  renderErankResults()
-  renderMarketplaceInsightPlan()
-  renderResultsTable()
-  renderCrossNicheDrilldown()
-  renderSeoPlan()
+}
+
+function renderAll() {
+  renderResearchStageTabs()
+  renderActiveResearchStage()
   persistMarketFinderState()
 }
 
