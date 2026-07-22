@@ -1328,6 +1328,7 @@
             erankTrend: '',
             erankCheckedAt: '',
             erankAttemptedAt: marketMode === 'erank' ? attemptedAt : '',
+            erankCaptureStatus: marketMode === 'erank' ? 'failed' : undefined,
             notes: error,
             error,
         };

@@ -92,12 +92,13 @@ export function attachErankQueryProvenance(row, plan) {
 
   const attempted = Boolean(row?.erankAttemptedAt || row?.erankCheckedAt)
   const failed = attempted && Boolean(String(row?.error ?? '').trim())
+  const declaredStatus = String(row?.erankCaptureStatus ?? '').trim()
   return {
     ...row,
     sourceKeyword: item.sourceKeyword,
     sourceKeywords: [...item.sourceKeywords],
     query: item.query,
     queryKind: item.queryKind,
-    erankCaptureStatus: failed ? 'failed' : attempted ? 'captured' : 'unsearched',
+    erankCaptureStatus: declaredStatus || (failed ? 'failed' : attempted ? 'captured' : 'unsearched'),
   }
 }

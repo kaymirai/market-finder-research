@@ -108,4 +108,10 @@ test('adds query provenance and distinguishes failed captures from unsearched ph
   })
 
   assert.equal(attachErankQueryProvenance({ keyword: 'ghost shirt' }, plan).erankCaptureStatus, 'unsearched')
+
+  assert.equal(attachErankQueryProvenance({
+    keyword: 'halloween ghost shirt',
+    erankCaptureStatus: 'no-data',
+    erankCheckedAt: attemptedAt,
+  }, plan).erankCaptureStatus, 'no-data')
 })

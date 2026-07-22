@@ -137,6 +137,21 @@ test('distinguishes unsearched, active, and failed eRank capture states', () => 
   )
 })
 
+test('treats an explicit eRank no-data response as checked instead of failed', () => {
+  assert.deepEqual(
+    deriveErankCaptureUiState({
+      erankCaptureStatus: 'no-data',
+      erankCheckedAt: '2026-07-23T10:00:00.000Z',
+      notes: 'eRank returned Unknown for the direct keyword metrics.',
+    }),
+    {
+      status: 'no-data',
+      missingColumns: ['Search', 'Clicks', 'Competition', 'KD'],
+      nextDestination: '別の語句を探索',
+    },
+  )
+})
+
 test('does not rebuild unchanged rail HTML but refreshes changed visible content', () => {
   let assignments = 0
   const element = {

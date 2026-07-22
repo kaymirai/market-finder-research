@@ -226,8 +226,11 @@
             partial: 0,
             targetFound: false,
             targetHasDemand: false,
+            targetDemandNoData: false,
+            targetDemandResolved: false,
             targetCompetitionResolved: false,
             targetHasKd: false,
+            targetKdResolved: false,
             targetPartial: false,
             text: '',
         };
@@ -237,11 +240,20 @@
             for (const key of ERANK_METRIC_KEYS) {
                 targetMetrics[key] = metricValueFromColumn(targetRow, key, columns);
             }
+            const targetDemandNoData = ['erankSearchVolume', 'erankClicks', 'erankCtr']
+                .every((key) => metricColumnShowsNoData(targetRow, key, columns));
+            const targetCompetitionResolved = numericMetric(targetMetrics.erankCompetition) !== null
+                || metricColumnShowsNoData(targetRow, 'erankCompetition', columns);
+            const targetHasKd = numericMetric(targetMetrics.erankKeywordDifficulty) !== null;
             summary.targetFound = true;
             summary.targetHasDemand = Boolean(targetMetrics.erankSearchVolume || targetMetrics.erankClicks);
-            summary.targetCompetitionResolved = numericMetric(targetMetrics.erankCompetition) !== null
-                || metricColumnShowsNoData(targetRow, 'erankCompetition', columns);
-            summary.targetHasKd = numericMetric(targetMetrics.erankKeywordDifficulty) !== null;
+            summary.targetDemandNoData = targetDemandNoData;
+            summary.targetDemandResolved = summary.targetHasDemand || targetDemandNoData;
+            summary.targetCompetitionResolved = targetCompetitionResolved;
+            summary.targetHasKd = targetHasKd;
+            summary.targetKdResolved = targetHasKd
+                || metricColumnShowsNoData(targetRow, 'erankKeywordDifficulty', columns)
+                || (targetDemandNoData && targetCompetitionResolved);
             summary.targetPartial = looksLikePartialCompetitionLoad(targetMetrics);
         }
         const parts = [];
@@ -289,14 +301,14 @@
             const waitedEnoughForLazyColumns = elapsed >= 12000;
             const requiredKdRows = Math.max(1, Math.min(snapshot.rows, 3));
             const targetReady = snapshot.targetFound
-                && snapshot.targetHasDemand
+                && snapshot.targetDemandResolved
                 && snapshot.targetCompetitionResolved
-                && snapshot.targetHasKd;
+                && snapshot.targetKdResolved;
             const kdReady = snapshot.targetFound
                 ? targetReady
                 : snapshot.withKd >= requiredKdRows;
             const hasVisibleMetrics = snapshot.rows > 0
-                && snapshot.withDemand > 0
+                && (snapshot.withDemand > 0 || targetReady)
                 && kdReady;
             const looksReady = hasVisibleMetrics
                 && snapshot.partial === 0
@@ -1199,9 +1211,19 @@
         const relatedKeywords = extractRelatedKeywordRows(keyword);
         const erankCheckedAt = new Date().toISOString();
         const timestampedRelatedKeywords = relatedKeywords.map((row) => (Object.assign(Object.assign({}, row), { erankCheckedAt })));
-        const notes = erankSearchVolume || erankClicks || erankCompetition || erankKeywordDifficulty || relatedKeywords.length > 0
-            ? `Extracted from eRank screen${relatedKeywords.length > 0 ? ` / related ${relatedKeywords.length}` : ''}`
-            : `eRank metrics not found. Check the eRank screen manually. URL=${location.href}`;
+        const directMetricCount = [erankSearchVolume, erankClicks, erankCompetition, erankKeywordDifficulty]
+            .filter((value) => String(value !== null && value !== void 0 ? value : '').trim() !== '')
+            .length;
+        const erankCaptureStatus = directMetricCount === 0
+            ? 'no-data'
+            : directMetricCount === 4
+                ? 'captured'
+                : 'partial';
+        const notes = erankCaptureStatus === 'no-data'
+            ? 'eRank returned Unknown or no direct metrics for this keyword.'
+            : erankSearchVolume || erankClicks || erankCompetition || erankKeywordDifficulty || relatedKeywords.length > 0
+                ? `Extracted from eRank screen${relatedKeywords.length > 0 ? ` / related ${relatedKeywords.length}` : ''}`
+                : `eRank metrics not found. Check the eRank screen manually. URL=${location.href}`;
         return {
             keyword,
             listingsAnalyzed: '',
@@ -1216,6 +1238,7 @@
             erankKeywordDifficulty,
             erankTrend,
             erankCheckedAt,
+            erankCaptureStatus,
             notes,
             rawText: bodyText.slice(0, 1500),
             relatedKeywords: timestampedRelatedKeywords,

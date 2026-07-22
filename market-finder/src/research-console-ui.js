@@ -56,8 +56,11 @@ export function deriveErankCaptureUiState(row = {}, capture = {}) {
     .map(([, label]) => label)
   const presentCount = ERANK_EXPECTED_METRICS.length - missingColumns.length
   const attempted = Boolean(row.erankAttemptedAt || row.erankCheckedAt || row.error)
+  const declaredStatus = String(row.erankCaptureStatus ?? '').trim()
   const status = capture.active
     ? 'active'
+    : declaredStatus === 'no-data'
+      ? 'no-data'
     : presentCount === ERANK_EXPECTED_METRICS.length
       ? 'completed'
       : presentCount > 0
@@ -69,7 +72,11 @@ export function deriveErankCaptureUiState(row = {}, capture = {}) {
   return {
     status,
     missingColumns,
-    nextDestination: status === 'completed' ? 'Etsy Marketplace Insights' : 'eRank Keyword Tool',
+    nextDestination: status === 'completed'
+      ? 'Etsy Marketplace Insights'
+      : status === 'no-data'
+        ? '別の語句を探索'
+        : 'eRank Keyword Tool',
   }
 }
 

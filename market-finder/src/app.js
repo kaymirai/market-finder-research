@@ -174,6 +174,7 @@ const ERANK_UI_STATUS_LABELS = {
   active: '取得中',
   partial: '一部取得',
   completed: '取得済み',
+  'no-data': 'eRankデータなし',
   failed: '取得失敗',
 }
 
@@ -1850,7 +1851,7 @@ function renderMarketplaceInsightPlan() {
       : eligibleCandidates.length === 0
         ? 'eRank結果はありますが、Etsy公式へ進める基準を通った候補は0件です。上の「今回は保留した候補」を確認してください。'
       : !state.extensionConnected
-        ? 'eRank確認は完了しています。実Chromeで開き、Chrome拡張1.31をReloadしてから押してください。'
+        ? 'eRank確認は完了しています。実Chromeで開き、Chrome拡張1.33をReloadしてから押してください。'
         : officialProbeCount > 0
           ? `eRank保留のうち需要数値がある安全な上位${officialProbeCount}件を、Etsy公式データで再確認します。`
         : `eRankで絞った${eligibleCandidates.length}件をEtsy公式で順番に自動確認します。`
@@ -2161,7 +2162,7 @@ function renderErankCaptureStates(rows) {
       <div class="erank-capture-state-list">
         ${rows.map((row) => `
           <div class="erank-capture-state is-${escapeHtml(row.status)}">
-            <span class="pill ${row.status === 'failed' || row.status === 'partial' ? 'review' : ''}">${escapeHtml(ERANK_UI_STATUS_LABELS[row.status] ?? row.status)}</span>
+            <span class="pill ${row.status === 'failed' || row.status === 'partial' || row.status === 'no-data' ? 'review' : ''}">${escapeHtml(ERANK_UI_STATUS_LABELS[row.status] ?? row.status)}</span>
             <div class="erank-capture-query">
               <strong>${escapeHtml(row.query)}</strong>
               <small>${escapeHtml(row.queryKind === 'base' ? '基底語' : '完全語句')} / 元候補: ${escapeHtml(row.sourceKeywords.join('、'))}</small>
@@ -3701,6 +3702,8 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     return String(incoming ?? '').trim() !== '' ? incoming : existingRow?.[field]
   }
   const incomingHasErank = rowHasErankInput(row)
+  const incomingErankCaptureStatus = String(row.erankCaptureStatus ?? '').trim()
+  const incomingErankChecked = incomingHasErank || ['captured', 'partial', 'no-data'].includes(incomingErankCaptureStatus)
   const incomingHasEtsyMarketplace = rowHasEtsyMarketplaceInput(row)
   const incomingHasEverbee = rowHasEverbeeInput(row)
   const incomingCheckedAt = row.checkedAt || row.createdAt || row.updatedAt || ''
@@ -3732,7 +3735,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
       : (existingRow?.sourceKeywords ?? (sourceKeyword ? [sourceKeyword] : [])),
     query: String(row.query ?? existingRow?.query ?? keyword),
     queryKind: String(row.queryKind ?? existingRow?.queryKind ?? ''),
-    erankCaptureStatus: String(row.erankCaptureStatus ?? existingRow?.erankCaptureStatus ?? ''),
+    erankCaptureStatus: incomingErankCaptureStatus || String(existingRow?.erankCaptureStatus ?? ''),
     erankAttemptedAt: String(row.erankAttemptedAt ?? existingRow?.erankAttemptedAt ?? ''),
     error: String(row.error ?? existingRow?.error ?? ''),
     researchRoundId: String(row.researchRoundId ?? existingRow?.researchRoundId ?? currentResearchRound()?.id ?? ''),
@@ -3785,7 +3788,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     etsySearches30d: keepExistingWhenBlank('etsySearches30d'),
     etsyListings: keepExistingWhenBlank('etsyListings'),
     etsyRelatedTerms: keepExistingWhenBlank('etsyRelatedTerms'),
-    erankCheckedAt: incomingHasErank
+    erankCheckedAt: incomingErankChecked
       ? (row.erankCheckedAt || incomingCheckedAt || existingRow?.erankCheckedAt || '')
       : existingRow?.erankCheckedAt ?? '',
     etsyCheckedAt: incomingHasEtsyMarketplace
@@ -4506,7 +4509,7 @@ async function collectTrendScoutTerms() {
       const made = state.candidates.length
       const message = made > 0
         ? `候補作成は完了しました。外部サイトの自動取得は未接続ですが、入口ワード${searchSeedAdded}件と商品条件から調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`
-        : '候補を作れませんでした。外部サイトの自動取得も使う場合は、実Chromeで開き、Chrome拡張1.31をReloadしてください。Market Finderページは自動で再読み込みされます。'
+        : '候補を作れませんでした。外部サイトの自動取得も使う場合は、実Chromeで開き、Chrome拡張1.33をReloadしてください。Market Finderページは自動で再読み込みされます。'
       updateProgressModal({
         current: made > 0 ? '調査候補を反映' : '候補なし',
         done: 2,
@@ -4674,16 +4677,16 @@ function closeAdvancedModal() {
 function friendlyExtensionError(error) {
   const message = error instanceof Error ? error.message : String(error ?? '')
   if (/activeTab.*permission is required|either the .*activeTab.*permission is required/i.test(message)) {
-    return 'Chrome拡張の画面キャプチャ権限が不足しています。実Chromeで開き、拡張をReloadしてバージョン1.31になっているか確認してください。'
+    return 'Chrome拡張の画面キャプチャ権限が不足しています。実Chromeで開き、拡張をReloadしてバージョン1.33になっているか確認してください。'
   }
   if (/extension context invalidated/i.test(message)) {
-    return 'Chrome拡張の旧接続が残っています。実Chromeで拡張1.31をReloadすると、開いているMarket Finderも自動で再読み込みされます。'
+    return 'Chrome拡張の旧接続が残っています。実Chromeで拡張1.33をReloadすると、開いているMarket Finderも自動で再読み込みされます。'
   }
   if (/receiving end does not exist|could not establish connection/i.test(message)) {
-    return 'Chrome拡張とページがつながっていません。Market Finderを実Chromeで開き、Chrome拡張1.31をReloadしてください。ページは自動で再読み込みされます。'
+    return 'Chrome拡張とページがつながっていません。Market Finderを実Chromeで開き、Chrome拡張1.33をReloadしてください。ページは自動で再読み込みされます。'
   }
   if (/応答がありません/.test(message)) {
-    return 'Chrome拡張から応答がありません。Market Finderを実Chromeで開き、Chrome拡張1.31をReloadしてください。'
+    return 'Chrome拡張から応答がありません。Market Finderを実Chromeで開き、Chrome拡張1.33をReloadしてください。'
   }
   return message || 'Chrome拡張の処理に失敗しました。'
 }
@@ -5019,7 +5022,7 @@ function renderExtensionState() {
     if (elements.quickExtensionStatus) {
       elements.quickExtensionStatus.textContent = state.extensionConnected
         ? '接続済みです。eRankやEverBeeの自動取得を使えます。'
-        : '未接続です。実Chromeで開き、Chrome拡張1.31をReloadしてください。ページは自動で再読み込みされます。'
+        : '未接続です。実Chromeで開き、Chrome拡張1.33をReloadしてください。ページは自動で再読み込みされます。'
     }
     renderProgressModal(extensionState)
     return

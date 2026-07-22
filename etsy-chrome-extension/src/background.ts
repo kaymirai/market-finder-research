@@ -28,6 +28,7 @@
         erankTrend?: string
         erankCheckedAt?: string
         erankAttemptedAt?: string
+        erankCaptureStatus?: 'captured' | 'partial' | 'no-data' | 'failed'
         etsySearches30d?: string
         etsyListings?: string
         etsyRelatedTerms?: string[]
@@ -1466,6 +1467,7 @@
             erankTrend: '',
             erankCheckedAt: '',
             erankAttemptedAt: marketMode === 'erank' ? attemptedAt : '',
+            erankCaptureStatus: marketMode === 'erank' ? 'failed' : undefined,
             notes: error,
             error,
         }
