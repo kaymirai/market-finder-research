@@ -14,6 +14,17 @@ test('restores only known stage and queue values', () => {
     selectedKeyword: '',
   })
   assert.equal(createResearchConsoleUi({ activeStage: 'unknown' }).activeStage, 'conditions')
+  assert.equal(createResearchConsoleUi({ queueFilter: 'unknown' }).queueFilter, 'all')
+})
+
+test('ignores an invalid research stage selection', () => {
+  const initial = createResearchConsoleUi({ activeStage: 'erank', queueFilter: 'pending' })
+  assert.deepEqual(selectResearchStage(initial, 'unknown'), initial)
+})
+
+test('ignores an invalid queue filter selection', () => {
+  const initial = createResearchConsoleUi({ activeStage: 'etsy', queueFilter: 'failed' })
+  assert.deepEqual(selectResearchQueueFilter(initial, 'unknown'), initial)
 })
 
 test('selects stage and queue filter without mutating input', () => {
