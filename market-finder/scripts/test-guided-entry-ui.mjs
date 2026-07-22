@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { extensionResultsImportMode } from '../src/research-flow.js'
 
 const root = new URL('../', import.meta.url)
 const [html, app, styles] = await Promise.all([
@@ -209,12 +210,94 @@ test('routes extension state notifications through the active stage renderer', (
   assert.notEqual(pollSuccessEnd, -1, 'extension polling success handler must end before error handling')
   assert.notEqual(importStart, -1, 'extension import handler must exist')
   assert.notEqual(importEnd, -1, 'extension import handler must end before copy helpers')
-  assert.match(marketStateHandler, /importExtensionResults\(data\.state\)[\s\S]{0,200}renderExtensionState\(\)/)
-  assert.match(pollSuccessHandler, /importExtensionResults\(response\.state\)[\s\S]{0,200}renderExtensionState\(\)/)
-  assert.match(importHandler, /persistMarketFinderState\(\)[\s\S]{0,120}renderAll\(\)/)
+  assert.match(marketStateHandler, /importExtensionResults\(data\.state\)[\s\S]{0,200}renderExtensionStateUpdate\(\)/)
+  assert.match(pollSuccessHandler, /importExtensionResults\(response\.state\)[\s\S]{0,200}renderExtensionStateUpdate\(\)/)
+  assert.doesNotMatch(importHandler, /renderAll\(\)/)
   assert.doesNotMatch(marketStateHandler, /renderMarketplaceInsightPlan\(\)/)
   assert.doesNotMatch(pollSuccessHandler, /renderMarketplaceInsightPlan\(\)/)
   assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
+})
+
+test('refreshes the active stage once for every extension import outcome', () => {
+  const importStart = app.indexOf('function importExtensionResults(extensionState)')
+  const refreshStart = app.indexOf('function renderExtensionStateUpdate()')
+  const copyStart = app.indexOf('async function copyText')
+  const importOpen = app.indexOf('{', importStart)
+  const importClose = app.lastIndexOf('}', refreshStart)
+  const refreshOpen = app.indexOf('{', refreshStart)
+  const refreshClose = app.lastIndexOf('}', copyStart)
+  const importBody = app.slice(importOpen + 1, importClose)
+  const refreshBody = app.slice(refreshOpen + 1, refreshClose)
+  assert.notEqual(importStart, -1, 'extension import must be separated from notification rendering')
+  assert.notEqual(refreshStart, -1, 'extension notifications must refresh the active stage')
+  assert.notEqual(copyStart, -1, 'copy helper must follow the notification refresh helper')
+
+  const createImport = new Function(
+    'extensionResultsImportMode',
+    'state',
+    'extensionResearchRows',
+    'sanitizeErankMetricLeak',
+    'latestResearchCheckedAt',
+    'addResearchRows',
+    'ingestBroadSnippetsFromExtensionState',
+    'salesCheckKeywords',
+    'elements',
+    'erankWinnerRows',
+    'erankExploreRows',
+    'setSimpleStatus',
+    'syncCrossNicheWorkflow',
+    'persistMarketFinderState',
+    `return function importExtensionResults(extensionState) {${importBody}\n}`,
+  )
+  const createRefresh = new Function(
+    'renderExtensionState',
+    'renderResearchStageTabs',
+    'renderActiveResearchStage',
+    `return function renderExtensionStateUpdate() {${refreshBody}\n}`,
+  )
+  const scenarios = [
+    { label: 'active empty', state: { active: true, results: [] }, expectedImport: false, expectedPersists: 0 },
+    { label: 'imported result', state: { active: true, results: [{ keyword: 'ghost shirt' }] }, expectedImport: true, expectedPersists: 1 },
+    { label: 'inactive ignore', state: { active: false, results: [] }, expectedImport: false, expectedPersists: 0 },
+  ]
+
+  for (const scenario of scenarios) {
+    const appState = {
+      researchRows: [],
+      acceptExtensionResults: false,
+      restoredResearchSavedAt: '',
+      restoredResultsAccepted: false,
+      progress: { mode: 'idle' },
+    }
+    let persistCount = 0
+    const importResults = createImport(
+      extensionResultsImportMode,
+      appState,
+      (extensionState) => extensionState.results,
+      (row) => row,
+      () => '',
+      (rows) => appState.researchRows.push(...rows),
+      () => {},
+      () => [],
+      { researchJobInput: { value: '' } },
+      () => [],
+      () => [],
+      () => {},
+      () => {},
+      () => { persistCount += 1 },
+    )
+    const rendered = []
+    const refresh = createRefresh(
+      () => rendered.push('extension'),
+      () => rendered.push('tabs'),
+      () => rendered.push('active'),
+    )
+
+    assert.equal(importResults(scenario.state), scenario.expectedImport, scenario.label)
+    refresh()
+    assert.equal(persistCount, scenario.expectedPersists, scenario.label)
+    assert.deepEqual(rendered, ['extension', 'tabs', 'active'], scenario.label)
+  }
 })
 
 test('renders the two entry routes as one radio group', () => {

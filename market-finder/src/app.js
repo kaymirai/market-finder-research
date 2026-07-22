@@ -3812,7 +3812,7 @@ function extensionResearchRows(extensionState) {
 
 function importExtensionResults(extensionState) {
   const importMode = extensionResultsImportMode(extensionState, state.researchRows, state.acceptExtensionResults)
-  if (importMode === 'ignore') return
+  if (importMode === 'ignore') return false
   const importedRows = extensionResearchRows(extensionState).map(sanitizeErankMetricLeak)
   if (importMode === 'restore') {
     state.restoredResearchSavedAt = latestResearchCheckedAt(importedRows) || new Date().toISOString()
@@ -3839,7 +3839,13 @@ function importExtensionResults(extensionState) {
     syncCrossNicheWorkflow({ announce: true, scroll: state.progress.mode === 'keyword' })
   }
   persistMarketFinderState()
-  renderAll()
+  return true
+}
+
+function renderExtensionStateUpdate() {
+  renderExtensionState()
+  renderResearchStageTabs()
+  renderActiveResearchStage()
 }
 
 async function copyText(text, button, doneLabel, defaultLabel) {
@@ -4839,7 +4845,7 @@ function handleExtensionMessage(event) {
     state.extensionConnected = true
     state.extensionState = data.state
     importExtensionResults(data.state)
-    renderExtensionState()
+    renderExtensionStateUpdate()
   }
 
   if (!pending) return
@@ -4902,7 +4908,7 @@ async function pollExtensionState() {
     const response = await requestExtension('GET_MARKET_STATE', {}, 3000)
     state.extensionState = response.state
     importExtensionResults(response.state)
-    renderExtensionState()
+    renderExtensionStateUpdate()
     if (response.state?.active) window.setTimeout(pollExtensionState, 2000)
   } catch (error) {
     const message = friendlyExtensionError(error)
@@ -5279,7 +5285,7 @@ async function stopExtensionResearch() {
     const latest = response.state ? response : await requestExtension('GET_MARKET_STATE', {}, 3000)
     state.extensionState = latest.state
     importExtensionResults(latest.state)
-    renderExtensionState()
+    renderExtensionStateUpdate()
   } catch (error) {
     const message = friendlyExtensionError(error)
     elements.extensionStatus.textContent = message
