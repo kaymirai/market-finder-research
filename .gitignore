@@ -2,6 +2,7 @@
 /etsy-product-ai/
 /docs/
 /.tmp/
+/.worktrees/
 
 # Large/source data files that are not part of this app checkpoint.
 /*.csv
