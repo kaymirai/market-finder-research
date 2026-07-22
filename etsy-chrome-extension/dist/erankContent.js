@@ -14,10 +14,40 @@
         '[contenteditable="true"]',
     ];
     const SEARCH_BUTTON_WORDS = ['search', 'lookup', 'submit', 'go', 'find', 'analyze'];
-    const ERANK_METRICS_READY_TIMEOUT_MS = 180000;
+    const ERANK_METRICS_READY_TIMEOUT_MS = 300000;
+    const ERANK_METRIC_HEARTBEAT_MS = 2000;
     let erankRunActive = false;
     function wait(ms) {
         return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+    function waitForMetricDomChange() {
+        return new Promise((resolve) => {
+            let settled = false;
+            let debounceId = null;
+            const finish = () => {
+                if (settled)
+                    return;
+                settled = true;
+                observer.disconnect();
+                window.clearTimeout(heartbeatId);
+                if (debounceId !== null)
+                    window.clearTimeout(debounceId);
+                resolve();
+            };
+            const observer = new MutationObserver(() => {
+                if (debounceId !== null)
+                    window.clearTimeout(debounceId);
+                debounceId = window.setTimeout(finish, 250);
+            });
+            const heartbeatId = window.setTimeout(finish, ERANK_METRIC_HEARTBEAT_MS);
+            observer.observe(document.body, {
+                subtree: true,
+                childList: true,
+                characterData: true,
+                attributes: true,
+                attributeFilter: ['aria-label', 'title', 'data-value', 'class'],
+            });
+        });
     }
     function normalizeText(value) {
         return value.replace(/\s+/g, ' ').trim();
@@ -195,6 +225,8 @@
             withKd: 0,
             partial: 0,
             targetFound: false,
+            targetHasDemand: false,
+            targetCompetitionResolved: false,
             targetHasKd: false,
             targetPartial: false,
             text: '',
@@ -206,6 +238,9 @@
                 targetMetrics[key] = metricValueFromColumn(targetRow, key, columns);
             }
             summary.targetFound = true;
+            summary.targetHasDemand = Boolean(targetMetrics.erankSearchVolume || targetMetrics.erankClicks);
+            summary.targetCompetitionResolved = numericMetric(targetMetrics.erankCompetition) !== null
+                || metricColumnShowsNoData(targetRow, 'erankCompetition', columns);
             summary.targetHasKd = numericMetric(targetMetrics.erankKeywordDifficulty) !== null;
             summary.targetPartial = looksLikePartialCompetitionLoad(targetMetrics);
         }
@@ -239,7 +274,7 @@
         let lastText = '';
         let stableCount = 0;
         while (Date.now() - startedAt < ERANK_METRICS_READY_TIMEOUT_MS) {
-            await wait(1000);
+            await waitForMetricDomChange();
             if (pageHasNoDataMessage())
                 return;
             const snapshot = keywordIdeasMetricSnapshot(keyword);
@@ -253,8 +288,12 @@
             const elapsed = Date.now() - startedAt;
             const waitedEnoughForLazyColumns = elapsed >= 12000;
             const requiredKdRows = Math.max(1, Math.min(snapshot.rows, 3));
+            const targetReady = snapshot.targetFound
+                && snapshot.targetHasDemand
+                && snapshot.targetCompetitionResolved
+                && snapshot.targetHasKd;
             const kdReady = snapshot.targetFound
-                ? snapshot.targetHasKd
+                ? targetReady
                 : snapshot.withKd >= requiredKdRows;
             const hasVisibleMetrics = snapshot.rows > 0
                 && snapshot.withDemand > 0
@@ -267,7 +306,7 @@
                 return;
         }
         const latest = keywordIdeasMetricSnapshot(keyword);
-        throw new Error(`eRankのKD表示を3分待ちましたが、数字として確認できませんでした。CompetitionはUnknownでもOKですが、KDが未表示または読み込み途中のため、このキーワードで停止しました。rows=${latest.rows} kd=${latest.withKd} partial=${latest.partial}`);
+        throw new Error(`eRankの競合・KD表示を5分待ちましたが完了を確認できませんでした。需要=${latest.targetHasDemand ? '取得済み' : '未取得'} 競合=${latest.targetCompetitionResolved ? '表示済み' : '読込中'} KD=${latest.targetHasKd ? '表示済み' : '読込中'} rows=${latest.rows} partial=${latest.partial}`);
     }
     function describeElement(element) {
         var _a;
@@ -775,6 +814,23 @@
         if (key === 'erankTrend')
             return (_j = (_h = values[values.length - 1]) === null || _h === void 0 ? void 0 : _h.value) !== null && _j !== void 0 ? _j : '';
         return (_l = (_k = values[0]) === null || _k === void 0 ? void 0 : _k.value) !== null && _l !== void 0 ? _l : '';
+    }
+    function metricColumnShowsNoData(row, key, columns) {
+        const rowRect = row.getBoundingClientRect();
+        const bounds = inferredColumnBounds(columns, key, rowRect);
+        if (!bounds)
+            return false;
+        const elements = Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"], span, strong, div, a, button'));
+        return elements.filter(isVisibleElement).some((element) => {
+            const rect = element.getBoundingClientRect();
+            const center = rect.left + rect.width / 2;
+            const overlap = Math.min(rect.right, bounds.right) - Math.max(rect.left, bounds.left);
+            if (rect.top < rowRect.top - 2 || rect.bottom > rowRect.bottom + 2)
+                return false;
+            if (center < bounds.left || center > bounds.right || overlap <= 0)
+                return false;
+            return metricTextSources(element).some((source) => /^(unknown|n\/a|no data|-)$/i.test(source));
+        });
     }
     function closestMetricValue(row, key, columnCenter) {
         var _a;

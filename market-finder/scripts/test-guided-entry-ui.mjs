@@ -170,6 +170,13 @@ test('shows direct and base eRank provenance including failed captures', () => {
   assert.match(app, /erankCaptureStateRows/)
 })
 
+test('explains the active eRank query and the exact capture failure stage', () => {
+  assert.match(app, /function formatErankProgressKeyword\(/)
+  assert.match(app, /元候補/)
+  assert.match(app, /失敗箇所/)
+  assert.match(app, /競合・KD/)
+})
+
 test('separates product tests, exploration candidates, and exclusions', () => {
   assert.match(html, /調査結果と商品化候補/)
   assert.match(app, /title: '商品化テスト候補'/)

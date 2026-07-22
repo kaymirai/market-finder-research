@@ -101,8 +101,8 @@
 
 .erank-capture-state {
   display: grid;
-  grid-template-columns: 170px minmax(220px, .8fr) minmax(360px, 1.4fr);
-  align-items: center;
+  grid-template-columns: 170px minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -111,8 +111,21 @@
 }
 
 .erank-capture-state small {
+  display: block;
   color: var(--muted);
   line-height: 1.4;
+  margin-top: 3px;
+}
+
+.erank-capture-query {
+  min-width: 0;
+}
+
+.erank-capture-error {
+  grid-column: 2;
+  color: #b4233b;
+  font-size: .86rem;
+  line-height: 1.45;
 }
 
 * {
