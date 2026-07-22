@@ -65,6 +65,12 @@ import {
   normalizeResearchMarketHistory,
   prioritizeEventCandidates,
 } from './event-market-tracks.js?v=20260720-1'
+import {
+  createResearchConsoleUi,
+  deriveResearchStageStates,
+  selectResearchQueueFilter,
+  selectResearchStage,
+} from './research-console-ui.js?v=20260722-1'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -151,6 +157,7 @@ const state = {
   searchSeedRows: [],
   searchSeedLoaded: false,
   searchSeedError: '',
+  consoleUi: createResearchConsoleUi(),
 }
 
 const pendingExtensionRequests = new Map()
@@ -305,6 +312,8 @@ const elements = {
   flowAutoBtn: document.querySelector('#flowAutoBtn'),
   flowCsvBtn: document.querySelector('#flowCsvBtn'),
   flowSeoBtn: document.querySelector('#flowSeoBtn'),
+  researchConsole: document.querySelector('#researchConsole'),
+  researchStageTabs: document.querySelector('#researchStageTabs'),
   simpleCsvInput: document.querySelector('#simpleCsvInput'),
   simpleImportCsvBtn: document.querySelector('#simpleImportCsvBtn'),
   simpleSeoKeywordsInput: document.querySelector('#simpleSeoKeywordsInput'),
@@ -468,6 +477,7 @@ function persistMarketFinderState() {
       researchedMarketHistory: state.researchedMarketHistory,
       selectedResultKey: state.selectedResultKey,
       seoPlan: state.seoPlan,
+      consoleUi: state.consoleUi,
     },
   }
 
@@ -524,6 +534,7 @@ function restorePersistedState() {
   state.researchedMarketHistory = normalizeResearchMarketHistory(savedState.researchedMarketHistory)
   state.selectedResultKey = String(savedState.selectedResultKey ?? '')
   state.seoPlan = savedState.seoPlan ?? null
+  state.consoleUi = createResearchConsoleUi(savedState.consoleUi)
 
   return persisted
 }
@@ -3100,7 +3111,54 @@ function renderTrendScoutStatus() {
   setTrendStatus(message, variant)
 }
 
+function researchConsoleMetrics() {
+  const captureStates = erankCaptureStateRows()
+  const marketplaceItems = state.marketplaceInsightPlan?.items ?? []
+  const activeService = state.marketplaceInsightAutoRunning
+    ? 'etsy'
+    : state.extensionState?.active
+      ? String(state.extensionState.mode ?? '').toLowerCase().includes('erank') ? 'erank' : 'everbee'
+      : ''
+  return {
+    candidateCount: state.candidates.length,
+    readyCandidateCount: readyKeywords().length,
+    erankResultCount: erankResultRows().length,
+    erankFailureCount: captureStates.filter((row) => row.status === 'failed').length,
+    erankPendingCount: captureStates.filter((row) => row.status === 'unsearched').length,
+    etsyEligibleCount: buildEtsyCandidatesFromErank(erankResultRows(), state.candidates).length,
+    etsyCompletedCount: marketplaceItems.filter((item) => item.status === 'completed').length,
+    etsyPendingCount: marketplaceItems.filter((item) => !['completed', 'skipped'].includes(item.status)).length,
+    everbeeResultCount: everbeeResultRows().length,
+    activeService,
+  }
+}
+
+function setActiveResearchStage(stageId, { persist = true } = {}) {
+  state.consoleUi = selectResearchStage(state.consoleUi, stageId)
+  renderResearchStageTabs()
+  if (typeof renderActiveResearchStage === 'function') renderActiveResearchStage()
+  if (persist) persistMarketFinderState()
+}
+
+function renderResearchStageTabs() {
+  if (!elements.researchConsole || !elements.researchStageTabs) return
+
+  const stages = deriveResearchStageStates(researchConsoleMetrics())
+  elements.researchConsole.dataset.activeStage = state.consoleUi.activeStage
+  elements.researchStageTabs.querySelectorAll('[data-research-stage]').forEach((button) => {
+    const stage = stages.find((item) => item.id === button.dataset.researchStage)
+    const active = stage?.id === state.consoleUi.activeStage
+    button.setAttribute('aria-selected', String(active))
+    button.dataset.status = stage?.status ?? 'locked'
+    button.querySelector('small').textContent = stage?.count ? `${stage.count}件` : stage?.message ?? '未開始'
+  })
+  document.querySelectorAll('[data-research-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.researchPanel !== state.consoleUi.activeStage
+  })
+}
+
 function renderAll() {
+  renderResearchStageTabs()
   renderTrendScoutStatus()
   renderBroadHints()
   renderSearchSeedRows()
@@ -5073,6 +5131,12 @@ function bindEvents() {
   elements.broadExtractBtn.addEventListener('click', extractBroadMarketHints)
   elements.broadApplyBtn.addEventListener('click', applyBroadHintsToSeeds)
   elements.broadSampleBtn.addEventListener('click', fillBroadSample)
+  elements.researchStageTabs.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    const button = event.target.closest('[data-research-stage]')
+    if (!button) return
+    setActiveResearchStage(button.dataset.researchStage)
+  })
   elements.discoveryLaneTabs.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return
     const button = event.target.closest('[data-discovery-lane]')

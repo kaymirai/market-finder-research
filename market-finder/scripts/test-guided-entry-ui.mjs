@@ -267,6 +267,18 @@ test('persists extension results and restores completed results explicitly', () 
   assert.match(app, /旧形式の保存結果から初回ラウンドを復元/)
 })
 
+test('persists and restores research console UI state', () => {
+  assert.match(app, /createResearchConsoleUi/)
+  assert.match(app, /consoleUi: state\.consoleUi/)
+  assert.match(app, /state\.consoleUi = createResearchConsoleUi\(savedState\.consoleUi\)/)
+})
+
+test('switches stages without clearing research data', () => {
+  assert.match(app, /function setActiveResearchStage\(/)
+  assert.match(app, /data-research-stage/)
+  assert.doesNotMatch(app, /function setActiveResearchStage[\s\S]{0,500}state\.researchRows = \[\]/)
+})
+
 test('separates restored results from the current research run', () => {
   assert.match(app, /restoredResearchSavedAt: ''/)
   assert.match(app, /acceptExtensionResults: false/)
