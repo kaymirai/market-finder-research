@@ -108,6 +108,28 @@ test('keeps extension and action DOM contracts unique', () => {
   }
 })
 
+test('gives final results a dedicated export toolbar', () => {
+  assert.match(html, /id="finalResultToolbar"/)
+  assert.match(html, /id="copyFinalKeywordsBtn"[^>]*>キーワードをコピー<\/button>/)
+  assert.match(html, /id="downloadStep4CsvBtn"[^>]*>未来デザイナー用CSV<\/button>/)
+  assert.match(html, /id="downloadErankCsvBtn"[^>]*>参考用eRank CSV<\/button>/)
+  assert.equal(html.match(/id="downloadStep4CsvBtn"/g)?.length, 1)
+  assert.equal(html.match(/id="downloadErankCsvBtn"/g)?.length, 1)
+})
+
+test('copies only A and B final keywords in their result order', () => {
+  assert.match(app, /async function copyFinalKeywords\(\)/)
+  assert.match(app, /everbeeResultRows\(\)\s*\.filter\(\(row\) => \['A', 'B'\]\.includes\(row\.score\.opportunityLabel\)\)/)
+  assert.match(app, /\.map\(\(row\) => row\.score\.normalized\.keyword\)\s*\.join\('\\n'\)/)
+  assert.match(app, /elements\.copyFinalKeywordsBtn\.addEventListener\('click', copyFinalKeywords\)/)
+})
+
+test('sets the results console state and hides non-result rails', () => {
+  assert.match(app, /elements\.researchConsole\.dataset\.activeStage = state\.consoleUi\.activeStage/)
+  assert.match(app, /elements\.researchQueue\.hidden = state\.consoleUi\.activeStage === 'results'/)
+  assert.match(app, /elements\.researchInspector\.hidden = state\.consoleUi\.activeStage === 'results'/)
+})
+
 test('renders the two entry routes as one radio group', () => {
   assert.match(html, /<fieldset class="flow-choice-grid"/)
   assert.match(html, /id="flowAutoBtn"[^>]*type="radio"[^>]*name="flowChoice"[^>]*value="auto"/)

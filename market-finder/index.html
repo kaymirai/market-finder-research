@@ -434,7 +434,6 @@
           </div>
           <div class="heading-actions">
             <span class="count-badge"><strong id="erankCount">0</strong><small>eRank結果</small></span>
-            <button id="downloadErankCsvBtn" type="button" class="ghost-btn" data-optional="保存">eRank結果CSV保存</button>
           </div>
         </div>
         <div class="service-note">
@@ -523,7 +522,17 @@
               <span>C: 派生探索・追加確認</span>
               <span>D: 除外候補</span>
             </div>
-            <button id="downloadStep4CsvBtn" type="button" class="ghost-btn" data-optional="保存">結果CSV保存</button>
+          </div>
+        </div>
+        <div id="finalResultToolbar" class="final-result-toolbar">
+          <div class="final-result-context">
+            <strong>調査結果と商品化テスト候補</strong>
+            <span id="finalResultFreshness">最新の確認日時を表示します</span>
+          </div>
+          <div class="final-result-actions">
+            <button id="copyFinalKeywordsBtn" type="button" class="ghost-btn">キーワードをコピー</button>
+            <button id="downloadErankCsvBtn" type="button" class="ghost-btn" data-optional="保存">参考用eRank CSV</button>
+            <button id="downloadStep4CsvBtn" type="button" class="primary-btn" data-optional="保存">未来デザイナー用CSV</button>
           </div>
         </div>
         <div id="researchRoundProgress" class="research-round-progress" hidden></div>

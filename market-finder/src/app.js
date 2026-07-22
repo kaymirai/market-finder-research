@@ -267,6 +267,8 @@ const elements = {
   erankCount: document.querySelector('#erankCount'),
   downloadErankCsvBtn: document.querySelector('#downloadErankCsvBtn'),
   downloadStep4CsvBtn: document.querySelector('#downloadStep4CsvBtn'),
+  copyFinalKeywordsBtn: document.querySelector('#copyFinalKeywordsBtn'),
+  finalResultFreshness: document.querySelector('#finalResultFreshness'),
   resultsList: document.querySelector('#resultsList'),
   researchRoundProgress: document.querySelector('#researchRoundProgress'),
   researchRoundTabs: document.querySelector('#researchRoundTabs'),
@@ -2691,7 +2693,10 @@ function renderOpportunityResultGroup({ title, description, items, emptyMessage,
 function renderResultsTable() {
   renderResearchRoundControls()
   const ranked = selectedRoundEverbeeRows()
-  elements.downloadStep4CsvBtn.disabled = everbeeResultRows().length === 0
+  const finalRows = everbeeResultRows()
+  elements.downloadStep4CsvBtn.disabled = finalRows.length === 0
+  elements.copyFinalKeywordsBtn.disabled = !finalRows.some((row) => ['A', 'B'].includes(row.score.opportunityLabel))
+  elements.finalResultFreshness.textContent = formatDateTime(latestResearchCheckedAt(finalRows)) || '結果なし'
 
   if (ranked.length === 0) {
     state.selectedResultKey = ''
@@ -3307,6 +3312,9 @@ function renderResearchStageTabs() {
   if (!elements.researchConsole || !elements.researchStageTabs) return
 
   const stages = deriveResearchStageStates(researchConsoleMetrics())
+  elements.researchConsole.dataset.activeStage = state.consoleUi.activeStage
+  elements.researchQueue.hidden = state.consoleUi.activeStage === 'results'
+  elements.researchInspector.hidden = state.consoleUi.activeStage === 'results'
   renderResearchStageView({
     consoleElement: elements.researchConsole,
     tabContainer: elements.researchStageTabs,
@@ -3836,6 +3844,14 @@ async function copyKeywords() {
     'コピー済み',
     '候補リストをコピー'
   )
+}
+
+async function copyFinalKeywords() {
+  const text = everbeeResultRows()
+    .filter((row) => ['A', 'B'].includes(row.score.opportunityLabel))
+    .map((row) => row.score.normalized.keyword)
+    .join('\n')
+  await copyText(text, elements.copyFinalKeywordsBtn, 'コピー済み', 'キーワードをコピー')
 }
 
 async function copyReadyKeywords() {
@@ -5354,6 +5370,7 @@ function bindEvents() {
   elements.resultsList.addEventListener('click', handleResultListClick)
   elements.researchRoundTabs.addEventListener('click', handleResultListClick)
   elements.copyKeywordsBtn.addEventListener('click', copyKeywords)
+  elements.copyFinalKeywordsBtn.addEventListener('click', copyFinalKeywords)
   elements.copyReadyBtn.addEventListener('click', copyReadyKeywords)
   elements.downloadJobBtn.addEventListener('click', downloadJob)
   elements.downloadErankCsvBtn.addEventListener('click', exportErankCsv)
