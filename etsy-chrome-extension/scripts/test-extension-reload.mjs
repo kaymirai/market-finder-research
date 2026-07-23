@@ -46,6 +46,27 @@ test('recognizes the current eRank no-data result before waiting for metric colu
   assert.match(erankContentTypeScriptSource, /if \(pageHasNoDataMessage\(\)\) return extractMetrics\(keyword\)/)
 })
 
+test('waits for Competition and treats KD as optional after a short grace period', () => {
+  const readiness = erankContentTypeScriptSource.match(/async function waitForKeywordIdeasMetricsReady[\s\S]*?(?=\n    function describeElement)/)?.[0] ?? ''
+  const targetReady = readiness.match(/const targetReady = ([\s\S]*?)(?=\n\s*const competitionReady)/)?.[1] ?? ''
+
+  assert.match(erankContentTypeScriptSource, /ERANK_KD_GRACE_AFTER_COMPETITION_MS/)
+  assert.match(readiness, /competitionReadyAt/)
+  assert.match(readiness, /targetCompetitionResolved/)
+  assert.match(readiness, /kdGraceElapsed/)
+  assert.match(readiness, /const partialLoadResolved = snapshot\.targetFound/)
+  assert.match(readiness, /\? !snapshot\.targetPartial/)
+  assert.doesNotMatch(targetReady, /targetKdResolved/)
+})
+
+test('selects the visual keyword row that covers the Competition and KD columns', () => {
+  const rowFinder = erankContentTypeScriptSource.match(/function findVisualRowForKeyword[\s\S]*?(?=\n    function textLooksLikeKeywordCell)/)?.[0] ?? ''
+
+  assert.match(erankContentTypeScriptSource, /function visualColumnCoverageCount/)
+  assert.match(rowFinder, /visualColumnCoverageCount/)
+  assert.match(rowFinder, /coverage/)
+})
+
 test('wakes on eRank DOM changes and retains a finite safety timeout', () => {
   const metricWait = Number(erankContentTypeScriptSource.match(/ERANK_METRICS_READY_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
   const keywordWait = Number(backgroundTypeScriptSource.match(/MARKET_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
