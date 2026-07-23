@@ -22,6 +22,7 @@
     let marketTimerId = null;
     let marketRunId = 0;
     const MARKET_KEYWORD_TIMEOUT_MS = 360000;
+    const ERANK_DAILY_LOOKUP_LIMIT_ERROR = 'ERANK_DAILY_LOOKUP_LIMIT_REACHED: eRankの1日あたりの検索上限に達しました。翌日のリセット後に再開してください（Basic 100件/日、Pro 200件/日）。';
     const trendSourceConfigs = {
         erank: {
             id: 'erank',
@@ -1152,6 +1153,20 @@
             return false;
         }
     }
+    function isErankDailyLimitError(value) {
+        return /ERANK_DAILY_LOOKUP_LIMIT_REACHED|1日あたりの検索上限|keyword lookup limit/i.test(String(value !== null && value !== void 0 ? value : ''));
+    }
+    function tabShowsErankPlan(tabId) {
+        return new Promise((resolve) => {
+            chrome.tabs.get(tabId, (tab) => {
+                if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.url)) {
+                    resolve(false);
+                    return;
+                }
+                resolve(/\/(?:plans?|pricing|upgrade)(?:\/|$|\?)/i.test(tab.url));
+            });
+        });
+    }
     function getMarketState() {
         return {
             active: marketActive,
@@ -1281,13 +1296,32 @@
                 marketResults.push(result);
             }
             else {
-                marketResults.push(buildFailedMarketResult(keyword, response.error || `${marketMode === 'erank' ? 'eRank' : 'EverBee'}調査に失敗しました。`));
+                const message = response.error || `${marketMode === 'erank' ? 'eRank' : 'EverBee'}調査に失敗しました。`;
+                if (marketMode === 'erank' && isErankDailyLimitError(message)) {
+                    marketError = ERANK_DAILY_LOOKUP_LIMIT_ERROR;
+                    marketActive = false;
+                    marketCurrentKeyword = '';
+                    marketQueue.unshift(keyword);
+                    saveMarketState();
+                    focusMarketFinderTab();
+                    return;
+                }
+                marketResults.push(buildFailedMarketResult(keyword, message));
             }
         }
         catch (error) {
             if (!marketActive || runId !== marketRunId)
                 return;
             const message = error instanceof Error ? error.message : 'Unexpected Market Finder extension error.';
+            if (marketMode === 'erank' && isErankDailyLimitError(message)) {
+                marketError = ERANK_DAILY_LOOKUP_LIMIT_ERROR;
+                marketActive = false;
+                marketCurrentKeyword = '';
+                marketQueue.unshift(keyword);
+                saveMarketState();
+                focusMarketFinderTab();
+                return;
+            }
             marketError = message;
             marketResults.push(buildFailedMarketResult(keyword, message));
         }
@@ -1582,6 +1616,9 @@
         var _a;
         const timeoutMessage = `eRank timed out for "${keyword}". Skipped this keyword.`;
         const firstTry = await withTimeout(sendErankMessage(tabId, keyword), MARKET_KEYWORD_TIMEOUT_MS, timeoutMessage);
+        if (!firstTry.ok && await tabShowsErankPlan(tabId)) {
+            return { ok: false, error: ERANK_DAILY_LOOKUP_LIMIT_ERROR };
+        }
         if (firstTry.ok || !((_a = firstTry.error) === null || _a === void 0 ? void 0 : _a.includes('Receiving end does not exist')))
             return firstTry;
         await chrome.scripting.executeScript({
@@ -1589,7 +1626,11 @@
             files: ['dist/erankContent.js'],
         });
         await activateTab(tabId);
-        return withTimeout(sendErankMessage(tabId, keyword), MARKET_KEYWORD_TIMEOUT_MS, timeoutMessage);
+        const secondTry = await withTimeout(sendErankMessage(tabId, keyword), MARKET_KEYWORD_TIMEOUT_MS, timeoutMessage);
+        if (!secondTry.ok && await tabShowsErankPlan(tabId)) {
+            return { ok: false, error: ERANK_DAILY_LOOKUP_LIMIT_ERROR };
+        }
+        return secondTry;
     }
     function sendEverbeeMessage(tabId, keyword) {
         return new Promise((resolve) => {

@@ -44,6 +44,7 @@
     const ERANK_METRICS_READY_TIMEOUT_MS = 300000
     const ERANK_METRIC_HEARTBEAT_MS = 2000
     const ERANK_KD_GRACE_AFTER_COMPETITION_MS = 8000
+    const ERANK_DAILY_LOOKUP_LIMIT_ERROR = 'ERANK_DAILY_LOOKUP_LIMIT_REACHED: eRankの1日あたりの検索上限に達しました。翌日のリセット後に再開してください（Basic 100件/日、Pro 200件/日）。'
     let erankRunActive = false
 
     function wait(ms: number) {
@@ -79,6 +80,18 @@
 
     function normalizeText(value: string) {
         return value.replace(/\s+/g, ' ').trim()
+    }
+
+    function pageHasDailyLookupLimit() {
+        const text = normalizeText(document.body.innerText || '')
+        const showsPlanLimit = /erank plans/i.test(text) && /keyword lookups?\/day/i.test(text)
+        const showsLimitMessage = /(?:daily|today|per day).{0,50}(?:keyword|lookup).{0,50}(?:limit|reached|used)/i.test(text)
+            || /(?:keyword|lookup).{0,50}(?:daily|today|per day).{0,50}(?:limit|reached|used)/i.test(text)
+        return showsPlanLimit || showsLimitMessage
+    }
+
+    function throwIfDailyLookupLimitReached() {
+        if (pageHasDailyLookupLimit()) throw new Error(ERANK_DAILY_LOOKUP_LIMIT_ERROR)
     }
 
     function pageHasNoDataMessage() {
@@ -227,6 +240,7 @@
 
         while (Date.now() - startedAt < 18000) {
             await wait(900)
+            throwIfDailyLookupLimitReached()
             const text = normalizeText(document.body.innerText || '')
             if (pageHasNoDataMessage()) return
             const hasMetric = /(average searches|avg searches|average clicks|avg clicks|etsy competition|search trend|competition|ctr)/i.test(text)
@@ -1339,6 +1353,7 @@
     }
 
     async function runKeyword(keyword: string) {
+        throwIfDailyLookupLimitReached()
         const field = findSearchField()
         if (!field) throw new Error(collectSearchDiagnostics())
 
@@ -1348,7 +1363,9 @@
         await wait(250)
         await submitSearch(field)
         await wait(4500)
+        throwIfDailyLookupLimitReached()
         await waitForLikelyResults(keyword)
+        throwIfDailyLookupLimitReached()
         if (pageHasNoDataMessage()) return extractMetrics(keyword)
         await revealKeywordIdeasTable()
         await waitForKeywordIdeasMetricsReady(keyword)

@@ -28,6 +28,13 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /自動検証を停止/)
 })
 
+test('stops automatic verification without consuming pending rows at the eRank daily limit', () => {
+  assert.match(app, /function isErankDailyLimitError\(/)
+  assert.match(app, /isErankDailyLimitError\(data\.state\?\.error\)/)
+  assert.match(app, /eRankの1日あたりの検索上限/)
+  assert.match(app, /stopPendingEvidenceAutomation/)
+})
+
 test('uses the pure evidence state module instead of a second scoring model', () => {
   assert.match(app, /from '\.\/final-evidence-matrix\.js\?v=/)
   assert.match(app, /deriveFinalEvidenceState/)

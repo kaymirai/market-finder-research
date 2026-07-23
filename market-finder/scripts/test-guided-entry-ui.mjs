@@ -443,6 +443,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     'importExtensionResults',
     'renderExtensionStateUpdate',
     'friendlyExtensionError',
+    'isErankDailyLimitError',
     `return function handleExtensionMessage(event) {${handlerBody}\n}`,
   )
   const createPoll = new Function(
@@ -531,6 +532,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     importExtensionResults,
     renderExtensionStateUpdate,
     (error) => String(error),
+    (error) => /ERANK_DAILY_LOOKUP_LIMIT_REACHED/.test(String(error ?? '')),
   )
   pollExtensionState = createPoll(
     appState,
@@ -1112,5 +1114,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260723-4')
+  assert.equal(stylesheetVersion, '20260723-5')
 })
