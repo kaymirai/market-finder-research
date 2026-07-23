@@ -213,7 +213,7 @@ test('renders only the active research stage details', () => {
 })
 
 test('dispatches only the selected stage detail renderers', () => {
-  const body = app.match(/function renderActiveResearchStage\([^)]*\) \{([\s\S]*?)\n\}\n\nfunction renderAll\(\)/)?.[1]
+  const body = app.match(/function renderActiveResearchStage\([^)]*\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction renderAll\(\)/)?.[1]
   assert.ok(body, 'active stage renderer must be extractable')
 
   const createDispatcher = new Function(
@@ -342,7 +342,7 @@ test('routes extension state notifications through the active stage renderer', (
 })
 
 test('pending MARKET_STATE polls write a changed Workspace once and an unchanged Workspace zero times', async () => {
-  const activeBody = app.match(/function renderActiveResearchStage\([^)]*\) \{([\s\S]*?)\n\}\n\nfunction renderAll\(\)/)?.[1]
+  const activeBody = app.match(/function renderActiveResearchStage\([^)]*\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction renderAll\(\)/)?.[1]
   const refreshBody = app.match(/function renderExtensionStateUpdate\(\) \{([\s\S]*?)\n\}/)?.[1]
   const handlerBody = app.match(/function handleExtensionMessage\(event\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction updateExtensionBadge/)?.[1]
   const pollBody = app.match(/async function pollExtensionState\(\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nasync function startExtensionResearch/)?.[1]
