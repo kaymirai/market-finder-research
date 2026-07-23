@@ -298,3 +298,13 @@ test('derives progress, review, complete, and available states', () => {
   assert.equal(stages.find((item) => item.id === 'etsy').status, 'progress')
   assert.equal(stages.find((item) => item.id === 'results').status, 'locked')
 })
+
+test('shows every final evidence row in the results stage count', () => {
+  const stages = deriveResearchStageStates({
+    erankResultCount: 50,
+    everbeeResultCount: 50,
+    finalEvidenceCount: 119,
+  })
+
+  assert.equal(stages.find((item) => item.id === 'results').count, 119)
+})

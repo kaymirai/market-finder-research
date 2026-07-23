@@ -756,12 +756,15 @@ test('explains the active eRank query and the exact capture failure stage', () =
   assert.match(app, /競合・KD/)
 })
 
-test('separates product tests, exploration candidates, and exclusions', () => {
+test('separates recommendations, pending verification, holds, failures, and exclusions', () => {
   assert.match(html, /調査結果と商品化候補/)
-  assert.match(app, /title: '商品化テスト候補'/)
-  assert.match(app, /title: '追加探索候補'/)
-  assert.match(app, /title: '除外候補'/)
-  assert.match(app, /collapsible: true/)
+  assert.match(html, /data-final-evidence-filter="recommended"/)
+  assert.match(html, /data-final-evidence-filter="pending"/)
+  assert.match(html, /data-final-evidence-filter="hold"/)
+  assert.match(html, /data-final-evidence-filter="failed"/)
+  assert.match(html, /data-final-evidence-filter="excluded"/)
+  assert.match(app, /finalEvidenceFilterMatches/)
+  assert.match(app, /未検証をまとめて検証/)
   assert.doesNotMatch(html, /<h2>おすすめキーワード<\/h2>/)
 })
 
@@ -1047,5 +1050,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260723-1')
+  assert.equal(stylesheetVersion, '20260723-2')
 })

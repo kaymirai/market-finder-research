@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260723-1">
+    <link rel="stylesheet" href="./styles.css?v=20260723-2">
   </head>
   <body>
     <main class="app-shell">
@@ -555,6 +555,17 @@
             <button id="downloadStep4CsvBtn" type="button" class="primary-btn" data-optional="保存" aria-describedby="finalResultFreshness">未来デザイナー用CSV</button>
           </div>
         </div>
+        <div class="final-evidence-controls">
+          <div id="finalEvidenceFilters" class="final-evidence-filters" role="group" aria-label="最終結果の表示切り替え">
+            <button type="button" data-final-evidence-filter="all" aria-pressed="true">すべて</button>
+            <button type="button" data-final-evidence-filter="recommended" aria-pressed="false">推奨</button>
+            <button type="button" data-final-evidence-filter="pending" aria-pressed="false">検証待ち</button>
+            <button type="button" data-final-evidence-filter="hold" aria-pressed="false">保留</button>
+            <button type="button" data-final-evidence-filter="excluded" aria-pressed="false">除外</button>
+            <button type="button" data-final-evidence-filter="failed" aria-pressed="false">取得失敗</button>
+          </div>
+          <button id="verifyPendingEvidenceBtn" type="button" class="primary-btn">未検証をまとめて検証</button>
+        </div>
         <div id="researchRoundProgress" class="research-round-progress" hidden></div>
         <div id="researchRoundTabs" class="research-round-tabs" role="tablist" aria-label="調査ラウンド"></div>
         <div id="researchRoundSummary" class="research-round-summary"></div>
@@ -569,6 +580,7 @@
           <span><strong>Top Share</strong> 70%以上は単一ヒットへの集中としてAから除外</span>
           <span><strong>Freshness</strong> eRankとEverBeeが45日以内の時だけA/B候補</span>
         </div>
+        <div id="finalEvidenceTable" class="final-evidence-table-shell" aria-live="polite"></div>
         <section id="crossNicheSection" class="cross-niche-section" hidden>
           <div class="cross-niche-heading">
             <div>
@@ -709,6 +721,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260723-1"></script>
+    <script type="module" src="./src/app.js?v=20260723-2"></script>
   </body>
 </html>

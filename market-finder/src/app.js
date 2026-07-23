@@ -80,7 +80,14 @@ import {
   selectResearchQueueFilter,
   selectResearchStage,
   stableRenderSignature,
-} from './research-console-ui.js?v=20260722-3'
+} from './research-console-ui.js?v=20260723-1'
+import {
+  deriveFinalEvidenceState,
+  deriveFinalScoreState,
+  finalEvidenceFilterMatches,
+  formatEvidenceMetric,
+  pendingEvidenceBatch,
+} from './final-evidence-matrix.js?v=20260723-1'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -162,6 +169,8 @@ const state = {
   acceptExtensionResults: false,
   seoPlan: null,
   selectedResultKey: '',
+  finalEvidenceFilter: 'all',
+  finalEvidenceCount: 0,
   recentTrendKeywords: new Set(),
   lastTrendRunStartedAt: '',
   searchSeedRows: [],
@@ -283,6 +292,9 @@ const elements = {
   downloadStep4CsvBtn: document.querySelector('#downloadStep4CsvBtn'),
   copyFinalKeywordsBtn: document.querySelector('#copyFinalKeywordsBtn'),
   finalResultFreshness: document.querySelector('#finalResultFreshness'),
+  finalEvidenceFilters: document.querySelector('#finalEvidenceFilters'),
+  verifyPendingEvidenceBtn: document.querySelector('#verifyPendingEvidenceBtn'),
+  finalEvidenceTable: document.querySelector('#finalEvidenceTable'),
   resultsList: document.querySelector('#resultsList'),
   researchRoundProgress: document.querySelector('#researchRoundProgress'),
   researchRoundTabs: document.querySelector('#researchRoundTabs'),
@@ -515,6 +527,7 @@ function persistMarketFinderState() {
       candidateCatalog: state.candidateCatalog,
       researchedMarketHistory: state.researchedMarketHistory,
       selectedResultKey: state.selectedResultKey,
+      finalEvidenceFilter: state.finalEvidenceFilter,
       seoPlan: state.seoPlan,
       consoleUi: state.consoleUi,
     },
@@ -572,6 +585,10 @@ function restorePersistedState() {
   state.candidateCatalog = Array.isArray(savedState.candidateCatalog) ? savedState.candidateCatalog : []
   state.researchedMarketHistory = normalizeResearchMarketHistory(savedState.researchedMarketHistory)
   state.selectedResultKey = String(savedState.selectedResultKey ?? '')
+  state.finalEvidenceFilter = ['all', 'recommended', 'pending', 'hold', 'excluded', 'failed']
+    .includes(savedState.finalEvidenceFilter)
+    ? savedState.finalEvidenceFilter
+    : 'all'
   state.seoPlan = savedState.seoPlan ?? null
   state.consoleUi = restoreResearchConsoleUiFromPayload(savedState)
 
@@ -1313,8 +1330,8 @@ function salesCheckKeywords() {
   return narrowed.length > 0 ? narrowed : readyKeywords()
 }
 
-function buildCurrentErankQueryPlan() {
-  return buildErankQueryPlan(state.candidates, {
+function buildCurrentErankQueryPlan(candidates = state.candidates) {
+  return buildErankQueryPlan(candidates, {
     eventTerm: selectedEvent().searchTerm,
     candidateLimit: ERANK_RESEARCH_LIMIT,
     baseQueryFor: (keyword, candidate) => candidate.queryStrategy === 'cross-niche'
@@ -2756,65 +2773,242 @@ function renderFinalResultToolbar() {
   elements.finalResultFreshness.textContent = toolbarState.statusMessage
 }
 
+function evidenceTermCount(value) {
+  const terms = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(/[\n,;]+/)
+  return new Set(terms.map((term) => normalizePhrase(term)).filter(Boolean)).size
+}
+
+function evidenceConversionLabel(row = {}) {
+  const direct = String(row.etsyConversionLabel ?? row.conversionLabel ?? '').trim()
+  if (direct) return direct
+  return String(row.notes ?? '').match(/Conversion:\s*([^/]+)/i)?.[1]?.trim() ?? ''
+}
+
+function finalEvidenceRows() {
+  const analysis = currentResearchAnalysis()
+  const scoredByKeyword = new Map(analysis.scoredRows.map((row) => [normalizePhrase(row.keyword), row]))
+  const everbeeByKeyword = new Map(everbeeResultRows().map((row) => [normalizePhrase(row.score.normalized.keyword), row]))
+  const captureByKeyword = new Map(erankCaptureStateRows().map((row) => [normalizePhrase(row.query), row]))
+  const candidateByKeyword = new Map()
+  ;[...state.candidateCatalog, ...state.candidates, ...currentCrossNicheDrilldown().candidates].forEach((candidate) => {
+    const keyword = normalizePhrase(candidate?.keyword)
+    if (keyword) candidateByKeyword.set(keyword, { ...candidateByKeyword.get(keyword), ...candidate, keyword })
+  })
+  const eligibleForEtsy = new Set(
+    etsyValidationCandidates().map((candidate) => normalizePhrase(candidate.keyword ?? candidate.query))
+  )
+  const marketplaceByKeyword = new Map(
+    (state.marketplaceInsightPlan?.items ?? []).map((item) => [normalizePhrase(item.query), item])
+  )
+  const keywords = new Set([...scoredByKeyword.keys(), ...candidateByKeyword.keys(), ...captureByKeyword.keys()])
+
+  const rows = [...keywords].map((keyword) => {
+    const scoredRow = scoredByKeyword.get(keyword)
+    const everbeeRow = everbeeByKeyword.get(keyword)
+    const candidate = candidateByKeyword.get(keyword) ?? {}
+    const capture = captureByKeyword.get(keyword) ?? {}
+    const raw = scoredRow ?? findResearchRow(keyword) ?? { keyword }
+    const normalized = scoredRow?.score?.normalized ?? raw
+    const captureUi = deriveErankCaptureUiState(raw, {
+      active: Boolean(state.extensionState?.active && normalizePhrase(state.extensionState.currentKeyword) === keyword),
+    })
+    const erankAttempted = captureUi.status !== 'unsearched' || Boolean(capture.erankAttemptedAt)
+    const erankDemandUnknown = captureUi.status === 'no-data'
+      || (captureUi.status === 'partial'
+        && ![raw.erankSearchVolume, raw.erankClicks].some((value) => String(value ?? '').trim() !== ''))
+    const planItem = marketplaceByKeyword.get(keyword)
+    const etsyChecked = Boolean(raw.etsyCheckedAt)
+      || ['completed', 'skipped', 'error'].includes(planItem?.status)
+    const hasEtsyData = rowHasEtsyMarketplaceInput(raw)
+      || [planItem?.result?.etsySearches30d, planItem?.result?.etsyListings]
+        .some((value) => value !== null && value !== undefined && String(value).trim() !== '')
+    const hasEverbeeData = rowHasEverbeeInput(raw)
+    const failed = captureUi.status === 'failed' || planItem?.status === 'error'
+    const failureStage = planItem?.status === 'error' ? 'pending-etsy' : 'pending-erank'
+    let nextStage = 'done'
+    if (!failed && !erankAttempted) nextStage = 'pending-erank'
+    else if (!failed && !erankDemandUnknown && !hasEverbeeData && hasEtsyData) nextStage = 'pending-everbee'
+    else if (!failed && !erankDemandUnknown && !hasEverbeeData && !etsyChecked && eligibleForEtsy.has(keyword)) nextStage = 'pending-etsy'
+
+    const excluded = Boolean(hasEverbeeData && scoredRow?.score?.opportunityLabel === 'D')
+      || Boolean(erankAttempted && !erankDemandUnknown && !failed && !hasEverbeeData
+        && !hasEtsyData && !eligibleForEtsy.has(keyword))
+    const evidenceState = deriveFinalEvidenceState({
+      nextStage,
+      erankStatus: erankDemandUnknown ? 'unknown' : captureUi.status,
+      hasEverbeeData,
+      excluded,
+      failed,
+      failureStage,
+    })
+    const scoreState = deriveFinalScoreState({
+      candidateStage: hasEverbeeData
+        ? scoredRow?.score?.candidateStage
+        : rowHasErankInput(raw) ? 'demand-checked' : 'idea',
+      score: scoredRow?.score?.score,
+      explorationPriority: candidate.priorityScore,
+    })
+    const decisionReasons = scoredRow ? scoreReasonLabels(scoredRow.score) : []
+
+    return {
+      keyword,
+      key: keyword,
+      raw,
+      normalized,
+      everbeeRow,
+      evidenceState,
+      scoreState,
+      opportunityLabel: scoreState.type === 'overall' ? scoredRow?.score?.opportunityLabel ?? '' : '',
+      confidenceLabel: scoredRow?.score?.confidenceLabel ?? '',
+      candidateStage: scoredRow?.score?.candidateStage ?? (rowHasErankInput(raw) ? 'demand-checked' : 'idea'),
+      etsyConversionLabel: evidenceConversionLabel(raw),
+      etsyRelatedCount: evidenceTermCount(normalized.etsyRelatedTerms),
+      decisionReasons,
+      erankChecked: erankAttempted && captureUi.status !== 'failed',
+      etsyChecked,
+      everbeeChecked: hasEverbeeData || Boolean(raw.everbeeCheckedAt),
+    }
+  })
+
+  const statusOrder = { verified: 0, pending: 1, hold: 2, failed: 3, excluded: 4 }
+  return rows.sort((left, right) => (
+    (statusOrder[left.evidenceState.status] ?? 9) - (statusOrder[right.evidenceState.status] ?? 9)
+    || (right.scoreState.score ?? -1) - (left.scoreState.score ?? -1)
+    || (right.scoreState.explorationPriority ?? -1) - (left.scoreState.explorationPriority ?? -1)
+    || left.keyword.localeCompare(right.keyword, 'en')
+  ))
+}
+
+function finalEvidenceMetric(value, checked, options = {}) {
+  const displayValue = typeof options.transform === 'function' && value !== null && value !== undefined && value !== ''
+    ? options.transform(value)
+    : value
+  return formatEvidenceMetric(displayValue, { checked, suffix: options.suffix })
+}
+
+function renderFinalEvidenceMetricCell(metric, label) {
+  return `<td class="final-evidence-metric is-${escapeHtml(metric.kind)}" data-label="${escapeHtml(label)}">${escapeHtml(metric.text)}</td>`
+}
+
+function renderFinalEvidenceMatrixRow(row) {
+  const data = row.normalized
+  const scoreHint = row.scoreState.explorationPriority !== null
+    ? `<small>探索優先度 ${escapeHtml(row.scoreState.explorationPriority)}</small>`
+    : row.scoreState.type === 'reference' ? '<small>売上確認前</small>' : ''
+  const action = row.evidenceState.actionLabel
+    ? `<button type="button" class="text-btn final-evidence-action" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
+    : ''
+  const topShare = data.topSalesShare === null || data.topSalesShare === undefined
+    ? data.topSalesShare
+    : Math.round(Number(data.topSalesShare) * 100)
+
+  return `
+    <tr class="final-evidence-row is-${escapeHtml(row.evidenceState.status)}${row.key === state.selectedResultKey ? ' is-selected' : ''}">
+      <td class="is-sticky-column column-score"><strong>${escapeHtml(row.scoreState.label)}</strong>${scoreHint}</td>
+      <td class="is-sticky-column column-keyword"><button type="button" class="final-evidence-keyword" data-result-key="${escapeHtml(row.key)}">${escapeHtml(row.keyword)}</button></td>
+      <td class="is-sticky-column column-status"><span class="final-evidence-status is-${escapeHtml(row.evidenceState.status)}">${escapeHtml(row.evidenceState.label)}</span>${action}</td>
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.erankSearchVolume, row.erankChecked), 'eRank Search')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.erankClicks, row.erankChecked), 'eRank Clicks')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.erankCtr, row.erankChecked, { suffix: '%' }), 'eRank CTR')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.erankCompetition, row.erankChecked), 'eRank Competition')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.erankKeywordDifficulty, row.erankChecked), 'eRank KD')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.erankTrend, row.erankChecked), 'eRank Trend')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.etsySearches30d, row.etsyChecked), 'Etsy Searches')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.etsyListings, row.etsyChecked), 'Etsy Listings')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(row.etsyConversionLabel, row.etsyChecked), 'Etsy Conversion')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(row.etsyChecked ? row.etsyRelatedCount : null, row.etsyChecked), 'Etsy Related')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.listingsAnalyzed, row.everbeeChecked), 'EverBee Competition')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.sellingListingCount, row.everbeeChecked), 'Selling')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.recentSellingListingCount, row.everbeeChecked), 'Recent')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.medianMonthlySales, row.everbeeChecked), 'Median Sales')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.medianMonthlyRevenue, row.everbeeChecked), 'Median Revenue')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.totalVisibleMonthlySales, row.everbeeChecked), 'Total Sales')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(topShare, row.everbeeChecked, { suffix: '%' }), 'Top Share')}
+      ${renderFinalEvidenceMetricCell(finalEvidenceMetric(data.medianListingAgeMonths, row.everbeeChecked, { suffix: ' mo' }), 'Median Age')}
+      <td>${escapeHtml(row.opportunityLabel || '-')}</td>
+      <td>${escapeHtml(row.confidenceLabel || '-')}</td>
+      <td>${escapeHtml(row.candidateStage || '-')}</td>
+      <td class="final-evidence-reasons">${escapeHtml(row.decisionReasons.join(' / ') || row.evidenceState.label)}</td>
+    </tr>
+  `
+}
+
+function renderFinalEvidenceDetail(row) {
+  if (row?.everbeeRow) return renderEverbeeDetail(row.everbeeRow)
+  if (!row) return '<div class="empty-state">表示する候補がありません。</div>'
+  const nextAction = row.evidenceState.actionLabel
+    ? `<button type="button" class="primary-btn" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
+    : ''
+  return `
+    <article class="result-detail-card final-evidence-detail">
+      <div class="result-top">
+        <div class="opportunity-score c"><span>${row.scoreState.type === 'pending' ? '探索' : '参考'}</span><strong>${escapeHtml(row.scoreState.score ?? row.scoreState.explorationPriority ?? '-')}</strong></div>
+        <div><h3>${escapeHtml(row.keyword)}</h3><div class="meta-line"><span class="pill">${escapeHtml(row.evidenceState.label)}</span><span class="pill">${escapeHtml(row.candidateStage)}</span></div></div>
+      </div>
+      <p class="final-evidence-detail-note">取得済みの根拠だけを表示しています。Unknownは0ではなく、提供元に推定値がない状態です。</p>
+      ${nextAction}
+    </article>
+  `
+}
+
+function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
+  const visibleRows = rows.filter((row) => finalEvidenceFilterMatches(row, state.finalEvidenceFilter))
+  elements.finalEvidenceFilters.querySelectorAll('[data-final-evidence-filter]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.finalEvidenceFilter === state.finalEvidenceFilter))
+  })
+  const pendingRows = rows.filter((row) => row.evidenceState.status === 'pending')
+  elements.verifyPendingEvidenceBtn.disabled = pendingRows.length === 0
+  elements.verifyPendingEvidenceBtn.textContent = pendingRows.length > 0
+    ? `未検証をまとめて検証 (${pendingRows.length})`
+    : '未検証なし'
+
+  if (visibleRows.length === 0) {
+    renderHtmlIfChanged(elements.finalEvidenceTable, '<div class="empty-state">この条件に一致する結果はありません。</div>')
+    return visibleRows
+  }
+
+  const tableHtml = `
+    <table class="final-evidence-table">
+      <thead><tr>
+        <th class="is-sticky-column column-score">総合点</th><th class="is-sticky-column column-keyword">キーワード</th><th class="is-sticky-column column-status">検証状態</th>
+        <th>eRank Search</th><th>Clicks</th><th>CTR</th><th>Competition</th><th>KD</th><th>Trend</th>
+        <th>Etsy 30d</th><th>Etsy Listings</th><th>Etsy Conversion</th><th>関連語</th>
+        <th>EverBee競合</th><th>Selling</th><th>Recent</th><th>Median Sales</th><th>Median Revenue</th><th>Total Sales</th><th>Top Share</th><th>Median Age</th>
+        <th>判定</th><th>Confidence</th><th>Stage</th><th>判定理由</th>
+      </tr></thead>
+      <tbody>${visibleRows.map(renderFinalEvidenceMatrixRow).join('')}</tbody>
+    </table>
+  `
+  renderHtmlIfChanged(elements.finalEvidenceTable, tableHtml)
+  return visibleRows
+}
+
 function renderResultsTable() {
   renderFinalResultToolbar()
   renderResearchRoundControls()
-  const ranked = selectedRoundEverbeeRows()
+  const allRows = finalEvidenceRows()
+  state.finalEvidenceCount = allRows.length
+  const stageStatus = document.querySelector('#researchStageResultsStatus')
+  if (stageStatus) stageStatus.textContent = allRows.length > 0 ? `${allRows.length}件` : '売上確認待ち'
 
-  if (ranked.length === 0) {
+  if (allRows.length === 0) {
+    renderFinalEvidenceMatrix(allRows)
     state.selectedResultKey = ''
-    elements.resultsList.innerHTML = '<div class="empty-state">このラウンドにはまだEverBee確認済みの結果がありません。上のタブで初回または総合を確認できます。</div>'
+    renderHtmlIfChanged(elements.resultsList, '<div class="empty-state">まだ評価結果がありません。候補を作り、eRankから順に確認してください。</div>')
     return
   }
 
-  const keyedRows = ranked.map((row, index) => ({ row, key: resultRowKey(row, index) }))
-  if (!state.selectedResultKey || !keyedRows.some((item) => item.key === state.selectedResultKey)) {
-    state.selectedResultKey = keyedRows[0].key
+  const visibleRows = allRows.filter((row) => finalEvidenceFilterMatches(row, state.finalEvidenceFilter))
+  if (!state.selectedResultKey || !allRows.some((row) => row.key === state.selectedResultKey)) {
+    state.selectedResultKey = (visibleRows[0] ?? allRows[0]).key
   }
 
-  const selectedItem = keyedRows.find((item) => item.key === state.selectedResultKey) ?? keyedRows[0]
-  const itemsByKey = new Map(keyedRows.map((item) => [item.key, item]))
-  const groupItems = (rows) => rows.map((row) => itemsByKey.get(resultRowKey(row)))
-    .filter(Boolean)
-  const testRows = ranked.filter((row) => ['A', 'B'].includes(row.score.opportunityLabel))
-  const exploreRows = ranked.filter((row) => row.score.opportunityLabel === 'C')
-  const excludedRows = ranked.filter((row) => row.score.opportunityLabel === 'D')
-  const opportunityGroups = [
-    renderOpportunityResultGroup({
-      title: '商品化テスト候補',
-      description: 'A/Bだけを表示します。根拠がそろった順に、小さく商品化テストする候補です。',
-      items: groupItems(testRows),
-      emptyMessage: 'このラウンドのA/B商品化テスト候補は0件です。C候補から追加探索を続けます。',
-      className: 'is-test-ready',
-    }),
-    renderOpportunityResultGroup({
-      title: '追加探索候補',
-      description: 'C判定です。商品化推奨ではなく、派生語や不足データを追加確認する候補です。',
-      items: groupItems(exploreRows),
-      emptyMessage: '追加探索候補はありません。',
-      className: 'is-exploration',
-    }),
-    renderOpportunityResultGroup({
-      title: '除外候補',
-      description: 'D判定または権利・需要・鮮度の条件を通らなかった候補です。',
-      items: groupItems(excludedRows),
-      emptyMessage: '除外候補はありません。',
-      className: 'is-excluded',
-      collapsible: true,
-    }),
-  ].join('')
-
-  elements.resultsList.innerHTML = `
-    <div class="results-comparison-layout">
-      <div class="result-track-list">
-        <div class="table-caption">候補を押すと、右に商品案・SEO案・タグ案が出ます。</div>
-        ${opportunityGroups}
-      </div>
-      <div class="selected-result-panel">
-        ${renderEverbeeDetail(selectedItem.row)}
-      </div>
-    </div>
-  `
+  renderFinalEvidenceMatrix(allRows)
+  const selected = allRows.find((row) => row.key === state.selectedResultKey) ?? allRows[0]
+  const detailHtml = `<div class="selected-result-panel">${renderFinalEvidenceDetail(selected)}</div>`
+  renderHtmlIfChanged(elements.resultsList, detailHtml)
 }
 
 function formatCrossNichePercent(value) {
@@ -3063,8 +3257,69 @@ async function copySelectedNounBrief(button) {
   }, 1400)
 }
 
+async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '') {
+  const rows = finalEvidenceRows()
+  const requested = normalizePhrase(requestedKeyword)
+  const stageOrder = ['pending-erank', 'pending-etsy', 'pending-everbee']
+  let stage = stageOrder.includes(requestedStage) ? requestedStage : ''
+  let batch = []
+
+  if (requested) {
+    const row = rows.find((item) => item.keyword === requested)
+    if (row && (row.evidenceState.status === 'pending' || row.evidenceState.status === 'failed')) {
+      stage = stage || row.evidenceState.nextStage
+      batch = [row]
+    }
+  }
+
+  if (batch.length === 0) {
+    if (!stage) stage = stageOrder.find((item) => pendingEvidenceBatch(rows, item).length > 0) ?? ''
+    batch = pendingEvidenceBatch(rows, stage)
+  }
+
+  if (!stage || batch.length === 0) {
+    setSimpleStatus('検証待ちの候補はありません。Unknown・除外・取得失敗は状態別フィルターで確認できます。')
+    return
+  }
+
+  const keywords = batch.map((row) => row.keyword)
+  state.finalEvidenceFilter = 'pending'
+  persistMarketFinderState()
+
+  if (stage === 'pending-erank') {
+    const candidates = batch.map((row) => ({
+      ...row.candidate,
+      keyword: row.keyword,
+      status: 'ready',
+      queryStrategy: 'cross-niche',
+    }))
+    setSimpleStatus(`${keywords.length}件の未取得eRankデータを確認します。既存結果は保持します。`)
+    await startErankResearch({ candidates, preserveExisting: true })
+    return
+  }
+
+  if (stage === 'pending-etsy') {
+    rebuildMarketplaceInsightPlan({ preserveExisting: true })
+    setSimpleStatus(`${keywords.length}件を含むEtsy公式確認を開始します。取得済み結果は再利用します。`)
+    await startMarketplaceInsight()
+    return
+  }
+
+  elements.researchJobInput.value = keywords.join('\n')
+  setSimpleStatus(`${keywords.length}件の未取得EverBee売上データを確認します。既存結果は保持します。`)
+  await startExtensionResearch({ keywords, preserveExisting: true })
+}
+
 function handleResultListClick(event) {
   if (!(event.target instanceof Element)) return
+  const verifyButton = event.target.closest('[data-final-verify-stage]')
+  if (verifyButton) {
+    verifyPendingEvidence(
+      verifyButton.dataset.finalVerifyStage,
+      verifyButton.dataset.finalVerifyKeyword,
+    ).catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+    return
+  }
   const roundButton = event.target.closest('[data-round-filter]')
   if (roundButton) {
     state.researchRounds = selectResearchRound(state.researchRounds, roundButton.dataset.roundFilter)
@@ -3412,6 +3667,7 @@ function researchConsoleMetrics() {
     etsyCompletedCount: marketplaceItems.filter((item) => item.status === 'completed').length,
     etsyPendingCount: marketplaceItems.filter((item) => !['completed', 'skipped'].includes(item.status)).length,
     everbeeResultCount: everbeeResultRows().length,
+    finalEvidenceCount: state.finalEvidenceCount || everbeeResultRows().length,
     activeService,
   }
 }
@@ -3793,6 +4049,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     erankTrend: keepExistingWhenBlank('erankTrend'),
     etsySearches30d: keepExistingWhenBlank('etsySearches30d'),
     etsyListings: keepExistingWhenBlank('etsyListings'),
+    etsyConversionLabel: keepExistingWhenBlank('etsyConversionLabel'),
     etsyRelatedTerms: keepExistingWhenBlank('etsyRelatedTerms'),
     erankCheckedAt: incomingErankChecked
       ? (row.erankCheckedAt || incomingCheckedAt || existingRow?.erankCheckedAt || '')
@@ -4128,11 +4385,30 @@ function researchMetadataCsvValues(row) {
   ]
 }
 
+function evidenceCsvValue(value, checked = false) {
+  const metric = formatEvidenceMetric(value, { checked })
+  return metric.kind === 'pending' ? '' : metric.text
+}
+
+function finalEvidenceMetadataCsvValues(row, evidenceByKeyword) {
+  const keyword = normalizePhrase(row?.keyword ?? row?.query)
+  const evidence = evidenceByKeyword.get(keyword)
+  const captureStatus = String(row?.erankCaptureStatus ?? '').trim()
+    || (evidence?.erankChecked ? 'captured' : '')
+  return [
+    evidence?.evidenceState?.label ?? '',
+    evidence?.evidenceState?.nextStage ?? '',
+    evidence?.scoreState?.type ?? '',
+    captureStatus === 'no-data' ? 'Unknown' : captureStatus,
+  ]
+}
+
 function exportErankCsv() {
   const rows = erankResultRows()
   const captureStates = erankCaptureStateRows()
     .filter((row) => !rowHasErankInput(findResearchRow(row.query) ?? {}))
   if (rows.length === 0 && captureStates.length === 0) return
+  const evidenceByKeyword = new Map(finalEvidenceRows().map((row) => [row.keyword, row]))
 
   const header = [
     'Source Type',
@@ -4153,6 +4429,10 @@ function exportErankCsv() {
     'Cross Niche Parent',
     'Cross Niche Depth',
     'Notes',
+    'Verification Status',
+    'Missing Stages',
+    'Score Type',
+    'eRank Capture Status',
     ...RESEARCH_METADATA_CSV_HEADERS,
   ]
 
@@ -4174,15 +4454,16 @@ function exportErankCsv() {
       track.historyClusterKey,
       row.erankOpportunity.label,
       row.erankOpportunity.score,
-      normalized.erankSearchVolume ?? '',
-      normalized.erankClicks ?? '',
-      normalized.erankCtr ?? '',
-      normalized.erankCompetition ?? '',
-      normalized.erankKeywordDifficulty ?? '',
-      normalized.erankTrend ?? '',
+      evidenceCsvValue(normalized.erankSearchVolume, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankClicks, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankCtr, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankCompetition, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankKeywordDifficulty, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankTrend, Boolean(normalized.erankCheckedAt)),
       row.crossNicheParent ?? '',
       row.crossNicheDepth ?? '',
       row.notes ?? '',
+      ...finalEvidenceMetadataCsvValues(row, evidenceByKeyword),
       ...researchMetadataCsvValues(row),
     ].map(csvCell).join(',')
   })
@@ -4199,6 +4480,11 @@ function exportErankCsv() {
       row.status === 'failed' ? '検索済み・数値取得失敗' : '未検索',
       '', '', '', '', '', '', '', '', '',
       row.error ?? '',
+      ...finalEvidenceMetadataCsvValues({
+        ...row,
+        keyword: row.query,
+        erankCaptureStatus: row.status,
+      }, evidenceByKeyword),
       ...researchMetadataCsvValues({
         ...row,
         keyword: row.query,
@@ -4214,6 +4500,7 @@ function exportErankCsv() {
 function exportStep4Csv() {
   const rows = everbeeResultRows()
   if (rows.length === 0) return
+  const evidenceByKeyword = new Map(finalEvidenceRows().map((row) => [row.keyword, row]))
 
   const header = [
     'Rank',
@@ -4274,6 +4561,10 @@ function exportStep4Csv() {
     'Positive Reasons',
     'Warnings',
     'Notes',
+    'Verification Status',
+    'Missing Stages',
+    'Score Type',
+    'eRank Capture Status',
     ...RESEARCH_METADATA_CSV_HEADERS,
   ]
 
@@ -4298,17 +4589,17 @@ function exportStep4Csv() {
       row.score.opportunityLabel,
       row.score.confidenceLabel,
       row.score.candidateStage,
-      normalized.listingsAnalyzed ?? '',
-      normalized.visibleListingCount ?? '',
-      normalized.sellingListingCount ?? '',
-      normalized.recentSellingListingCount ?? '',
-      normalized.medianMonthlySales ?? '',
-      normalized.medianMonthlyRevenue ?? '',
-      normalized.totalVisibleMonthlySales ?? '',
-      normalized.topSalesShare ?? '',
-      normalized.medianListingAgeMonths ?? '',
-      normalized.etsySearches30d ?? '',
-      normalized.etsyListings ?? '',
+      evidenceCsvValue(normalized.listingsAnalyzed, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.visibleListingCount, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.sellingListingCount, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.recentSellingListingCount, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.medianMonthlySales, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.medianMonthlyRevenue, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.totalVisibleMonthlySales, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.topSalesShare, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.medianListingAgeMonths, Boolean(normalized.everbeeCheckedAt)),
+      evidenceCsvValue(normalized.etsySearches30d, Boolean(normalized.etsyCheckedAt)),
+      evidenceCsvValue(normalized.etsyListings, Boolean(normalized.etsyCheckedAt)),
       (normalized.etsyRelatedTerms ?? []).join(', '),
       normalized.erankCheckedAt ?? '',
       normalized.etsyCheckedAt ?? '',
@@ -4320,12 +4611,12 @@ function exportStep4Csv() {
       normalized.topRevenue ?? '',
       normalized.averagePrice ?? '',
       normalized.listingAgeMonths ?? '',
-      normalized.erankSearchVolume ?? '',
-      normalized.erankClicks ?? '',
-      normalized.erankCtr ?? '',
-      normalized.erankCompetition ?? '',
-      normalized.erankKeywordDifficulty ?? '',
-      normalized.erankTrend ?? '',
+      evidenceCsvValue(normalized.erankSearchVolume, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankClicks, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankCtr, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankCompetition, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankKeywordDifficulty, Boolean(normalized.erankCheckedAt)),
+      evidenceCsvValue(normalized.erankTrend, Boolean(normalized.erankCheckedAt)),
       route.decision ?? '',
       route.primary?.label ?? '',
       route.summary ?? '',
@@ -4342,6 +4633,7 @@ function exportStep4Csv() {
       scoreReasonLabels(row.score).join(' / '),
       row.score.exclusionReasons.join(' / '),
       row.notes ?? '',
+      ...finalEvidenceMetadataCsvValues(row, evidenceByKeyword),
       ...researchMetadataCsvValues(row),
     ].map(csvCell).join(',')
   })
@@ -5058,14 +5350,14 @@ async function pollExtensionState() {
   }
 }
 
-async function startExtensionResearch() {
+async function startExtensionResearch(options = {}) {
   state.broadAutoImport = false
-  const keywords = parseResearchJob(elements.researchJobInput.value)
+  const keywords = cleanKeywordList(options.keywords ?? parseResearchJob(elements.researchJobInput.value))
   if (keywords.length === 0) {
     elements.extensionStatus.textContent = '調査キーワード / JSON欄に、調査したいキーワードを入れてください。'
     return
   }
-  const preserveExisting = preserveCrossNicheResearch('everbee')
+  const preserveExisting = options.preserveExisting === true || preserveCrossNicheResearch('everbee')
   if (!preserveExisting && !confirmExportBeforeClearingResults({ scope: 'everbee', label: '前回のEverBee売上結果' })) return
   if (!preserveExisting) clearResearchResults('everbee')
   state.acceptExtensionResults = true
@@ -5093,8 +5385,9 @@ async function startExtensionResearch() {
   }
 }
 
-async function startErankResearch() {
-  const queryPlan = buildCurrentErankQueryPlan()
+async function startErankResearch(options = {}) {
+  const candidates = Array.isArray(options.candidates) ? options.candidates : state.candidates
+  const queryPlan = buildCurrentErankQueryPlan(candidates)
   const keywords = queryPlan.map((item) => item.query)
   if (keywords.length === 0) {
     const message = '候補一覧が空です。先に「候補を自動で探す」を押してください。'
@@ -5103,11 +5396,11 @@ async function startErankResearch() {
     renderCandidates()
     return
   }
-  const preserveExisting = preserveCrossNicheResearch('erank')
+  const preserveExisting = options.preserveExisting === true || preserveCrossNicheResearch('erank')
   if (!preserveExisting && !confirmExportBeforeClearingResults({ scope: 'all', label: '前回の調査結果' })) return
   if (!preserveExisting) clearResearchResults('all')
   state.erankQueryPlan = queryPlan
-  mergeCandidateCatalog(state.candidates)
+  mergeCandidateCatalog(candidates)
   if (!preserveExisting) beginInitialResearchRound()
   else syncActiveRoundStatus('pending-erank')
   state.acceptExtensionResults = true
@@ -5375,6 +5668,7 @@ async function captureMarketplaceInsight(options = {}) {
         keyword: metric.keyword,
         etsySearches30d: metric.etsySearches30d,
         etsyListings: metric.etsyListings,
+        etsyConversionLabel: metric.conversionLabel,
         etsyCheckedAt: checkedAt,
         notes: `Etsy Marketplace Insights related to ${item.query}${conversionNote}${modeNote}`,
       })
@@ -5559,6 +5853,19 @@ function bindEvents() {
   elements.addResearchBtn.addEventListener('click', addManualResearch)
   elements.importCsvBtn.addEventListener('click', importCsv)
   elements.sampleCsvBtn.addEventListener('click', fillSampleCsv)
+  elements.finalEvidenceFilters.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    const button = event.target.closest('[data-final-evidence-filter]')
+    if (!button) return
+    state.finalEvidenceFilter = button.dataset.finalEvidenceFilter || 'all'
+    state.selectedResultKey = ''
+    renderResultsTable()
+    persistMarketFinderState()
+  })
+  elements.verifyPendingEvidenceBtn.addEventListener('click', () => {
+    verifyPendingEvidence().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+  })
+  elements.finalEvidenceTable.addEventListener('click', handleResultListClick)
   elements.resultsList.addEventListener('click', handleResultListClick)
   elements.researchRoundTabs.addEventListener('click', handleResultListClick)
   elements.copyKeywordsBtn.addEventListener('click', copyKeywords)
