@@ -94,6 +94,18 @@ test('redirects an eRank dashboard tab to Keyword Tool before searching', () => 
   assert.ok((backgroundTypeScriptSource.match(/prepareErankTab\(/g) ?? []).length >= 3)
 })
 
+test('stops the eRank queue when the daily keyword lookup limit is reached', () => {
+  const processor = backgroundTypeScriptSource.match(/async function processNextMarketKeyword[\s\S]*?(?=\n    async function runEverbeeKeyword)/)?.[0] ?? ''
+
+  assert.match(erankContentTypeScriptSource, /function pageHasDailyLookupLimit\(/)
+  assert.ok(erankContentTypeScriptSource.includes('keyword lookups?\\/day'))
+  assert.match(backgroundTypeScriptSource, /ERANK_DAILY_LOOKUP_LIMIT_REACHED/)
+  assert.match(backgroundTypeScriptSource, /function isErankDailyLimitError\(/)
+  assert.match(processor, /marketQueue\.unshift\(keyword\)/)
+  assert.match(processor, /marketActive = false/)
+  assert.match(processor, /focusMarketFinderTab\(\)/)
+})
+
 function visibleElement(innerText = '') {
   return {
     innerText,
