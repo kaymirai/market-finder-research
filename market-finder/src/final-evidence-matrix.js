@@ -15,6 +15,31 @@ function finiteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function normalizedKeywordList(values = []) {
+  const seen = new Set()
+  return (Array.isArray(values) ? values : [])
+    .map((value) => String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' '))
+    .filter((keyword) => {
+      if (!keyword || seen.has(keyword)) return false
+      seen.add(keyword)
+      return true
+    })
+}
+
+export function buildFinalEvidenceKeywordPool({
+  evidenceKeywords = [],
+  selectedKeywords = [],
+  fallbackKeywords = [],
+  hasSelection = false,
+  fallbackLimit = 20,
+} = {}) {
+  const selected = normalizedKeywordList(selectedKeywords)
+  const fallback = hasSelection
+    ? []
+    : normalizedKeywordList(fallbackKeywords).slice(0, Math.max(1, Math.floor(Number(fallbackLimit) || 20)))
+  return normalizedKeywordList([...evidenceKeywords, ...selected, ...fallback])
+}
+
 export function deriveFinalEvidenceState(input = {}) {
   if (input.excluded) {
     return {

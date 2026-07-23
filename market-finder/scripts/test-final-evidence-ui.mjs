@@ -10,11 +10,19 @@ const [html, app, css] = await Promise.all([
 
 test('provides a single final evidence matrix with filters and bulk verification', () => {
   assert.match(html, /id="finalEvidenceFilters"/)
+  assert.match(html, /id="finalEvidenceScopeStatus"/)
   assert.match(html, /id="verifyPendingEvidenceBtn"/)
   assert.match(html, /id="finalEvidenceTable"/)
   assert.match(app, /function finalEvidenceRows\(/)
   assert.match(app, /function renderFinalEvidenceMatrix\(/)
   assert.match(app, /async function verifyPendingEvidence\(/)
+})
+
+test('labels bulk verification as a selected shortlist instead of every generated idea', () => {
+  assert.match(app, /buildFinalEvidenceKeywordPool/)
+  assert.match(app, /選抜済みを自動検証/)
+  assert.match(app, /候補アイデア[\s\S]*選抜外/)
+  assert.doesNotMatch(app, /未検証をすべて自動検証/)
 })
 
 test('continues fifty-row verification batches automatically until stopped or complete', () => {
@@ -24,7 +32,7 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /function stopPendingEvidenceAutomation\(/)
   assert.match(app, /candidateLimit:\s*batchLimit/)
   assert.match(app, /wasActive\s*&&\s*!data\.state\?\.active[\s\S]*schedulePendingEvidenceAutomation/)
-  assert.match(app, /未検証をすべて自動検証/)
+  assert.match(app, /選抜済みを自動検証/)
   assert.match(app, /自動検証を停止/)
 })
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildFinalEvidenceKeywordPool,
   deriveFinalEvidenceState,
   deriveFinalKeywordDecision,
   deriveFinalScoreState,
@@ -9,6 +10,37 @@ import {
   formatEvidenceMetric,
   pendingEvidenceBatch,
 } from '../src/final-evidence-matrix.js'
+
+test('keeps generated ideas out of the final verification queue until they are selected', () => {
+  const catalog = Array.from({ length: 1000 }, (_, index) => `idea ${index + 1}`)
+  const selected = catalog.slice(0, 20)
+  const result = buildFinalEvidenceKeywordPool({
+    evidenceKeywords: ['measured keyword'],
+    selectedKeywords: selected,
+    fallbackKeywords: catalog,
+    hasSelection: true,
+    fallbackLimit: 20,
+  })
+
+  assert.equal(result.length, 21)
+  assert.equal(result.includes('measured keyword'), true)
+  assert.equal(result.includes('idea 20'), true)
+  assert.equal(result.includes('idea 21'), false)
+})
+
+test('uses only a bounded fallback when older saved research has no selected round', () => {
+  const catalog = Array.from({ length: 1000 }, (_, index) => `legacy idea ${index + 1}`)
+  const result = buildFinalEvidenceKeywordPool({
+    evidenceKeywords: [],
+    selectedKeywords: [],
+    fallbackKeywords: catalog,
+    hasSelection: false,
+    fallbackLimit: 20,
+  })
+
+  assert.equal(result.length, 20)
+  assert.equal(result.at(-1), 'legacy idea 20')
+})
 
 test('keeps every unfinished verification stage actionable', () => {
   assert.deepEqual(deriveFinalEvidenceState({ nextStage: 'pending-erank' }), {

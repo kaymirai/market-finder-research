@@ -828,7 +828,7 @@ test('separates recommendations, pending verification, holds, failures, and excl
   assert.match(html, /data-final-evidence-filter="failed"/)
   assert.match(html, /data-final-evidence-filter="excluded"/)
   assert.match(app, /finalEvidenceFilterMatches/)
-  assert.match(app, /未検証をすべて自動検証/)
+  assert.match(app, /選抜済みを自動検証/)
   assert.doesNotMatch(html, /<h2>おすすめキーワード<\/h2>/)
 })
 
@@ -1114,5 +1114,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260723-5')
+  assert.equal(stylesheetVersion, '20260723-6')
 })

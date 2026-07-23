@@ -82,13 +82,14 @@ import {
   stableRenderSignature,
 } from './research-console-ui.js?v=20260723-1'
 import {
+  buildFinalEvidenceKeywordPool,
   deriveFinalEvidenceState,
   deriveFinalKeywordDecision,
   deriveFinalScoreState,
   finalEvidenceFilterMatches,
   formatEvidenceMetric,
   pendingEvidenceBatch,
-} from './final-evidence-matrix.js?v=20260723-2'
+} from './final-evidence-matrix.js?v=20260723-3'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -305,6 +306,7 @@ const elements = {
   finalResultFreshness: document.querySelector('#finalResultFreshness'),
   finalKeywordDecision: document.querySelector('#finalKeywordDecision'),
   finalEvidenceFilters: document.querySelector('#finalEvidenceFilters'),
+  finalEvidenceScopeStatus: document.querySelector('#finalEvidenceScopeStatus'),
   verifyPendingEvidenceBtn: document.querySelector('#verifyPendingEvidenceBtn'),
   finalEvidenceScrollProxy: document.querySelector('#finalEvidenceScrollProxy'),
   finalEvidenceScrollProxyTrack: document.querySelector('#finalEvidenceScrollProxyTrack'),
@@ -2896,7 +2898,20 @@ function finalEvidenceRows() {
   const marketplaceByKeyword = new Map(
     (state.marketplaceInsightPlan?.items ?? []).map((item) => [normalizePhrase(item.query), item])
   )
-  const keywords = new Set([...scoredByKeyword.keys(), ...candidateByKeyword.keys(), ...captureByKeyword.keys()])
+  const selectedKeywords = [
+    ...state.researchRounds.rounds.flatMap((round) => round.candidateKeywords ?? []),
+    ...state.crossNicheWorkflow.batch.map((candidate) => candidate.keyword),
+  ]
+  const hasSelection = selectedKeywords.some((keyword) => Boolean(normalizePhrase(keyword)))
+  const keywords = new Set(buildFinalEvidenceKeywordPool({
+    evidenceKeywords: [...scoredByKeyword.keys(), ...captureByKeyword.keys()],
+    selectedKeywords,
+    fallbackKeywords: state.candidates
+      .filter((candidate) => candidate.status === 'ready')
+      .map((candidate) => candidate.keyword),
+    hasSelection,
+    fallbackLimit: ERANK_RESEARCH_LIMIT,
+  }))
 
   const rows = [...keywords].map((keyword) => {
     const scoredRow = scoredByKeyword.get(keyword)
@@ -3062,12 +3077,21 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
     button.setAttribute('aria-pressed', String(button.dataset.finalEvidenceFilter === state.finalEvidenceFilter))
   })
   const pendingRows = rows.filter((row) => row.evidenceState.status === 'pending')
+  const includedKeywords = new Set(rows.map((row) => normalizePhrase(row.keyword)))
+  const deferredIdeaCount = new Set(
+    state.candidateCatalog
+      .map((candidate) => normalizePhrase(candidate.keyword))
+      .filter((keyword) => keyword && !includedKeywords.has(keyword))
+  ).size
+  elements.finalEvidenceScopeStatus.textContent = deferredIdeaCount > 0
+    ? `検証対象 ${rows.length}件。候補アイデア ${deferredIdeaCount}件は選抜外のため、eRank枠を使わず保留しています。`
+    : `検証対象 ${rows.length}件。選抜した候補と取得済みデータだけを表示しています。`
   const automationActive = Boolean(state.pendingEvidenceAutomation?.active)
   elements.verifyPendingEvidenceBtn.disabled = pendingRows.length === 0 && !automationActive
   elements.verifyPendingEvidenceBtn.textContent = automationActive
     ? `自動検証を停止 (${pendingRows.length}件残り)`
     : pendingRows.length > 0
-      ? `未検証をすべて自動検証 (${pendingRows.length})`
+      ? `選抜済みを自動検証 (${pendingRows.length})`
       : '未検証なし'
 
   if (visibleRows.length === 0) {
@@ -5178,7 +5202,7 @@ function closeAdvancedModal() {
 function friendlyExtensionError(error) {
   const message = error instanceof Error ? error.message : String(error ?? '')
   if (isErankDailyLimitError(message)) {
-    return 'eRankの1日あたりの検索上限に達しました。未検証は残したまま停止しました。翌日のリセット後に「未検証をすべて自動検証」を押してください（Basic 100件/日、Pro 200件/日）。'
+    return 'eRankの1日あたりの検索上限に達しました。選抜済みの未検証は残したまま停止しました。翌日のリセット後に「選抜済みを自動検証」を押してください（Basic 100件/日、Pro 200件/日）。'
   }
   if (/activeTab.*permission is required|either the .*activeTab.*permission is required/i.test(message)) {
     return 'Chrome拡張の画面キャプチャ権限が不足しています。実Chromeで開き、拡張をReloadしてバージョン1.34になっているか確認してください。'
