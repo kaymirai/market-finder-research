@@ -167,6 +167,7 @@ const state = {
   },
   extensionConnected: false,
   extensionState: null,
+  extensionPollFailureCount: 0,
   restoredResearchSavedAt: '',
   restoredResultsAccepted: false,
   acceptExtensionResults: false,
@@ -5191,6 +5192,11 @@ function friendlyExtensionError(error) {
   return message || 'Chrome拡張の処理に失敗しました。'
 }
 
+function isExtensionResponseTimeout(error) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /Chrome拡張から応答がありません/.test(message)
+}
+
 function ensureExtensionStarted(response, fallbackMessage) {
   const started = response?.response?.started
   if (started === false) {
@@ -5449,7 +5455,7 @@ function renderProgressModal(extensionState = state.extensionState) {
   elements.progressHideBtn.textContent = '閉じて続行'
 }
 
-function requestExtension(action, payload = {}, timeoutMs = 5000) {
+function requestExtension(action, payload = {}, timeoutMs = 15000) {
   const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
   return new Promise((resolve, reject) => {
@@ -5470,6 +5476,7 @@ function handleExtensionMessage(event) {
 
   if (data.action === 'BRIDGE_READY') {
     state.extensionConnected = true
+    state.extensionPollFailureCount = 0
     renderExtensionStateUpdate()
     pollExtensionState()
     return
@@ -5480,7 +5487,16 @@ function handleExtensionMessage(event) {
   if (data.action === 'MARKET_STATE') {
     const wasActive = Boolean(state.extensionState?.active)
     state.extensionConnected = true
+    state.extensionPollFailureCount = 0
     state.extensionState = data.state
+    if (
+      data.state?.active
+      && state.progress.failed
+      && isExtensionResponseTimeout(state.progress.message)
+    ) {
+      state.progress.failed = false
+      state.progress.message = 'Chrome拡張との接続を再確認しました。調査を続けています。'
+    }
     importExtensionResults(data.state)
     renderExtensionStateUpdate()
     if (state.pendingEvidenceAutomation?.active && wasActive && !data.state?.active) {
@@ -5544,10 +5560,22 @@ function renderExtensionState() {
 async function pollExtensionState() {
   if (!state.extensionConnected) return
   try {
-    const response = await requestExtension('GET_MARKET_STATE', {}, 3000)
+    const response = await requestExtension('GET_MARKET_STATE', {}, 10000)
+    state.extensionPollFailureCount = 0
     if (response.state?.active) window.setTimeout(pollExtensionState, 2000)
   } catch (error) {
+    const canRetry = isExtensionResponseTimeout(error)
+      && Boolean(state.extensionState?.active)
+      && state.extensionPollFailureCount < 2
+    if (canRetry) {
+      state.extensionPollFailureCount += 1
+      elements.extensionStatus.textContent = 'Chrome拡張との通信を再確認しています。調査はそのまま続けています。'
+      window.setTimeout(pollExtensionState, 3000)
+      return
+    }
+
     const message = friendlyExtensionError(error)
+    state.extensionPollFailureCount = 0
     state.extensionConnected = false
     releaseRunningControls()
     renderExtensionStateUpdate()

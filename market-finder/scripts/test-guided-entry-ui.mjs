@@ -342,6 +342,63 @@ test('routes extension state notifications through the active stage renderer', (
   assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
 })
 
+test('keeps active research running through a transient extension poll timeout', async () => {
+  const pollBody = app.match(/async function pollExtensionState\(\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nasync function startExtensionResearch/)?.[1]
+  assert.ok(pollBody, 'extension poll caller must be extractable')
+
+  const createPoll = new Function(
+    'state',
+    'requestExtension',
+    'window',
+    'friendlyExtensionError',
+    'releaseRunningControls',
+    'renderExtensionStateUpdate',
+    'elements',
+    'failProgress',
+    'isExtensionResponseTimeout',
+    `return async function pollExtensionState() {${pollBody}\n}`,
+  )
+  const state = {
+    extensionConnected: true,
+    extensionState: {
+      active: true,
+      mode: 'erank',
+      currentKeyword: 'dad birthday card',
+      remaining: 19,
+      results: [],
+    },
+    extensionPollFailureCount: 0,
+    progress: { visible: true },
+  }
+  const scheduled = []
+  let failed = 0
+  const pollExtensionState = createPoll(
+    state,
+    async () => {
+      throw new Error('Chrome拡張から応答がありません。拡張機能を再読み込みしてください。')
+    },
+    {
+      setTimeout(callback, delay) {
+        scheduled.push({ callback, delay })
+      },
+    },
+    (error) => String(error?.message ?? error),
+    () => {},
+    () => {},
+    { extensionStatus: { textContent: '' } },
+    () => { failed += 1 },
+    (error) => /Chrome拡張から応答がありません/.test(String(error?.message ?? error)),
+  )
+
+  await pollExtensionState()
+
+  assert.equal(state.extensionConnected, true)
+  assert.equal(state.extensionPollFailureCount, 1)
+  assert.equal(failed, 0)
+  assert.equal(scheduled.length, 1)
+  assert.equal(scheduled[0].delay, 3000)
+})
+
 test('pending MARKET_STATE polls write a changed Workspace once and an unchanged Workspace zero times', async () => {
   const activeBody = app.match(/function renderActiveResearchStage\([^)]*\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction renderAll\(\)/)?.[1]
   const refreshBody = app.match(/function renderExtensionStateUpdate\(\) \{([\s\S]*?)\n\}/)?.[1]
@@ -398,12 +455,15 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     'releaseRunningControls',
     'elements',
     'failProgress',
+    'isExtensionResponseTimeout',
     `return async function pollExtensionState() {${pollBody}\n}`,
   )
 
   const appState = {
     extensionConnected: true,
     extensionState: null,
+    extensionPollFailureCount: 0,
+    progress: { failed: false, message: '' },
     consoleUi: { activeStage: 'erank' },
     researchRows: [],
   }
@@ -482,6 +542,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     noRender,
     { extensionStatus: { textContent: '' } },
     noRender,
+    (error) => /Chrome拡張から応答がありません/.test(String(error?.message ?? error)),
   )
 
   const deliverPoll = async (extensionState) => {
@@ -1051,5 +1112,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260723-3')
+  assert.equal(stylesheetVersion, '20260723-4')
 })
