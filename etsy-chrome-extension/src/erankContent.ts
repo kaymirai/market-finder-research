@@ -1261,7 +1261,7 @@
         const erankSearchVolume = statisticsMetrics.erankSearchVolume || visualMetrics.erankSearchVolume || tableMetrics.erankSearchVolume
         const erankClicks = statisticsMetrics.erankClicks || visualMetrics.erankClicks || tableMetrics.erankClicks
         const erankCtr = statisticsMetrics.erankCtr || visualMetrics.erankCtr || tableMetrics.erankCtr
-        const erankCompetition = visualMetrics.erankCompetition || tableMetrics.erankCompetition
+        const erankCompetition = statisticsMetrics.erankCompetition || visualMetrics.erankCompetition || tableMetrics.erankCompetition
         const erankKeywordDifficulty = visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty
         const erankTrend = visualMetrics.erankTrend || tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText)
         const relatedKeywords = extractRelatedKeywordRows(keyword)

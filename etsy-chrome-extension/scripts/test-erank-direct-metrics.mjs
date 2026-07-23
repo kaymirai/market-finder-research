@@ -1,0 +1,19 @@
+#!/usr/bin/env node
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+
+const source = await readFile(new URL('../src/erankContent.ts', import.meta.url), 'utf8')
+const marketFinderSource = await readFile(new URL('../../market-finder/src/app.js', import.meta.url), 'utf8')
+
+test('prefers direct Keyword Statistics competition metrics', () => {
+  assert.match(source, /const erankCompetition = statisticsMetrics\.erankCompetition\s*\|\|/)
+})
+
+test('counts the four direct eRank metrics when deriving capture status', () => {
+  assert.match(source, /\[erankSearchVolume, erankClicks, erankCompetition, erankKeywordDifficulty\]/)
+})
+
+test('shows checked eRank no-data results as Unknown', () => {
+  assert.match(marketFinderSource, /'no-data': 'Unknown'/)
+})

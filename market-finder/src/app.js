@@ -174,7 +174,7 @@ const ERANK_UI_STATUS_LABELS = {
   active: '取得中',
   partial: '一部取得',
   completed: '取得済み',
-  'no-data': 'eRankデータなし',
+  'no-data': 'Unknown',
   failed: '取得失敗',
 }
 
