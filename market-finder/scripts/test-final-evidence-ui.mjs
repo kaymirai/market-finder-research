@@ -47,6 +47,17 @@ test('does not rebuild the large evidence table when its HTML is unchanged', () 
   assert.match(app, /renderHtmlIfChanged\(elements\.resultsList,\s*detailHtml\)/)
 })
 
+test('limits Etsy bulk verification to the selected evidence batch', () => {
+  assert.match(app, /function rebuildMarketplaceInsightPlan\(\{\s*preserveExisting = false,\s*keywords = \[\]/)
+  assert.match(app, /rebuildMarketplaceInsightPlan\(\{\s*preserveExisting:\s*true,\s*keywords\s*\}\)/)
+  assert.match(app, /requestedKeywordKeys/)
+})
+
+test('routes EverBee failures to a retryable failed state', () => {
+  assert.match(app, /const everbeeFailed =/)
+  assert.match(app, /everbeeFailed\s*\?\s*'pending-everbee'/)
+})
+
 test('labels eRank provider no-data as Unknown for users', () => {
   assert.match(app, /'no-data':\s*'Unknown'/)
   assert.doesNotMatch(app, /'no-data':\s*'eRankデータなし'/)
@@ -57,4 +68,5 @@ test('exports verification metadata with both result CSVs', () => {
     assert.ok(app.split(header).length >= 3, `${header} must exist in both CSV exports`)
   }
   assert.match(app, /Unknown/)
+  assert.match(app, /const unknownMetric = row\.status === 'no-data' \? 'Unknown' : ''/)
 })

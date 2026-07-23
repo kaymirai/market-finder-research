@@ -1635,10 +1635,16 @@ function renderDiscoveryControls() {
   }).join('')
 }
 
-function rebuildMarketplaceInsightPlan({ preserveExisting = false } = {}) {
+function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = [] } = {}) {
   const mode = state.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
   const quota = mode === 'plus' ? 60 : 15
+  const previous = preserveExisting ? state.marketplaceInsightPlan : null
+  const requestedKeywords = Array.isArray(keywords) && keywords.length > 0
+    ? keywords
+    : (preserveExisting && Array.isArray(previous?.targetedKeywords) ? previous.targetedKeywords : [])
+  const requestedKeywordKeys = new Set(requestedKeywords.map(normalizePhrase).filter(Boolean))
   const validationCandidates = etsyValidationCandidates()
+    .filter((candidate) => requestedKeywordKeys.size === 0 || requestedKeywordKeys.has(normalizePhrase(candidate.keyword)))
   if (validationCandidates.length === 0) {
     if (preserveExisting && state.marketplaceInsightPlan?.items?.length > 0) return true
     state.marketplaceInsightPlan = null
@@ -1646,7 +1652,6 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false } = {}) {
     return false
   }
 
-  const previous = preserveExisting ? state.marketplaceInsightPlan : null
   const previousItems = Array.isArray(previous?.items) ? previous.items : []
   const capturedRelatedMetrics = previousItems.flatMap((item) => {
     const metrics = Array.isArray(item.result?.etsyRelatedKeywordMetrics)
@@ -1663,7 +1668,10 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false } = {}) {
     marketplaceInsightMode: mode,
     relatedKeywordMetrics,
   })
-  const builtByQuery = new Map(built.items.map((item) => [normalizePhrase(item.query), item]))
+  const builtItems = requestedKeywordKeys.size > 0
+    ? built.items.filter((item) => requestedKeywordKeys.has(normalizePhrase(item.query)))
+    : built.items
+  const builtByQuery = new Map(builtItems.map((item) => [normalizePhrase(item.query), item]))
   const mergedItems = []
   const mergedKeys = new Set()
   if (preserveExisting) {
@@ -1671,22 +1679,21 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false } = {}) {
       const key = normalizePhrase(existing.query)
       if (!key || mergedKeys.has(key)) return
       const rebuilt = builtByQuery.get(key)
-      const keepExisting = Boolean(rebuilt)
-        || existing.stage === 'followup'
-        || existing.status !== 'planned'
+      const keepExisting = ['completed', 'skipped'].includes(existing.status)
+        || Boolean(rebuilt)
+        || (requestedKeywordKeys.size === 0 && (existing.stage === 'followup' || existing.status !== 'planned'))
       if (!keepExisting) return
       mergedItems.push(rebuilt ? { ...rebuilt, ...existing } : existing)
       mergedKeys.add(key)
     })
   }
-  built.items.forEach((item) => {
+  builtItems.forEach((item) => {
     const key = normalizePhrase(item.query)
     if (!key || mergedKeys.has(key)) return
     mergedItems.push(item)
     mergedKeys.add(key)
   })
-  const items = mergedItems
-    .slice(0, built.quota)
+  const items = (requestedKeywordKeys.size > 0 ? mergedItems : mergedItems.slice(0, built.quota))
     .map((item, index) => ({ ...item, id: `etsy-insight-${index + 1}` }))
   const counts = ['discovery', 'validation', 'reserve', 'followup'].reduce((result, stage) => ({
     ...result,
@@ -1702,15 +1709,16 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false } = {}) {
     createdAt: new Date().toISOString(),
     officialRemaining: previous?.officialRemaining ?? null,
     relatedKeywordMetrics,
-    candidatePool: built.candidatePool,
+    candidatePool: requestedKeywordKeys.size > 0 ? [] : built.candidatePool,
+    targetedKeywords: requestedKeywordKeys.size > 0 ? [...requestedKeywordKeys] : [],
     researchRound: previous?.researchRound ?? built.researchRound,
     releasedFollowUpCount: followUpItems.length,
     completedFollowUpCount: followUpItems.filter((item) => ['completed', 'skipped'].includes(item.status)).length,
     stagnantRounds: previous?.stagnantRounds ?? built.stagnantRounds,
     lastEvaluatedRound: previous?.lastEvaluatedRound ?? built.lastEvaluatedRound,
     roundBaselineClusterKeys: previous?.roundBaselineClusterKeys ?? built.roundBaselineClusterKeys,
-    stopReason: previous?.stopReason ?? '',
-    followUpRemaining: Math.max(0, built.followUpCapacity - followUpItems.length),
+    stopReason: requestedKeywordKeys.size > 0 ? 'targeted-batch' : previous?.stopReason ?? '',
+    followUpRemaining: requestedKeywordKeys.size > 0 ? 0 : Math.max(0, built.followUpCapacity - followUpItems.length),
     items,
   }
   state.marketplaceInsightMessage = preserveExisting
@@ -2825,8 +2833,17 @@ function finalEvidenceRows() {
       || [planItem?.result?.etsySearches30d, planItem?.result?.etsyListings]
         .some((value) => value !== null && value !== undefined && String(value).trim() !== '')
     const hasEverbeeData = rowHasEverbeeInput(raw)
-    const failed = captureUi.status === 'failed' || planItem?.status === 'error'
-    const failureStage = planItem?.status === 'error' ? 'pending-etsy' : 'pending-erank'
+    const everbeeFailed = Boolean(
+      raw.error
+      && !hasEverbeeData
+      && captureUi.status !== 'failed'
+      && planItem?.status !== 'error'
+      && (hasEtsyData || etsyChecked || rowHasErankInput(raw)),
+    )
+    const failed = captureUi.status === 'failed' || planItem?.status === 'error' || everbeeFailed
+    const failureStage = everbeeFailed
+      ? 'pending-everbee'
+      : planItem?.status === 'error' ? 'pending-etsy' : 'pending-erank'
     let nextStage = 'done'
     if (!failed && !erankAttempted) nextStage = 'pending-erank'
     else if (!failed && !erankDemandUnknown && !hasEverbeeData && hasEtsyData) nextStage = 'pending-everbee'
@@ -3299,7 +3316,7 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '')
   }
 
   if (stage === 'pending-etsy') {
-    rebuildMarketplaceInsightPlan({ preserveExisting: true })
+    rebuildMarketplaceInsightPlan({ preserveExisting: true, keywords })
     setSimpleStatus(`${keywords.length}件を含むEtsy公式確認を開始します。取得済み結果は再利用します。`)
     await startMarketplaceInsight()
     return
@@ -4469,6 +4486,7 @@ function exportErankCsv() {
   })
   const stateLines = captureStates.map((row) => {
     const track = marketTrackMetadataForRow(row)
+    const unknownMetric = row.status === 'no-data' ? 'Unknown' : ''
     return [
       'eRank planned query',
       row.sourceKeyword,
@@ -4477,8 +4495,10 @@ function exportErankCsv() {
       track.researchEventId,
       elements.categorySelect.value,
       track.historyClusterKey,
-      row.status === 'failed' ? '検索済み・数値取得失敗' : '未検索',
-      '', '', '', '', '', '', '', '', '',
+      row.status === 'failed' ? '検索済み・数値取得失敗' : row.status === 'no-data' ? 'Unknown' : '未検索',
+      '',
+      unknownMetric, unknownMetric, unknownMetric, unknownMetric, unknownMetric, unknownMetric,
+      '', '',
       row.error ?? '',
       ...finalEvidenceMetadataCsvValues({
         ...row,
