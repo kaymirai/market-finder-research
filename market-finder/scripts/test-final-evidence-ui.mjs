@@ -17,6 +17,17 @@ test('provides a single final evidence matrix with filters and bulk verification
   assert.match(app, /async function verifyPendingEvidence\(/)
 })
 
+test('continues fifty-row verification batches automatically until stopped or complete', () => {
+  assert.match(app, /FINAL_EVIDENCE_BATCH_SIZE\s*=\s*50/)
+  assert.match(app, /pendingEvidenceAutomation:\s*\{[\s\S]*?active:\s*false/)
+  assert.match(app, /function schedulePendingEvidenceAutomation\(/)
+  assert.match(app, /function stopPendingEvidenceAutomation\(/)
+  assert.match(app, /candidateLimit:\s*batchLimit/)
+  assert.match(app, /wasActive\s*&&\s*!data\.state\?\.active[\s\S]*schedulePendingEvidenceAutomation/)
+  assert.match(app, /未検証をすべて自動検証/)
+  assert.match(app, /自動検証を停止/)
+})
+
 test('uses the pure evidence state module instead of a second scoring model', () => {
   assert.match(app, /from '\.\/final-evidence-matrix\.js\?v=/)
   assert.match(app, /deriveFinalEvidenceState/)

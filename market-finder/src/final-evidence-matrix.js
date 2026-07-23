@@ -121,12 +121,12 @@ export function formatEvidenceMetric(value, options = {}) {
   return { kind: 'pending', text: '未取得' }
 }
 
-export function pendingEvidenceBatch(rows = [], stage, limit = 12) {
+export function pendingEvidenceBatch(rows = [], stage, limit = 50) {
   const targetStage = normalizedStage(stage)
   if (!targetStage) return []
 
   const seen = new Set()
-  const maxBatch = Math.max(1, Math.min(12, Math.floor(Number(limit) || 12)))
+  const maxBatch = Math.max(1, Math.min(50, Math.floor(Number(limit) || 50)))
   return rows.filter((row) => {
     if (row?.evidenceState?.status !== 'pending') return false
     if (row.evidenceState.nextStage !== targetStage) return false

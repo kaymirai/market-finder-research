@@ -98,6 +98,7 @@ const SEARCH_SEED_METADATA_URL = './data/etsy-search-keyword-metadata-2026-05-23
 const SEARCH_SEED_PICK_LIMIT = 20
 const ERANK_RESEARCH_LIMIT = 20
 const SEARCH_SEED_PREVIEW_LIMIT = 6
+const FINAL_EVIDENCE_BATCH_SIZE = 50
 const DISCOVERY_LANE_LABELS = {
   motif: 'モチーフ',
   moment: '場面',
@@ -173,6 +174,13 @@ const state = {
   selectedResultKey: '',
   finalEvidenceFilter: 'all',
   finalEvidenceCount: 0,
+  pendingEvidenceAutomation: {
+    active: false,
+    scheduled: false,
+    initialCount: 0,
+    completedBatches: 0,
+    currentStage: '',
+  },
   recentTrendKeywords: new Set(),
   lastTrendRunStartedAt: '',
   searchSeedRows: [],
@@ -1335,10 +1343,14 @@ function salesCheckKeywords() {
   return narrowed.length > 0 ? narrowed : readyKeywords()
 }
 
-function buildCurrentErankQueryPlan(candidates = state.candidates) {
+function buildCurrentErankQueryPlan(candidates = state.candidates, options = {}) {
+  const candidateLimit = Math.max(1, Math.min(
+    FINAL_EVIDENCE_BATCH_SIZE,
+    Number(options.candidateLimit) || ERANK_RESEARCH_LIMIT,
+  ))
   return buildErankQueryPlan(candidates, {
     eventTerm: selectedEvent().searchTerm,
-    candidateLimit: ERANK_RESEARCH_LIMIT,
+    candidateLimit,
     baseQueryFor: (keyword, candidate) => candidate.queryStrategy === 'cross-niche'
       ? keyword
       : erankProbeKeyword(keyword),
@@ -3049,10 +3061,13 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
     button.setAttribute('aria-pressed', String(button.dataset.finalEvidenceFilter === state.finalEvidenceFilter))
   })
   const pendingRows = rows.filter((row) => row.evidenceState.status === 'pending')
-  elements.verifyPendingEvidenceBtn.disabled = pendingRows.length === 0
-  elements.verifyPendingEvidenceBtn.textContent = pendingRows.length > 0
-    ? `未検証をまとめて検証 (${pendingRows.length})`
-    : '未検証なし'
+  const automationActive = Boolean(state.pendingEvidenceAutomation?.active)
+  elements.verifyPendingEvidenceBtn.disabled = pendingRows.length === 0 && !automationActive
+  elements.verifyPendingEvidenceBtn.textContent = automationActive
+    ? `自動検証を停止 (${pendingRows.length}件残り)`
+    : pendingRows.length > 0
+      ? `未検証をすべて自動検証 (${pendingRows.length})`
+      : '未検証なし'
 
   if (visibleRows.length === 0) {
     renderHtmlIfChanged(elements.finalEvidenceTable, '<div class="empty-state">この条件に一致する結果はありません。</div>')
@@ -3350,10 +3365,93 @@ async function copySelectedNounBrief(button) {
   }, 1400)
 }
 
-async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '') {
+function pendingEvidenceRows(rows = finalEvidenceRows()) {
+  return rows.filter((row) => row.evidenceState.status === 'pending')
+}
+
+function stopPendingEvidenceAutomation(message = '') {
+  if (!state.pendingEvidenceAutomation.active && !state.pendingEvidenceAutomation.scheduled) return
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.scheduled = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  if (message) setSimpleStatus(message)
+  renderResultsTable()
+}
+
+function schedulePendingEvidenceAutomation(delayMs = 500) {
+  if (!state.pendingEvidenceAutomation.active || state.pendingEvidenceAutomation.scheduled) return
+  state.pendingEvidenceAutomation.scheduled = true
+  window.setTimeout(async () => {
+    state.pendingEvidenceAutomation.scheduled = false
+    if (!state.pendingEvidenceAutomation.active) return
+    if (state.extensionState?.active || state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) return
+
+    const remainingRows = pendingEvidenceRows()
+    if (remainingRows.length === 0) {
+      const checked = Math.max(0, state.pendingEvidenceAutomation.initialCount)
+      state.pendingEvidenceAutomation.active = false
+      state.pendingEvidenceAutomation.currentStage = ''
+      setSimpleStatus(`未検証の自動検証が完了しました。開始時の${checked}件を順番に確認しました。`)
+      renderResultsTable()
+      return
+    }
+
+    try {
+      const started = await verifyPendingEvidence('', '', {
+        automated: true,
+        batchLimit: FINAL_EVIDENCE_BATCH_SIZE,
+      })
+      if (!started && state.pendingEvidenceAutomation.active) {
+        stopPendingEvidenceAutomation('次に開始できる検証がないため、自動検証を停止しました。')
+      }
+    } catch (error) {
+      stopPendingEvidenceAutomation(`自動検証を停止しました。${friendlyExtensionError(error)}`)
+    }
+  }, delayMs)
+}
+
+async function togglePendingEvidenceAutomation() {
+  if (state.pendingEvidenceAutomation.active) {
+    stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
+    if (state.marketplaceInsightAutoRunning) {
+      stopMarketplaceInsightAutomation()
+    } else if (state.extensionState?.active) {
+      await stopExtensionResearch()
+    }
+    return
+  }
+
+  const pendingCount = pendingEvidenceRows().length
+  if (pendingCount === 0) {
+    setSimpleStatus('検証待ちの候補はありません。')
+    return
+  }
+  if (!state.extensionConnected) {
+    setSimpleStatus('Chrome拡張へ接続してから未検証の自動検証を開始してください。')
+    return
+  }
+
+  state.pendingEvidenceAutomation = {
+    active: true,
+    scheduled: false,
+    initialCount: pendingCount,
+    completedBatches: 0,
+    currentStage: '',
+  }
+  state.finalEvidenceFilter = 'pending'
+  setSimpleStatus(`${pendingCount}件を50件ずつ自動検証します。ブラウザを開いたままにしてください。`)
+  renderResultsTable()
+  schedulePendingEvidenceAutomation(0)
+}
+
+async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '', options = {}) {
   const rows = finalEvidenceRows()
   const requested = normalizePhrase(requestedKeyword)
   const stageOrder = ['pending-erank', 'pending-etsy', 'pending-everbee']
+  const batchLimit = Math.max(1, Math.min(
+    FINAL_EVIDENCE_BATCH_SIZE,
+    Number(options.batchLimit) || FINAL_EVIDENCE_BATCH_SIZE,
+  ))
   let stage = stageOrder.includes(requestedStage) ? requestedStage : ''
   let batch = []
 
@@ -3366,16 +3464,20 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '')
   }
 
   if (batch.length === 0) {
-    if (!stage) stage = stageOrder.find((item) => pendingEvidenceBatch(rows, item).length > 0) ?? ''
-    batch = pendingEvidenceBatch(rows, stage)
+    if (!stage) stage = stageOrder.find((item) => pendingEvidenceBatch(rows, item, batchLimit).length > 0) ?? ''
+    batch = pendingEvidenceBatch(rows, stage, batchLimit)
   }
 
   if (!stage || batch.length === 0) {
     setSimpleStatus('検証待ちの候補はありません。Unknown・除外・取得失敗は状態別フィルターで確認できます。')
-    return
+    return false
   }
 
   const keywords = batch.map((row) => row.keyword)
+  if (options.automated) {
+    state.pendingEvidenceAutomation.completedBatches += 1
+    state.pendingEvidenceAutomation.currentStage = stage
+  }
   state.finalEvidenceFilter = 'pending'
   persistMarketFinderState()
 
@@ -3387,20 +3489,24 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '')
       queryStrategy: 'cross-niche',
     }))
     setSimpleStatus(`${keywords.length}件の未取得eRankデータを確認します。既存結果は保持します。`)
-    await startErankResearch({ candidates, preserveExisting: true })
-    return
+    await startErankResearch({
+      candidates,
+      preserveExisting: true,
+      candidateLimit: batchLimit,
+    })
+    return !state.progress.failed
   }
 
   if (stage === 'pending-etsy') {
     rebuildMarketplaceInsightPlan({ preserveExisting: true, keywords })
     setSimpleStatus(`${keywords.length}件を含むEtsy公式確認を開始します。取得済み結果は再利用します。`)
-    await startMarketplaceInsight()
-    return
+    return Boolean(await startMarketplaceInsight())
   }
 
   elements.researchJobInput.value = keywords.join('\n')
   setSimpleStatus(`${keywords.length}件の未取得EverBee売上データを確認します。既存結果は保持します。`)
   await startExtensionResearch({ keywords, preserveExisting: true })
+  return !state.progress.failed
 }
 
 function handleResultListClick(event) {
@@ -5372,10 +5478,14 @@ function handleExtensionMessage(event) {
   const pending = data.requestId ? pendingExtensionRequests.get(data.requestId) : null
 
   if (data.action === 'MARKET_STATE') {
+    const wasActive = Boolean(state.extensionState?.active)
     state.extensionConnected = true
     state.extensionState = data.state
     importExtensionResults(data.state)
     renderExtensionStateUpdate()
+    if (state.pendingEvidenceAutomation?.active && wasActive && !data.state?.active) {
+      schedulePendingEvidenceAutomation()
+    }
   }
 
   if (!pending) return
@@ -5483,7 +5593,9 @@ async function startExtensionResearch(options = {}) {
 
 async function startErankResearch(options = {}) {
   const candidates = Array.isArray(options.candidates) ? options.candidates : state.candidates
-  const queryPlan = buildCurrentErankQueryPlan(candidates)
+  const queryPlan = buildCurrentErankQueryPlan(candidates, {
+    candidateLimit: options.candidateLimit,
+  })
   const keywords = queryPlan.map((item) => item.query)
   if (keywords.length === 0) {
     const message = '候補一覧が空です。先に「候補を自動で探す」を押してください。'
@@ -5612,20 +5724,21 @@ async function startMarketplaceInsight() {
   if (!state.extensionConnected) {
     state.marketplaceInsightMessage = 'Chrome拡張へ接続してからEtsy公式の自動確認を開始してください。'
     renderMarketplaceInsightPlan()
-    return
+    return false
   }
   if (etsyValidationCandidates().length === 0) {
     state.marketplaceInsightMessage = 'Etsy公式へ進めるeRank確認済み候補がありません。先にeRankで検索数を確認してください。'
     renderMarketplaceInsightPlan()
-    return
+    return false
   }
   if (!state.marketplaceInsightPlan?.items?.length && !rebuildMarketplaceInsightPlan()) {
     renderMarketplaceInsightPlan()
-    return
+    return false
   }
 
   renderMarketplaceInsightPlan()
   await runMarketplaceInsightAutomation()
+  return true
 }
 
 async function runMarketplaceInsightAutomation() {
@@ -5697,11 +5810,21 @@ async function runMarketplaceInsightAutomation() {
     syncCrossNicheWorkflow({ announce: true })
     renderAll()
     persistMarketFinderState()
+    if (state.pendingEvidenceAutomation.active) {
+      if (stoppedByError || stoppedByUser) {
+        stopPendingEvidenceAutomation('Etsy公式確認が停止したため、未検証の自動検証も停止しました。')
+      } else {
+        schedulePendingEvidenceAutomation()
+      }
+    }
   }
 }
 
 function stopMarketplaceInsightAutomation() {
   if (!state.marketplaceInsightAutoRunning) return
+  if (state.pendingEvidenceAutomation?.active) {
+    stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
+  }
   state.marketplaceInsightAutoRunning = false
   state.marketplaceInsightMessage = '現在の語句を取得したあとで自動確認を停止します。'
   renderMarketplaceInsightPlan()
@@ -5838,6 +5961,9 @@ function skipMarketplaceInsight() {
 }
 
 async function stopExtensionResearch() {
+  if (state.pendingEvidenceAutomation?.active) {
+    stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
+  }
   try {
     state.progress.stopped = true
     const response = await requestExtension('STOP_MARKET_RESEARCH')
@@ -5959,7 +6085,7 @@ function bindEvents() {
     persistMarketFinderState()
   })
   elements.verifyPendingEvidenceBtn.addEventListener('click', () => {
-    verifyPendingEvidence().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+    togglePendingEvidenceAutomation().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
   })
   elements.finalKeywordDecision.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return
@@ -5974,7 +6100,7 @@ function bindEvents() {
       return
     }
     if (event.target.closest('[data-final-decision-action="verify"]')) {
-      verifyPendingEvidence().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      togglePendingEvidenceAutomation().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
     handleResultListClick(event)

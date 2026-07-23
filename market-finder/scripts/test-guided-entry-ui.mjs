@@ -765,7 +765,7 @@ test('separates recommendations, pending verification, holds, failures, and excl
   assert.match(html, /data-final-evidence-filter="failed"/)
   assert.match(html, /data-final-evidence-filter="excluded"/)
   assert.match(app, /finalEvidenceFilterMatches/)
-  assert.match(app, /未検証をまとめて検証/)
+  assert.match(app, /未検証をすべて自動検証/)
   assert.doesNotMatch(html, /<h2>おすすめキーワード<\/h2>/)
 })
 

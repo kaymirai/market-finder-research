@@ -74,19 +74,19 @@ test('formats zero, Unknown, and uncollected metrics as different values', () =>
   assert.deepEqual(formatEvidenceMetric(13, { checked: true, suffix: '%' }), { kind: 'value', text: '13%' })
 })
 
-test('queues only the requested missing stage, without duplicates, up to twelve rows', () => {
+test('queues only the requested missing stage, without duplicates, up to fifty rows', () => {
   const rows = [
     { keyword: 'Ghost Shirt', evidenceState: { status: 'pending', nextStage: 'pending-erank' } },
     { keyword: 'ghost shirt', evidenceState: { status: 'pending', nextStage: 'pending-erank' } },
     { keyword: 'teacher shirt', evidenceState: { status: 'pending', nextStage: 'pending-etsy' } },
-    ...Array.from({ length: 14 }, (_, index) => ({
+    ...Array.from({ length: 64 }, (_, index) => ({
       keyword: `niche ${index + 1}`,
       evidenceState: { status: 'pending', nextStage: 'pending-erank' },
     })),
   ]
 
   const batch = pendingEvidenceBatch(rows, 'pending-erank')
-  assert.equal(batch.length, 12)
+  assert.equal(batch.length, 50)
   assert.equal(batch[0].keyword, 'Ghost Shirt')
   assert.equal(batch.some((row) => row.keyword === 'teacher shirt'), false)
 })
