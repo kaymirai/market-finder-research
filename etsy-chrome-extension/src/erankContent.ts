@@ -43,6 +43,7 @@
     const SEARCH_BUTTON_WORDS = ['search', 'lookup', 'submit', 'go', 'find', 'analyze']
     const ERANK_METRICS_READY_TIMEOUT_MS = 300000
     const ERANK_METRIC_HEARTBEAT_MS = 2000
+    const ERANK_KD_GRACE_AFTER_COMPETITION_MS = 8000
     let erankRunActive = false
 
     function wait(ms: number) {
@@ -326,6 +327,7 @@
         const startedAt = Date.now()
         let lastText = ''
         let stableCount = 0
+        let competitionReadyAt: number | null = null
 
         while (Date.now() - startedAt < ERANK_METRICS_READY_TIMEOUT_MS) {
             await waitForMetricDomChange()
@@ -340,27 +342,40 @@
 
             const elapsed = Date.now() - startedAt
             const waitedEnoughForLazyColumns = elapsed >= 12000
-            const requiredKdRows = Math.max(1, Math.min(snapshot.rows, 3))
+            const requiredCompetitionRows = Math.max(1, Math.min(snapshot.rows, 3))
             const targetReady = snapshot.targetFound
                 && snapshot.targetDemandResolved
                 && snapshot.targetCompetitionResolved
-                && snapshot.targetKdResolved
-            const kdReady = snapshot.targetFound
+            const competitionReady = snapshot.targetFound
                 ? targetReady
-                : snapshot.withKd >= requiredKdRows
+                : snapshot.withCompetition >= requiredCompetitionRows
+            if (competitionReady && competitionReadyAt === null) {
+                competitionReadyAt = Date.now()
+            } else if (!competitionReady) {
+                competitionReadyAt = null
+            }
+            const kdGraceElapsed = snapshot.targetHasKd
+                || snapshot.targetKdResolved
+                || (competitionReadyAt !== null && Date.now() - competitionReadyAt >= ERANK_KD_GRACE_AFTER_COMPETITION_MS)
+            const demandReady = snapshot.targetFound
+                ? snapshot.targetDemandResolved
+                : snapshot.withDemand > 0
             const hasVisibleMetrics = snapshot.rows > 0
-                && (snapshot.withDemand > 0 || targetReady)
-                && kdReady
+                && demandReady
+                && competitionReady
+                && kdGraceElapsed
+            const partialLoadResolved = snapshot.targetFound
+                ? !snapshot.targetPartial
+                : snapshot.partial === 0
             const looksReady = hasVisibleMetrics
-                && snapshot.partial === 0
-                && !snapshot.targetPartial
+                && partialLoadResolved
                 && stableCount >= 3
 
             if (waitedEnoughForLazyColumns && looksReady) return
         }
 
         const latest = keywordIdeasMetricSnapshot(keyword)
-        throw new Error(`eRankの競合・KD表示を5分待ちましたが完了を確認できませんでした。需要=${latest.targetHasDemand ? '取得済み' : '未取得'} 競合=${latest.targetCompetitionResolved ? '表示済み' : '読込中'} KD=${latest.targetHasKd ? '表示済み' : '読込中'} rows=${latest.rows} partial=${latest.partial}`)
+        throw new Error(`eRankのCompetition表示を5分待ちましたが完了を確認できませんでした。需要=${latest.targetDemandResolved ? '確認済み' : '未取得'} Competition=${latest.targetCompetitionResolved ? '表示済み' : '読込中'} KD=${latest.targetHasKd ? '取得済み' : '任意・未表示'} rows=${latest.rows} partial=${latest.partial}`)
     }
 
     function describeElement(element: Element) {
@@ -927,6 +942,12 @@
         return match?.value ?? ''
     }
 
+    function visualColumnCoverageCount(rect: DOMRect, columns: ErankColumnMap) {
+        return Array.from(columns.values())
+            .filter((column) => column.center >= rect.left - 4 && column.center <= rect.right + 4)
+            .length
+    }
+
     function findVisualRowForKeyword(keyword: string, columns: Map<ErankColumnKey, { left: number, right: number, center: number, top: number }>) {
         const target = normalizeKeywordText(keyword)
         const headerTop = columns.get('keyword')?.top ?? 0
@@ -940,7 +961,7 @@
                 return Math.abs((rect.left + rect.width / 2) - keywordCenter) <= 220
             })
 
-        const rows: HTMLElement[] = []
+        const rows = new Set<HTMLElement>()
         for (const element of exactKeywordElements) {
             let current: HTMLElement | null = element
             for (let depth = 0; current && depth < 9; depth += 1) {
@@ -954,14 +975,28 @@
                     && numericCount >= 3
                     && !/avg\.?\s*searches|avg\.?\s*clicks|etsy competition/i.test(text)
                 if (looksLikeRow) {
-                    rows.push(current)
-                    break
+                    rows.add(current)
                 }
                 current = current.parentElement
             }
         }
 
-        return rows.sort((a, b) => a.getBoundingClientRect().height - b.getBoundingClientRect().height)[0] ?? null
+        return Array.from(rows)
+            .map((row) => {
+                const rect = row.getBoundingClientRect()
+                const coverage = visualColumnCoverageCount(rect, columns)
+                const competitionColumn = columns.get('erankCompetition')
+                const coversCompetition = Boolean(
+                    competitionColumn
+                    && competitionColumn.center >= rect.left - 4
+                    && competitionColumn.center <= rect.right + 4,
+                )
+                return { row, rect, coverage, coversCompetition }
+            })
+            .sort((a, b) => Number(b.coversCompetition) - Number(a.coversCompetition)
+                || b.coverage - a.coverage
+                || a.rect.height - b.rect.height
+                || b.rect.width - a.rect.width)[0]?.row ?? null
     }
 
     function textLooksLikeKeywordCell(text: string) {

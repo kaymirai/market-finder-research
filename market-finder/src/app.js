@@ -2186,13 +2186,13 @@ function friendlyErankCaptureError(error) {
 
 function renderErankCaptureStates(rows) {
   if (rows.length === 0) return ''
-  const failedCount = rows.filter((row) => row.status === 'failed').length
+  const retryableCount = rows.filter((row) => ['partial', 'failed'].includes(row.status)).length
   return `
     <details class="erank-group erank-group-collapsed" open>
       <summary>数値を取得できていない検索 ${rows.length}件</summary>
-      ${failedCount > 0 ? `
+      ${retryableCount > 0 ? `
         <div class="erank-capture-actions">
-          <button type="button" class="ghost-btn" data-retry-erank-failures>取得失敗だけ再確認（${failedCount}件）</button>
+          <button type="button" class="ghost-btn" data-retry-erank-failures>一部取得・失敗を再確認（${retryableCount}件）</button>
         </div>
       ` : ''}
       <div class="erank-capture-state-list">
@@ -5526,10 +5526,10 @@ async function startErankResearch(options = {}) {
 }
 
 async function retryFailedErankResearch() {
-  const failedRows = erankCaptureStateRows().filter((row) => row.status === 'failed')
-  const keywords = cleanKeywordList(failedRows.map((row) => row.query))
+  const retryableRows = erankCaptureStateRows().filter((row) => ['partial', 'failed'].includes(row.status))
+  const keywords = cleanKeywordList(retryableRows.map((row) => row.query))
   if (keywords.length === 0) {
-    setSimpleStatus('再確認が必要なeRank取得失敗はありません。')
+    setSimpleStatus('再確認が必要なeRank一部取得・失敗はありません。')
     return
   }
   state.acceptExtensionResults = true
@@ -5537,9 +5537,9 @@ async function retryFailedErankResearch() {
   try {
     openProgressModal({
       mode: 'erank',
-      title: 'eRank取得失敗の再確認',
+      title: 'eRank一部取得・失敗の再確認',
       total: keywords.length,
-      message: `${keywords.length}件の取得失敗だけを再確認しています。`,
+      message: `${keywords.length}件の一部取得・失敗だけを再確認しています。`,
     })
     await requestExtension('CLEAR_MARKET_RESULTS')
     const startResponse = await requestExtension('START_ERANK_RESEARCH', {
@@ -5548,7 +5548,7 @@ async function retryFailedErankResearch() {
       delayMs: Math.max(3000, Math.min(Number(elements.delayInput.value) * 1000 || 5000, 20000)),
     })
     ensureExtensionStarted(startResponse, 'eRankの再確認を開始できませんでした。')
-    setSimpleStatus(`${keywords.length}件の取得失敗だけを再確認しています。既存の取得済み結果は保持します。`)
+    setSimpleStatus(`${keywords.length}件の一部取得・失敗だけを再確認しています。既存の取得済み結果は保持します。`)
     pollExtensionState()
   } catch (error) {
     const message = friendlyExtensionError(error)

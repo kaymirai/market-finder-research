@@ -148,10 +148,11 @@ test('executes eRank capture UI states from extension progress without changing 
   }), 'completed')
 })
 
-test('retries only failed eRank captures and clears their stale errors after a checked result', () => {
+test('retries partial and failed eRank captures and clears stale errors after a checked result', () => {
   assert.match(app, /data-retry-erank-failures/)
   assert.match(app, /async function retryFailedErankResearch\(\)/)
-  assert.match(app, /erankCaptureStateRows\(\)\.filter\(\(row\) => row\.status === 'failed'\)/)
+  assert.match(app, /erankCaptureStateRows\(\)\.filter\(\(row\) => \['partial', 'failed'\]\.includes\(row\.status\)\)/)
+  assert.match(app, /一部取得・失敗を再確認/)
   assert.match(app, /START_ERANK_RESEARCH[\s\S]{0,300}keywords/)
   assert.match(app, /elements\.erankResultsList\.addEventListener\('click'[\s\S]{0,300}retryFailedErankResearch\(\)/)
   assert.match(app, /error: incomingErankChecked \? String\(row\.error \?\? ''\)/)
