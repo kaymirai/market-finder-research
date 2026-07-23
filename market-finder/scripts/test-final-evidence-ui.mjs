@@ -51,6 +51,7 @@ test('limits Etsy bulk verification to the selected evidence batch', () => {
   assert.match(app, /function rebuildMarketplaceInsightPlan\(\{\s*preserveExisting = false,\s*keywords = \[\]/)
   assert.match(app, /rebuildMarketplaceInsightPlan\(\{\s*preserveExisting:\s*true,\s*keywords\s*\}\)/)
   assert.match(app, /requestedKeywordKeys/)
+  assert.match(app, /'targeted-batch':\s*'指定した候補の確認完了'/)
 })
 
 test('routes EverBee failures to a retryable failed state', () => {

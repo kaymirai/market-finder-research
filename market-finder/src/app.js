@@ -127,6 +127,7 @@ const MARKETPLACE_STOP_LABELS = {
   'max-followups': '最大40語を完了',
   stagnant: '新しい有望群なし',
   'candidate-pool-depleted': '有効候補が5語未満',
+  'targeted-batch': '指定した候補の確認完了',
 }
 
 const state = {
