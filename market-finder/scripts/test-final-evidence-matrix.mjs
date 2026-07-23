@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   deriveFinalEvidenceState,
+  deriveFinalKeywordDecision,
   deriveFinalScoreState,
   finalEvidenceFilterMatches,
   formatEvidenceMetric,
@@ -98,4 +99,74 @@ test('filters recommendations separately from verification states', () => {
   assert.equal(finalEvidenceFilterMatches(verifiedC, 'recommended'), false)
   assert.equal(finalEvidenceFilterMatches(pending, 'pending'), true)
   assert.equal(finalEvidenceFilterMatches(pending, 'all'), true)
+})
+
+test('names one verified A or B keyword as the primary keyword to use', () => {
+  const decision = deriveFinalKeywordDecision([
+    {
+      keyword: 'retro ghost teacher shirt',
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'B',
+      scoreState: { score: 88 },
+    },
+    {
+      keyword: 'halloween nurse ghost shirt',
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'A',
+      scoreState: { score: 74 },
+    },
+    {
+      keyword: 'gothic bat teacher shirt',
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'A',
+      scoreState: { score: 69 },
+    },
+  ])
+
+  assert.equal(decision.status, 'ready')
+  assert.equal(decision.primaryKeyword, 'halloween nurse ghost shirt')
+  assert.equal(decision.primaryLabel, 'A')
+  assert.deepEqual(decision.alternatives, ['gothic bat teacher shirt', 'retro ghost teacher shirt'])
+})
+
+test('does not pretend to recommend a keyword while verification remains', () => {
+  const decision = deriveFinalKeywordDecision([
+    {
+      keyword: 'halloween ghost shirt',
+      evidenceState: { status: 'pending' },
+      opportunityLabel: '',
+      scoreState: { score: null },
+    },
+    {
+      keyword: 'cat shirt',
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'C',
+      scoreState: { score: 53 },
+    },
+  ])
+
+  assert.equal(decision.status, 'pending')
+  assert.equal(decision.primaryKeyword, '')
+  assert.equal(decision.pendingCount, 1)
+})
+
+test('clearly rejects the batch when verification is finished without an A or B keyword', () => {
+  const decision = deriveFinalKeywordDecision([
+    {
+      keyword: 'cat shirt',
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'C',
+      scoreState: { score: 53 },
+    },
+    {
+      keyword: 'generic halloween shirt',
+      evidenceState: { status: 'excluded' },
+      opportunityLabel: 'D',
+      scoreState: { score: 24 },
+    },
+  ])
+
+  assert.equal(decision.status, 'none')
+  assert.equal(decision.primaryKeyword, '')
+  assert.equal(decision.pendingCount, 0)
 })

@@ -3287,6 +3287,94 @@ button.research-table-row {
   width: auto;
 }
 
+.final-keyword-decision {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-left: 5px solid #64748b;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 16px 18px;
+}
+
+.final-keyword-decision.is-ready {
+  border-left-color: var(--teal);
+  background: #ecfdf5;
+}
+
+.final-keyword-decision.is-pending {
+  border-left-color: #2563eb;
+  background: #eff6ff;
+}
+
+.final-keyword-decision.is-none {
+  border-left-color: #be123c;
+  background: #fff7f7;
+}
+
+.final-keyword-decision-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.final-keyword-decision-label {
+  width: fit-content;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--slate);
+  padding: 4px 7px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.final-keyword-decision h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.final-keyword-primary {
+  width: fit-content;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 900;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.final-keyword-decision p,
+.final-keyword-alternatives {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.final-keyword-alternatives button {
+  border: 0;
+  background: transparent;
+  color: var(--teal-dark);
+  padding: 0;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.final-keyword-decision-action {
+  min-width: 150px;
+  width: auto;
+  white-space: nowrap;
+}
+
 .final-evidence-controls {
   display: flex;
   align-items: center;
@@ -3325,12 +3413,30 @@ button.research-table-row {
   min-width: 220px;
 }
 
+.final-evidence-scroll-proxy {
+  position: sticky;
+  top: 58px;
+  z-index: 4;
+  height: 18px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: #eef3f4;
+  scrollbar-gutter: stable;
+}
+
+.final-evidence-scroll-proxy-track {
+  height: 1px;
+}
+
 .final-evidence-table-shell {
   position: relative;
   max-height: 640px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 0 0 8px 8px;
   background: #fff;
 }
 

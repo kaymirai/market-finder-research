@@ -53,7 +53,7 @@
         return value.replace(/\s+/g, ' ').trim();
     }
     function pageHasNoDataMessage() {
-        return /(?:we don't have any data|do not have any data|no data for|no data to show)/i.test(normalizeText(document.body.innerText || ''));
+        return /(?:we don't have any data|do not have any data|could not find data for|no data for|no data to show)/i.test(normalizeText(document.body.innerText || ''));
     }
     function normalizeMetric(value) {
         const normalized = normalizeText(value);
@@ -1255,6 +1255,8 @@
         await submitSearch(field);
         await wait(4500);
         await waitForLikelyResults(keyword);
+        if (pageHasNoDataMessage())
+            return extractMetrics(keyword);
         await revealKeywordIdeasTable();
         await waitForKeywordIdeasMetricsReady(keyword);
         return extractMetrics(keyword);

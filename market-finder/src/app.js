@@ -83,11 +83,12 @@ import {
 } from './research-console-ui.js?v=20260723-1'
 import {
   deriveFinalEvidenceState,
+  deriveFinalKeywordDecision,
   deriveFinalScoreState,
   finalEvidenceFilterMatches,
   formatEvidenceMetric,
   pendingEvidenceBatch,
-} from './final-evidence-matrix.js?v=20260723-1'
+} from './final-evidence-matrix.js?v=20260723-2'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -293,8 +294,11 @@ const elements = {
   downloadStep4CsvBtn: document.querySelector('#downloadStep4CsvBtn'),
   copyFinalKeywordsBtn: document.querySelector('#copyFinalKeywordsBtn'),
   finalResultFreshness: document.querySelector('#finalResultFreshness'),
+  finalKeywordDecision: document.querySelector('#finalKeywordDecision'),
   finalEvidenceFilters: document.querySelector('#finalEvidenceFilters'),
   verifyPendingEvidenceBtn: document.querySelector('#verifyPendingEvidenceBtn'),
+  finalEvidenceScrollProxy: document.querySelector('#finalEvidenceScrollProxy'),
+  finalEvidenceScrollProxyTrack: document.querySelector('#finalEvidenceScrollProxyTrack'),
   finalEvidenceTable: document.querySelector('#finalEvidenceTable'),
   resultsList: document.querySelector('#resultsList'),
   researchRoundProgress: document.querySelector('#researchRoundProgress'),
@@ -2782,6 +2786,74 @@ function renderFinalResultToolbar() {
   elements.finalResultFreshness.textContent = toolbarState.statusMessage
 }
 
+function renderFinalKeywordDecision(rows = []) {
+  if (rows.length === 0) {
+    elements.finalKeywordDecision.className = 'final-keyword-decision is-empty'
+    renderHtmlIfChanged(elements.finalKeywordDecision, `
+      <div class="final-keyword-decision-copy">
+        <span class="final-keyword-decision-label">調査結果待ち</span>
+        <h3>まだ使うキーワードは決まっていません</h3>
+        <p>eRank・Etsy公式・EverBeeの確認が進むと、ここに採用する1語を表示します。</p>
+      </div>
+    `)
+    return
+  }
+
+  const decision = deriveFinalKeywordDecision(rows)
+  elements.finalKeywordDecision.className = `final-keyword-decision is-${decision.status}`
+
+  if (decision.status === 'ready') {
+    const alternatives = decision.alternatives.length > 0
+      ? `<div class="final-keyword-alternatives">次点: ${decision.alternatives.map((keyword) => `<button type="button" data-result-key="${escapeHtml(keyword)}">${escapeHtml(keyword)}</button>`).join(' / ')}</div>`
+      : ''
+    const pendingNote = decision.pendingCount > 0
+      ? ` 未完了の検証が${decision.pendingCount}件ありますが、現時点の採用候補はこの語です。`
+      : ''
+    renderHtmlIfChanged(elements.finalKeywordDecision, `
+      <div class="final-keyword-decision-copy">
+        <span class="final-keyword-decision-label">採用 ${escapeHtml(decision.primaryLabel)}</span>
+        <h3>まず使うキーワード</h3>
+        <button type="button" class="final-keyword-primary" data-result-key="${escapeHtml(decision.primaryKeyword)}">${escapeHtml(decision.primaryKeyword)}</button>
+        <p>検証済みA/B候補の中で最優先です。商品タイトル・タグ・デザイン企画の軸にします。${escapeHtml(pendingNote)}</p>
+        ${alternatives}
+      </div>
+      <button type="button" class="primary-btn final-keyword-decision-action" data-copy-final-keyword="${escapeHtml(decision.primaryKeyword)}">この1語をコピー</button>
+    `)
+    return
+  }
+
+  if (decision.status === 'pending') {
+    renderHtmlIfChanged(elements.finalKeywordDecision, `
+      <div class="final-keyword-decision-copy">
+        <span class="final-keyword-decision-label">判定保留</span>
+        <h3>まだ使うキーワードを決めません</h3>
+        <p>採用できるA/B候補がなく、未完了の検証が${decision.pendingCount}件あります。先に数値を取得してから決定します。</p>
+      </div>
+      <button type="button" class="primary-btn final-keyword-decision-action" data-final-decision-action="verify">未検証を続ける</button>
+    `)
+    return
+  }
+
+  renderHtmlIfChanged(elements.finalKeywordDecision, `
+    <div class="final-keyword-decision-copy">
+      <span class="final-keyword-decision-label">採用なし</span>
+      <h3>今回は採用できるキーワードなし</h3>
+      <p>検証は完了しましたが、A/B評価の語がありません。C/Dの語をそのまま商品化せず、条件変更またはクロスニッチ探索へ進みます。</p>
+    </div>
+  `)
+}
+
+function syncFinalEvidenceScrollbars() {
+  const tableWidth = Math.max(
+    elements.finalEvidenceTable.scrollWidth,
+    elements.finalEvidenceTable.clientWidth,
+  )
+  elements.finalEvidenceScrollProxyTrack.style.width = `${tableWidth}px`
+  if (elements.finalEvidenceScrollProxy.scrollLeft !== elements.finalEvidenceTable.scrollLeft) {
+    elements.finalEvidenceScrollProxy.scrollLeft = elements.finalEvidenceTable.scrollLeft
+  }
+}
+
 function evidenceTermCount(value) {
   const terms = Array.isArray(value)
     ? value
@@ -2984,6 +3056,7 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
 
   if (visibleRows.length === 0) {
     renderHtmlIfChanged(elements.finalEvidenceTable, '<div class="empty-state">この条件に一致する結果はありません。</div>')
+    window.requestAnimationFrame(syncFinalEvidenceScrollbars)
     return visibleRows
   }
 
@@ -3000,6 +3073,7 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
     </table>
   `
   renderHtmlIfChanged(elements.finalEvidenceTable, tableHtml)
+  window.requestAnimationFrame(syncFinalEvidenceScrollbars)
   return visibleRows
 }
 
@@ -3007,6 +3081,7 @@ function renderResultsTable() {
   renderFinalResultToolbar()
   renderResearchRoundControls()
   const allRows = finalEvidenceRows()
+  renderFinalKeywordDecision(allRows)
   state.finalEvidenceCount = allRows.length
   const stageStatus = document.querySelector('#researchStageResultsStatus')
   if (stageStatus) stageStatus.textContent = allRows.length > 0 ? `${allRows.length}件` : '売上確認待ち'
@@ -5886,6 +5961,34 @@ function bindEvents() {
   elements.verifyPendingEvidenceBtn.addEventListener('click', () => {
     verifyPendingEvidence().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
   })
+  elements.finalKeywordDecision.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    const copyButton = event.target.closest('[data-copy-final-keyword]')
+    if (copyButton) {
+      copyText(
+        copyButton.dataset.copyFinalKeyword,
+        copyButton,
+        'コピー済み',
+        'この1語をコピー',
+      ).catch((error) => setSimpleStatus(String(error?.message ?? error)))
+      return
+    }
+    if (event.target.closest('[data-final-decision-action="verify"]')) {
+      verifyPendingEvidence().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      return
+    }
+    handleResultListClick(event)
+  })
+  elements.finalEvidenceScrollProxy.addEventListener('scroll', () => {
+    if (elements.finalEvidenceTable.scrollLeft !== elements.finalEvidenceScrollProxy.scrollLeft) {
+      elements.finalEvidenceTable.scrollLeft = elements.finalEvidenceScrollProxy.scrollLeft
+    }
+  })
+  elements.finalEvidenceTable.addEventListener('scroll', () => {
+    if (elements.finalEvidenceScrollProxy.scrollLeft !== elements.finalEvidenceTable.scrollLeft) {
+      elements.finalEvidenceScrollProxy.scrollLeft = elements.finalEvidenceTable.scrollLeft
+    }
+  })
   elements.finalEvidenceTable.addEventListener('click', handleResultListClick)
   elements.resultsList.addEventListener('click', handleResultListClick)
   elements.researchRoundTabs.addEventListener('click', handleResultListClick)
@@ -5925,6 +6028,7 @@ function bindEvents() {
     if (event.target === elements.advancedModal) closeAdvancedModal()
   })
   window.addEventListener('message', handleExtensionMessage)
+  window.addEventListener('resize', syncFinalEvidenceScrollbars)
 }
 
 function initExtensionBridge() {

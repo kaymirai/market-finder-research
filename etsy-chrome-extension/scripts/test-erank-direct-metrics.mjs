@@ -17,3 +17,8 @@ test('counts the four direct eRank metrics when deriving capture status', () => 
 test('shows checked eRank no-data results as Unknown', () => {
   assert.match(marketFinderSource, /'no-data': 'Unknown'/)
 })
+
+test('recognizes the current eRank no-data result before waiting for metric columns', () => {
+  assert.match(source, /could not find data for/i)
+  assert.match(source, /if \(pageHasNoDataMessage\(\)\) return extractMetrics\(keyword\)/)
+})

@@ -146,3 +146,43 @@ export function finalEvidenceFilterMatches(row = {}, filter = 'all') {
   }
   return row.evidenceState?.status === selected
 }
+
+export function deriveFinalKeywordDecision(rows = []) {
+  const rank = { A: 0, B: 1 }
+  const recommended = rows
+    .filter((row) => (
+      row?.evidenceState?.status === 'verified'
+      && Object.hasOwn(rank, String(row.opportunityLabel ?? '').trim())
+      && String(row.keyword ?? '').trim()
+    ))
+    .sort((left, right) => (
+      rank[String(left.opportunityLabel).trim()] - rank[String(right.opportunityLabel).trim()]
+      || (finiteNumber(right.scoreState?.score) ?? -1) - (finiteNumber(left.scoreState?.score) ?? -1)
+      || String(left.keyword).localeCompare(String(right.keyword), 'en')
+    ))
+
+  const pendingCount = rows.filter((row) => (
+    ['pending', 'failed'].includes(String(row?.evidenceState?.status ?? '').trim())
+  )).length
+
+  if (recommended.length > 0) {
+    const primary = recommended[0]
+    return {
+      status: 'ready',
+      primaryKeyword: String(primary.keyword).trim(),
+      primaryLabel: String(primary.opportunityLabel).trim(),
+      primaryScore: finiteNumber(primary.scoreState?.score),
+      alternatives: recommended.slice(1, 3).map((row) => String(row.keyword).trim()),
+      pendingCount,
+    }
+  }
+
+  return {
+    status: pendingCount > 0 ? 'pending' : 'none',
+    primaryKeyword: '',
+    primaryLabel: '',
+    primaryScore: null,
+    alternatives: [],
+    pendingCount,
+  }
+}

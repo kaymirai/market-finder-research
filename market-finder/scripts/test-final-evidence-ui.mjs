@@ -33,6 +33,24 @@ test('keeps headers and the first three comparison columns visible on desktop', 
   assert.match(css, /min-width:\s*2800px/)
 })
 
+test('shows an explicit keyword decision before the comparison table', () => {
+  assert.match(html, /id="finalKeywordDecision"/)
+  assert.match(app, /function renderFinalKeywordDecision\(/)
+  assert.match(app, /deriveFinalKeywordDecision/)
+  assert.match(app, /まず使うキーワード/)
+  assert.match(app, /今回は採用できるキーワードなし/)
+})
+
+test('provides an always-accessible horizontal scrollbar synchronized with the table', () => {
+  assert.match(html, /id="finalEvidenceScrollProxy"/)
+  assert.match(html, /id="finalEvidenceScrollProxyTrack"/)
+  assert.match(css, /\.final-evidence-scroll-proxy\s*\{[^}]*position:\s*sticky/s)
+  assert.match(css, /\.final-evidence-scroll-proxy\s*\{[^}]*overflow-x:\s*auto/s)
+  assert.match(app, /function syncFinalEvidenceScrollbars\(/)
+  assert.match(app, /finalEvidenceScrollProxy\.scrollLeft/)
+  assert.match(app, /finalEvidenceTable\.scrollLeft/)
+})
+
 test('shows every designed evidence field in the comparison table', () => {
   for (const header of ['Trend', 'Etsy Conversion', '関連語', 'Median Revenue', '判定理由']) {
     assert.match(app, new RegExp(`<th>${header}</th>`))
