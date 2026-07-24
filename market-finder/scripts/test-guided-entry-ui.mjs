@@ -271,6 +271,7 @@ test('BRIDGE_READY refresh cannot reveal Etsy while another stage is active', ()
     'state',
     'window',
     'EXTENSION_SOURCE',
+    'REQUIRED_EXTENSION_VERSION',
     'updateExtensionBadge',
     'renderMarketplaceInsightPlan',
     'pollExtensionState',
@@ -291,6 +292,7 @@ test('BRIDGE_READY refresh cannot reveal Etsy while another stage is active', ()
     state,
     windowObject,
     'market-finder-extension',
+    '1.35',
     () => {},
     () => { panels.etsy.hidden = false },
     () => {},
@@ -306,7 +308,7 @@ test('BRIDGE_READY refresh cannot reveal Etsy while another stage is active', ()
 
   handler({
     source: windowObject,
-    data: { source: 'market-finder-extension', action: 'BRIDGE_READY' },
+    data: { source: 'market-finder-extension', action: 'BRIDGE_READY', version: '1.35' },
   })
 
   assert.equal(state.extensionConnected, true)
@@ -806,7 +808,7 @@ test('keeps event track metadata and shows cross-event history', () => {
 test('shows direct and base eRank provenance including failed captures', () => {
   assert.match(html, /id="erankQueryPlanSummary"/)
   assert.match(html, /id="candidateRoundTabs"/)
-  assert.match(app, /if \(!preserveMarketplacePlan\) beginInitialResearchRound\(\)/)
+  assert.match(app, /if \(!preserveMarketplacePlan\) \{[\s\S]*beginInitialResearchRound\(\)/)
   assert.match(app, /完全語句/)
   assert.match(app, /基底語/)
   assert.match(app, /検索済み・数値取得失敗/)
@@ -1114,5 +1116,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260723-6')
+  assert.equal(stylesheetVersion, '20260724-2')
 })

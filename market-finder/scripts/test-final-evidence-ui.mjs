@@ -20,9 +20,18 @@ test('provides a single final evidence matrix with filters and bulk verification
 
 test('labels bulk verification as a selected shortlist instead of every generated idea', () => {
   assert.match(app, /buildFinalEvidenceKeywordPool/)
+  assert.match(app, /analysis\.scoredRows\.filter\(hasCollectedEvidence\)/)
+  assert.match(app, /selectedResearchRoundKeywords\(state\.researchRounds\.rounds/)
   assert.match(app, /選抜済みを自動検証/)
   assert.match(app, /候補アイデア[\s\S]*選抜外/)
   assert.doesNotMatch(app, /未検証をすべて自動検証/)
+})
+
+test('starts a fresh selected round when a new candidate search replaces the current plan', () => {
+  assert.match(
+    app,
+    /if \(!preserveMarketplacePlan\) \{\s*state\.researchRounds = createResearchRoundsState\(\)\s*beginInitialResearchRound\(\)\s*\}/,
+  )
 })
 
 test('continues fifty-row verification batches automatically until stopped or complete', () => {
@@ -34,6 +43,14 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /wasActive\s*&&\s*!data\.state\?\.active[\s\S]*schedulePendingEvidenceAutomation/)
   assert.match(app, /選抜済みを自動検証/)
   assert.match(app, /自動検証を停止/)
+})
+
+test('checks the extension background before starting selected verification', () => {
+  assert.match(app, /async function confirmExtensionConnection\(/)
+  assert.match(app, /requestExtension\('GET_MARKET_STATE', \{\}, 5000\)/)
+  assert.match(app, /if \(!await confirmExtensionConnection\(\)\) return/)
+  assert.match(app, /data\.action === 'BRIDGE_UNAVAILABLE'/)
+  assert.match(app, /if \(String\(data\.version \?\? ''\) !== REQUIRED_EXTENSION_VERSION\)/)
 })
 
 test('stops automatic verification without consuming pending rows at the eRank daily limit', () => {

@@ -26,6 +26,56 @@ function normalizedKeywordList(values = []) {
     })
 }
 
+export function hasCollectedEvidence(row = {}) {
+  const captureStatus = String(row.erankCaptureStatus ?? '').trim().toLowerCase()
+  const hasCaptureStatus = Boolean(captureStatus) && captureStatus !== 'unsearched'
+  const hasProductRows = Array.isArray(row.productRows) && row.productRows.length > 0
+  return [
+    row.erankSearchVolume,
+    row.erankClicks,
+    row.erankCtr,
+    row.erankCompetition,
+    row.erankKeywordDifficulty,
+    row.erankTrend,
+    row.etsySearches30d,
+    row.etsyListings,
+    Array.isArray(row.etsyRelatedTerms) && row.etsyRelatedTerms.length > 0 ? 'related' : '',
+    row.listingsAnalyzed,
+    row.topMonthlySales,
+    row.topRevenue,
+    row.averagePrice,
+    row.listingAge,
+    row.visibleListingCount,
+    row.sellingListingCount,
+    row.recentSellingListingCount,
+    row.medianMonthlySales,
+    row.medianMonthlyRevenue,
+    row.totalVisibleMonthlySales,
+    row.topSalesShare,
+    row.erankAttemptedAt,
+    row.erankCheckedAt,
+    row.etsyCheckedAt,
+    row.everbeeCheckedAt,
+    row.error,
+    hasCaptureStatus ? captureStatus : '',
+    hasProductRows ? 'productRows' : '',
+  ].some((value) => String(value ?? '').trim() !== '')
+}
+
+export function selectedResearchRoundKeywords(rounds = [], options = {}) {
+  const initialLimit = Math.max(1, Math.floor(Number(options.initialLimit) || 20))
+  const crossNicheLimit = Math.max(1, Math.floor(Number(options.crossNicheLimit) || 12))
+  const selected = []
+
+  ;(Array.isArray(rounds) ? rounds : []).forEach((round) => {
+    const keywords = Array.isArray(round?.candidateKeywords) ? round.candidateKeywords : []
+    const limit = round?.type === 'initial' ? initialLimit : crossNicheLimit
+    selected.push(...keywords.slice(-limit))
+  })
+
+  return normalizedKeywordList(selected)
+}
+
 export function buildFinalEvidenceKeywordPool({
   evidenceKeywords = [],
   selectedKeywords = [],

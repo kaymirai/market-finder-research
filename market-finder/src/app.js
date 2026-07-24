@@ -88,8 +88,10 @@ import {
   deriveFinalScoreState,
   finalEvidenceFilterMatches,
   formatEvidenceMetric,
+  hasCollectedEvidence,
   pendingEvidenceBatch,
-} from './final-evidence-matrix.js?v=20260723-3'
+  selectedResearchRoundKeywords,
+} from './final-evidence-matrix.js?v=20260724-1'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -100,6 +102,7 @@ const SEARCH_SEED_PICK_LIMIT = 20
 const ERANK_RESEARCH_LIMIT = 20
 const SEARCH_SEED_PREVIEW_LIMIT = 6
 const FINAL_EVIDENCE_BATCH_SIZE = 50
+const REQUIRED_EXTENSION_VERSION = '1.35'
 const DISCOVERY_LANE_LABELS = {
   motif: 'モチーフ',
   moment: '場面',
@@ -167,6 +170,7 @@ const state = {
     completed: false,
   },
   extensionConnected: false,
+  extensionVersion: '',
   extensionState: null,
   extensionPollFailureCount: 0,
   restoredResearchSavedAt: '',
@@ -1896,7 +1900,7 @@ function renderMarketplaceInsightPlan() {
       : eligibleCandidates.length === 0
         ? 'eRank結果はありますが、Etsy公式へ進める基準を通った候補は0件です。上の「今回は保留した候補」を確認してください。'
       : !state.extensionConnected
-        ? 'eRank確認は完了しています。実Chromeで開き、Chrome拡張1.34をReloadしてから押してください。'
+        ? `eRank確認は完了しています。実Chromeで開き、Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてから押してください。`
         : officialProbeCount > 0
           ? `eRank保留のうち需要数値がある安全な上位${officialProbeCount}件を、Etsy公式データで再確認します。`
         : `eRankで絞った${eligibleCandidates.length}件をEtsy公式で順番に自動確認します。`
@@ -2886,7 +2890,11 @@ function finalEvidenceRows() {
   const analysis = currentResearchAnalysis()
   const scoredByKeyword = new Map(analysis.scoredRows.map((row) => [normalizePhrase(row.keyword), row]))
   const everbeeByKeyword = new Map(everbeeResultRows().map((row) => [normalizePhrase(row.score.normalized.keyword), row]))
-  const captureByKeyword = new Map(erankCaptureStateRows().map((row) => [normalizePhrase(row.query), row]))
+  const captureByKeyword = new Map(
+    erankCaptureStateRows()
+      .filter((row) => hasCollectedEvidence({ ...row, erankCaptureStatus: row.status }))
+      .map((row) => [normalizePhrase(row.query), row])
+  )
   const candidateByKeyword = new Map()
   ;[...state.candidateCatalog, ...state.candidates, ...currentCrossNicheDrilldown().candidates].forEach((candidate) => {
     const keyword = normalizePhrase(candidate?.keyword)
@@ -2899,12 +2907,18 @@ function finalEvidenceRows() {
     (state.marketplaceInsightPlan?.items ?? []).map((item) => [normalizePhrase(item.query), item])
   )
   const selectedKeywords = [
-    ...state.researchRounds.rounds.flatMap((round) => round.candidateKeywords ?? []),
+    ...selectedResearchRoundKeywords(state.researchRounds.rounds, {
+      initialLimit: ERANK_RESEARCH_LIMIT,
+      crossNicheLimit: 12,
+    }),
     ...state.crossNicheWorkflow.batch.map((candidate) => candidate.keyword),
   ]
   const hasSelection = selectedKeywords.some((keyword) => Boolean(normalizePhrase(keyword)))
   const keywords = new Set(buildFinalEvidenceKeywordPool({
-    evidenceKeywords: [...scoredByKeyword.keys(), ...captureByKeyword.keys()],
+    evidenceKeywords: [
+      ...analysis.scoredRows.filter(hasCollectedEvidence).map((row) => normalizePhrase(row.keyword)),
+      ...captureByKeyword.keys(),
+    ],
     selectedKeywords,
     fallbackKeywords: state.candidates
       .filter((candidate) => candidate.status === 'ready')
@@ -3451,10 +3465,7 @@ async function togglePendingEvidenceAutomation() {
     setSimpleStatus('検証待ちの候補はありません。')
     return
   }
-  if (!state.extensionConnected) {
-    setSimpleStatus('Chrome拡張へ接続してから未検証の自動検証を開始してください。')
-    return
-  }
+  if (!await confirmExtensionConnection()) return
 
   state.pendingEvidenceAutomation = {
     active: true,
@@ -4107,7 +4118,10 @@ function generateCandidates({ preserveMarketplacePlan = false } = {}) {
     options,
   ).slice(0, broadEventMode ? 40 : Number(elements.limitInput.value) || 80)
   mergeCandidateCatalog(state.candidates)
-  if (!preserveMarketplacePlan) beginInitialResearchRound()
+  if (!preserveMarketplacePlan) {
+    state.researchRounds = createResearchRoundsState()
+    beginInitialResearchRound()
+  }
   state.activeDiscoveryLane = 'all'
   if (preserveMarketplacePlan && state.marketplaceInsightPlan?.items?.length > 0) {
     rebuildMarketplaceInsightPlan({ preserveExisting: true })
@@ -5034,7 +5048,7 @@ async function collectTrendScoutTerms() {
       const made = state.candidates.length
       const message = made > 0
         ? `候補作成は完了しました。外部サイトの自動取得は未接続ですが、入口ワード${searchSeedAdded}件と商品条件から調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`
-        : '候補を作れませんでした。外部サイトの自動取得も使う場合は、実Chromeで開き、Chrome拡張1.34をReloadしてください。Market Finderページは自動で再読み込みされます。'
+        : `候補を作れませんでした。外部サイトの自動取得も使う場合は、実Chromeで開き、Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてください。Market Finderページは自動で再読み込みされます。`
       updateProgressModal({
         current: made > 0 ? '調査候補を反映' : '候補なし',
         done: 2,
@@ -5205,16 +5219,16 @@ function friendlyExtensionError(error) {
     return 'eRankの1日あたりの検索上限に達しました。選抜済みの未検証は残したまま停止しました。翌日のリセット後に「選抜済みを自動検証」を押してください（Basic 100件/日、Pro 200件/日）。'
   }
   if (/activeTab.*permission is required|either the .*activeTab.*permission is required/i.test(message)) {
-    return 'Chrome拡張の画面キャプチャ権限が不足しています。実Chromeで開き、拡張をReloadしてバージョン1.34になっているか確認してください。'
+    return `Chrome拡張の画面キャプチャ権限が不足しています。実Chromeで開き、拡張をReloadしてバージョン${REQUIRED_EXTENSION_VERSION}になっているか確認してください。`
   }
   if (/extension context invalidated/i.test(message)) {
-    return 'Chrome拡張の旧接続が残っています。実Chromeで拡張1.34をReloadすると、開いているMarket Finderも自動で再読み込みされます。'
+    return `Chrome拡張の旧接続が残っています。実Chromeで拡張${REQUIRED_EXTENSION_VERSION}をReloadすると、開いているMarket Finderも自動で再読み込みされます。`
   }
   if (/receiving end does not exist|could not establish connection/i.test(message)) {
-    return 'Chrome拡張とページがつながっていません。Market Finderを実Chromeで開き、Chrome拡張1.34をReloadしてください。ページは自動で再読み込みされます。'
+    return `Chrome拡張とページがつながっていません。Market Finderを実Chromeで開き、Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてください。ページは自動で再読み込みされます。`
   }
   if (/応答がありません/.test(message)) {
-    return 'Chrome拡張から応答がありません。Market Finderを実Chromeで開き、Chrome拡張1.34をReloadしてください。'
+    return `Chrome拡張から応答がありません。Market Finderを実Chromeで開き、Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてください。`
   }
   return message || 'Chrome拡張の処理に失敗しました。'
 }
@@ -5501,16 +5515,58 @@ function requestExtension(action, payload = {}, timeoutMs = 15000) {
   })
 }
 
+async function confirmExtensionConnection() {
+  if (state.extensionVersion !== REQUIRED_EXTENSION_VERSION) {
+    state.extensionConnected = false
+    renderExtensionStateUpdate()
+    setSimpleStatus(`Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてから開始してください。接続表示が「接続済み v${REQUIRED_EXTENSION_VERSION}」になれば準備完了です。`)
+    return false
+  }
+  try {
+    const response = await requestExtension('GET_MARKET_STATE', {}, 5000)
+    state.extensionConnected = true
+    state.extensionState = response.state ?? state.extensionState
+    renderExtensionStateUpdate()
+    return true
+  } catch (error) {
+    state.extensionConnected = false
+    releaseRunningControls()
+    renderExtensionStateUpdate()
+    setSimpleStatus(friendlyExtensionError(error))
+    return false
+  }
+}
+
 function handleExtensionMessage(event) {
   if (event.source !== window) return
   const data = event.data
   if (!data || data.source !== EXTENSION_SOURCE) return
 
   if (data.action === 'BRIDGE_READY') {
+    if (String(data.version ?? '') !== REQUIRED_EXTENSION_VERSION) {
+      state.extensionConnected = false
+      state.extensionVersion = String(data.version ?? '')
+      releaseRunningControls()
+      renderExtensionStateUpdate()
+      elements.extensionStatus.textContent = `Chrome拡張${REQUIRED_EXTENSION_VERSION}へ更新してください。現在の接続は${state.extensionVersion || '旧版'}です。`
+      return
+    }
     state.extensionConnected = true
+    state.extensionVersion = String(data.version)
     state.extensionPollFailureCount = 0
     renderExtensionStateUpdate()
     pollExtensionState()
+    return
+  }
+
+  if (data.action === 'BRIDGE_UNAVAILABLE') {
+    state.extensionConnected = false
+    state.extensionVersion = ''
+    releaseRunningControls()
+    renderExtensionStateUpdate()
+    elements.extensionStatus.textContent = friendlyExtensionError(
+      data.error || `Chrome拡張${REQUIRED_EXTENSION_VERSION}のバックグラウンドへ接続できません。`
+    )
     return
   }
 
@@ -5558,7 +5614,8 @@ function handleExtensionMessage(event) {
 }
 
 function updateExtensionBadge() {
-  const label = state.extensionConnected ? '接続済み' : '未接続'
+  const versionLabel = state.extensionVersion ? ` v${state.extensionVersion}` : ''
+  const label = state.extensionConnected ? `接続済み${versionLabel}` : '未接続'
   const className = `status-badge ${state.extensionConnected ? 'ready' : 'warn'}`
   elements.extensionBadge.textContent = label
   elements.extensionBadge.className = className
@@ -5579,7 +5636,7 @@ function renderExtensionState() {
     if (elements.quickExtensionStatus) {
       elements.quickExtensionStatus.textContent = state.extensionConnected
         ? '接続済みです。eRankやEverBeeの自動取得を使えます。'
-        : '未接続です。実Chromeで開き、Chrome拡張1.34をReloadしてください。ページは自動で再読み込みされます。'
+        : `未接続です。実Chromeで開き、Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてください。ページは自動で再読み込みされます。`
     }
     renderProgressModal(extensionState)
     return

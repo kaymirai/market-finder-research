@@ -8,8 +8,55 @@ import {
   deriveFinalScoreState,
   finalEvidenceFilterMatches,
   formatEvidenceMetric,
+  hasCollectedEvidence,
   pendingEvidenceBatch,
+  selectedResearchRoundKeywords,
 } from '../src/final-evidence-matrix.js'
+
+test('keeps empty generated rows out of evidence while retaining attempted and measured rows', () => {
+  const emptyRows = Array.from({ length: 1000 }, (_, index) => ({
+    keyword: `generated idea ${index + 1}`,
+  }))
+  const evidenceRows = [
+    { keyword: 'measured phrase', erankCompetition: 4639 },
+    { keyword: 'attempted phrase', erankAttemptedAt: '2026-07-24T00:00:00.000Z' },
+    { keyword: 'failed phrase', error: '取得失敗' },
+    { keyword: 'sales phrase', productRows: [{ title: 'Listing' }] },
+  ]
+
+  assert.equal(emptyRows.filter(hasCollectedEvidence).length, 0)
+  assert.deepEqual(
+    evidenceRows.filter(hasCollectedEvidence).map((row) => row.keyword),
+    ['measured phrase', 'attempted phrase', 'failed phrase', 'sales phrase'],
+  )
+})
+
+test('bounds accumulated round selections to the latest batch in each research lane', () => {
+  const result = selectedResearchRoundKeywords([
+    {
+      type: 'initial',
+      candidateKeywords: Array.from({ length: 120 }, (_, index) => `initial ${index + 1}`),
+    },
+    {
+      type: 'cross-niche',
+      candidateKeywords: Array.from({ length: 80 }, (_, index) => `cross one ${index + 1}`),
+    },
+    {
+      type: 'cross-niche',
+      candidateKeywords: Array.from({ length: 90 }, (_, index) => `cross two ${index + 1}`),
+    },
+  ], {
+    initialLimit: 20,
+    crossNicheLimit: 12,
+  })
+
+  assert.equal(result.length, 44)
+  assert.equal(result.includes('initial 100'), false)
+  assert.equal(result.includes('initial 101'), true)
+  assert.equal(result.includes('cross one 68'), false)
+  assert.equal(result.includes('cross one 69'), true)
+  assert.equal(result.includes('cross two 79'), true)
+})
 
 test('keeps generated ideas out of the final verification queue until they are selected', () => {
   const catalog = Array.from({ length: 1000 }, (_, index) => `idea ${index + 1}`)
