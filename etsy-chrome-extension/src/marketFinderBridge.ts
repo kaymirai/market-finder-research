@@ -32,9 +32,28 @@
         })
     }
 
+    async function announceBridge() {
+        try {
+            const response = await sendRuntimeMessage('PING_MARKET_FINDER') as {
+                ok?: boolean
+                version?: string
+            }
+            if (response?.ok === false) throw new Error('Chrome extension background is unavailable.')
+            postToPage({
+                action: 'BRIDGE_READY',
+                version: response?.version ?? '',
+            })
+        } catch (error) {
+            postToPage({
+                action: 'BRIDGE_UNAVAILABLE',
+                error: error instanceof Error ? error.message : 'Chrome extension background is unavailable.',
+            })
+        }
+    }
+
     async function handlePageRequest(request: PageRequest) {
         if (request.action === 'PING') {
-            postToPage({ action: 'BRIDGE_READY' })
+            await announceBridge()
             return
         }
 
@@ -133,5 +152,5 @@
         handlePageRequest(request)
     })
 
-    postToPage({ action: 'BRIDGE_READY' })
+    announceBridge()
 })()

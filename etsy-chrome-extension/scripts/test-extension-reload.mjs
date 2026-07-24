@@ -378,6 +378,13 @@ test('forwards the automatic Etsy search and capture request through the page br
   assert.match(bridgeSource, /RUN_AND_CAPTURE_ETSY_MARKETPLACE_INSIGHT/)
 })
 
+test('reports the page bridge as ready only after the background runtime responds', () => {
+  assert.match(backgroundTypeScriptSource, /request\.action === 'PING_MARKET_FINDER'/)
+  assert.match(bridgeSource, /sendRuntimeMessage\(['"]PING_MARKET_FINDER['"]\)/)
+  assert.match(bridgeSource, /action: ['"]BRIDGE_READY['"]/)
+  assert.match(bridgeSource, /action: ['"]BRIDGE_UNAVAILABLE['"]/)
+})
+
 test('extracts related keyword metrics from Japanese and English Marketplace Insights', () => {
   const fixtures = [
     {

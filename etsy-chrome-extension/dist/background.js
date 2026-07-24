@@ -74,6 +74,13 @@
     }
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         var _a, _b, _c;
+        if (request.action === 'PING_MARKET_FINDER') {
+            sendResponse({
+                ok: true,
+                version: chrome.runtime.getManifest().version,
+            });
+            return true;
+        }
         if (request.action === 'START_PROCESS') {
             if (isProcessingImages) {
                 sendResponse({ started: false, error: '画像取得はすでに実行中です。' });
