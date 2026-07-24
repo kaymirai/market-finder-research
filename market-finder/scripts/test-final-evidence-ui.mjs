@@ -45,6 +45,24 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /自動検証を停止/)
 })
 
+test('updates the automation button without rebuilding the final evidence table', () => {
+  const toggleBody = app.match(/async function togglePendingEvidenceAutomation\(\) \{([\s\S]*?)\n\}\n\nasync function verifyPendingEvidence/)?.[1] ?? ''
+  const stopBody = app.match(/function stopPendingEvidenceAutomation\(message = ''\) \{([\s\S]*?)\n\}\n\nfunction schedulePendingEvidenceAutomation/)?.[1] ?? ''
+
+  assert.match(app, /function renderPendingEvidenceAutomationButton\(/)
+  assert.match(toggleBody, /renderPendingEvidenceAutomationButton\(/)
+  assert.match(stopBody, /renderPendingEvidenceAutomationButton\(/)
+  assert.doesNotMatch(toggleBody, /renderResultsTable\(/)
+  assert.doesNotMatch(stopBody, /renderResultsTable\(/)
+})
+
+test('reschedules automatic verification while another external task is still active', () => {
+  assert.match(
+    app,
+    /if \(state\.extensionState\?\.active \|\| state\.marketplaceInsightAutoRunning \|\| state\.marketplaceInsightBusy\) \{\s*schedulePendingEvidenceAutomation\(2000\)\s*return\s*\}/,
+  )
+})
+
 test('checks the extension background before starting selected verification', () => {
   assert.match(app, /async function confirmExtensionConnection\(/)
   assert.match(app, /requestExtension\('GET_MARKET_STATE', \{\}, 5000\)/)

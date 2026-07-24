@@ -3100,13 +3100,7 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
   elements.finalEvidenceScopeStatus.textContent = deferredIdeaCount > 0
     ? `検証対象 ${rows.length}件。候補アイデア ${deferredIdeaCount}件は選抜外のため、eRank枠を使わず保留しています。`
     : `検証対象 ${rows.length}件。選抜した候補と取得済みデータだけを表示しています。`
-  const automationActive = Boolean(state.pendingEvidenceAutomation?.active)
-  elements.verifyPendingEvidenceBtn.disabled = pendingRows.length === 0 && !automationActive
-  elements.verifyPendingEvidenceBtn.textContent = automationActive
-    ? `自動検証を停止 (${pendingRows.length}件残り)`
-    : pendingRows.length > 0
-      ? `選抜済みを自動検証 (${pendingRows.length})`
-      : '未検証なし'
+  renderPendingEvidenceAutomationButton(pendingRows.length)
 
   if (visibleRows.length === 0) {
     renderHtmlIfChanged(elements.finalEvidenceTable, '<div class="empty-state">この条件に一致する結果はありません。</div>')
@@ -3408,13 +3402,23 @@ function pendingEvidenceRows(rows = finalEvidenceRows()) {
   return rows.filter((row) => row.evidenceState.status === 'pending')
 }
 
+function renderPendingEvidenceAutomationButton(pendingCount = pendingEvidenceRows().length) {
+  const automationActive = Boolean(state.pendingEvidenceAutomation?.active)
+  elements.verifyPendingEvidenceBtn.disabled = pendingCount === 0 && !automationActive
+  elements.verifyPendingEvidenceBtn.textContent = automationActive
+    ? `自動検証を停止 (${pendingCount}件残り)`
+    : pendingCount > 0
+      ? `選抜済みを自動検証 (${pendingCount})`
+      : '未検証なし'
+}
+
 function stopPendingEvidenceAutomation(message = '') {
   if (!state.pendingEvidenceAutomation.active && !state.pendingEvidenceAutomation.scheduled) return
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
   state.pendingEvidenceAutomation.currentStage = ''
   if (message) setSimpleStatus(message)
-  renderResultsTable()
+  renderPendingEvidenceAutomationButton()
 }
 
 function schedulePendingEvidenceAutomation(delayMs = 500) {
@@ -3423,7 +3427,10 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
   window.setTimeout(async () => {
     state.pendingEvidenceAutomation.scheduled = false
     if (!state.pendingEvidenceAutomation.active) return
-    if (state.extensionState?.active || state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) return
+    if (state.extensionState?.active || state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) {
+      schedulePendingEvidenceAutomation(2000)
+      return
+    }
 
     const remainingRows = pendingEvidenceRows()
     if (remainingRows.length === 0) {
@@ -3476,7 +3483,7 @@ async function togglePendingEvidenceAutomation() {
   }
   state.finalEvidenceFilter = 'pending'
   setSimpleStatus(`${pendingCount}件を50件ずつ自動検証します。ブラウザを開いたままにしてください。`)
-  renderResultsTable()
+  renderPendingEvidenceAutomationButton(pendingCount)
   schedulePendingEvidenceAutomation(0)
 }
 
