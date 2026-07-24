@@ -64,8 +64,14 @@ test('reschedules automatic verification while another external task is still ac
 })
 
 test('checks the extension background before starting selected verification', () => {
+  const confirmBody = app.match(/async function confirmExtensionConnection\(\) \{([\s\S]*?)\n\}\n\nfunction handleExtensionMessage/)?.[1] ?? ''
+
   assert.match(app, /async function confirmExtensionConnection\(/)
   assert.match(app, /requestExtension\('GET_MARKET_STATE', \{\}, 5000\)/)
+  assert.match(
+    confirmBody,
+    /if \(state\.extensionConnected && state\.extensionVersion === REQUIRED_EXTENSION_VERSION\) return true/,
+  )
   assert.match(app, /if \(!await confirmExtensionConnection\(\)\) return/)
   assert.match(app, /data\.action === 'BRIDGE_UNAVAILABLE'/)
   assert.match(app, /if \(String\(data\.version \?\? ''\) !== REQUIRED_EXTENSION_VERSION\)/)

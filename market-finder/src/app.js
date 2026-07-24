@@ -5529,6 +5529,7 @@ async function confirmExtensionConnection() {
     setSimpleStatus(`Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてから開始してください。接続表示が「接続済み v${REQUIRED_EXTENSION_VERSION}」になれば準備完了です。`)
     return false
   }
+  if (state.extensionConnected && state.extensionVersion === REQUIRED_EXTENSION_VERSION) return true
   try {
     const response = await requestExtension('GET_MARKET_STATE', {}, 5000)
     state.extensionConnected = true
