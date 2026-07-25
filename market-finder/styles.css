@@ -3922,3 +3922,37 @@ button.research-table-row {
   align-items: center;
   flex: 0 0 auto;
 }
+
+.design-cluster {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #fbfcfd;
+}
+
+.design-cluster-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.design-cluster-heading strong {
+  margin-left: 8px;
+}
+
+.design-cluster-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.design-cluster-warning {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 700;
+}

@@ -163,17 +163,21 @@ test('exports verification metadata with both result CSVs', () => {
   assert.match(app, /const unknownMetric = row\.status === 'no-data' \? 'Unknown' : ''/)
 })
 
-test('hands the design step twenty verified keywords without discarding the rest', () => {
+test('hands the design step a few themes as series, not a flat keyword list', () => {
   assert.match(html, /id="designShortlistPanel"/)
   assert.match(html, /id="downloadDesignShortlistBtn"/)
   assert.match(html, /id="designShortlistMoreBtn"/)
   assert.match(html, /id="designShortlistResetBtn"/)
-  assert.match(html, /今日デザインする20件/)
+  assert.match(html, /次に作る4テーマ/)
+  assert.match(html, /1テーマ＝1シリーズとして5〜8商品/)
   assert.ok(html.indexOf('id="designShortlistPanel"') > html.indexOf('id="finalKeywordDecision"'))
   assert.match(app, /function renderDesignShortlist\(\)/)
-  assert.match(app, /function currentDesignShortlist\(\)/)
+  assert.match(app, /function currentDesignClusterPlan\(\)/)
   assert.match(app, /function exportDesignShortlistCsv\(\)/)
-  assert.match(app, /selectDesignShortlist/)
+  assert.match(app, /selectDesignClusters/)
+  assert.match(app, /class="design-cluster"/)
+  // One listing serves one buyer intent, so the handoff must not flatten the clusters away.
+  assert.doesNotMatch(app, /selectDesignShortlist/)
   // Only verified rows may reach the design handoff.
   assert.match(app, /row\.evidenceState\.status === 'verified'\)\s*\n\s*\.map\(\(row\) => row\.everbeeRow\)/)
   // The full export must stay available so the shortlist is a view, not a filter on the data.

@@ -52,9 +52,11 @@ import {
   summarizeErankQueryPlan,
 } from './erank-query-plan.js?v=20260725-4'
 import {
-  DESIGN_SHORTLIST_SIZE,
-  selectDesignShortlist,
-} from './design-shortlist.js?v=20260725-1'
+  DESIGN_CLUSTER_COUNT,
+  DESIGN_PER_CLUSTER_MAX,
+  DESIGN_PER_CLUSTER_MIN,
+  selectDesignClusters,
+} from './design-shortlist.js?v=20260725-2'
 import {
   createResearchRoundsState,
   researchRowsForRound,
@@ -154,7 +156,7 @@ const state = {
   crossNicheWorkflow: createCrossNicheWorkflowState(),
   crossNicheProposal: null,
   erankQueryPlan: [],
-  designShortlistOffset: 0,
+  designClusterOffset: 0,
   researchRounds: createResearchRoundsState(),
   candidateCatalog: [],
   researchRows: [],
@@ -560,7 +562,7 @@ function persistMarketFinderState() {
       crossNicheWorkflow: state.crossNicheWorkflow,
       crossNicheProposal: state.crossNicheProposal,
       erankQueryPlan: state.erankQueryPlan,
-      designShortlistOffset: state.designShortlistOffset,
+      designClusterOffset: state.designClusterOffset,
       researchRounds: state.researchRounds,
       candidateCatalog: state.candidateCatalog,
       researchedMarketHistory: state.researchedMarketHistory,
@@ -622,7 +624,7 @@ function restorePersistedState() {
     ? savedState.crossNicheProposal
     : null
   state.erankQueryPlan = Array.isArray(savedState.erankQueryPlan) ? savedState.erankQueryPlan : []
-  state.designShortlistOffset = Math.max(0, Number(savedState.designShortlistOffset) || 0)
+  state.designClusterOffset = Math.max(0, Number(savedState.designClusterOffset) || 0)
   state.researchRounds = createResearchRoundsState(savedState.researchRounds)
   state.candidateCatalog = Array.isArray(savedState.candidateCatalog) ? savedState.candidateCatalog : []
   state.researchedMarketHistory = normalizeResearchMarketHistory(savedState.researchedMarketHistory)
@@ -2953,17 +2955,14 @@ function evidenceConversionLabel(row = {}) {
   return String(row.notes ?? '').match(/Conversion:\s*([^/]+)/i)?.[1]?.trim() ?? ''
 }
 
-// The shortlist always reads every verified round, so narrowing the design handoff never
+// The plan always reads every verified round, so narrowing the design handoff never
 // narrows the research behind it.
-function currentDesignShortlist() {
+function currentDesignClusterPlan() {
   const verifiedRows = finalEvidenceRows()
     .filter((row) => row.evidenceState.status === 'verified')
     .map((row) => row.everbeeRow)
     .filter(Boolean)
-  return selectDesignShortlist(verifiedRows, {
-    size: DESIGN_SHORTLIST_SIZE,
-    offset: state.designShortlistOffset,
-  })
+  return selectDesignClusters(verifiedRows, { offset: state.designClusterOffset })
 }
 
 function finalEvidenceRows() {
@@ -3210,44 +3209,63 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
 
 function renderDesignShortlist() {
   if (!elements.designShortlistPanel) return
-  const shortlist = currentDesignShortlist()
+  const plan = currentDesignClusterPlan()
 
-  elements.designShortlistCount.innerHTML = `<strong>${shortlist.items.length}</strong><small>件</small>`
-  elements.downloadDesignShortlistBtn.disabled = shortlist.items.length === 0
-  elements.designShortlistMoreBtn.disabled = !shortlist.hasMore
-  elements.designShortlistResetBtn.disabled = shortlist.offset === 0
+  elements.designShortlistCount.innerHTML = `<strong>${plan.clusters.length}</strong><small>テーマ</small>`
+  elements.downloadDesignShortlistBtn.disabled = plan.items.length === 0
+  elements.designShortlistMoreBtn.disabled = !plan.hasMore
+  elements.designShortlistResetBtn.disabled = plan.offset === 0
 
-  if (shortlist.items.length === 0) {
+  if (plan.clusters.length === 0) {
     renderHtmlIfChanged(
       elements.designShortlistList,
       '<div class="empty-state small">検証済みのA/B候補が入ると、ここに出ます。</div>',
     )
-    elements.designShortlistStatus.textContent = 'EverBeeの売上確認が終わると、デザインに進む20件がここに出ます。'
+    elements.designShortlistStatus.textContent = 'EverBeeの売上確認が終わると、次に作るテーマがここに出ます。'
     return
   }
 
-  renderHtmlIfChanged(elements.designShortlistList, shortlist.items.map((row, index) => {
-    const normalized = row.score.normalized
-    const route = row.productRoute ?? {}
-    const heroNouns = (row.idea?.nounBrief?.heroNouns ?? []).slice(0, 3).join(' / ')
+  renderHtmlIfChanged(elements.designShortlistList, plan.clusters.map((cluster, clusterIndex) => {
+    const rows = cluster.items.map((row, index) => {
+      const normalized = row.score.normalized
+      const route = row.productRoute ?? {}
+      const heroNouns = (row.idea?.nounBrief?.heroNouns ?? []).slice(0, 3).join(' / ')
+      return `
+        <div class="design-shortlist-row">
+          <span class="design-shortlist-rank">${index + 1}</span>
+          <span class="design-shortlist-keyword">
+            <strong>${escapeHtml(normalized.keyword)}</strong>
+            <small>${escapeHtml(route.primary?.label ?? '-')}${heroNouns ? ` / 主役: ${escapeHtml(heroNouns)}` : ''}</small>
+          </span>
+          <span class="design-shortlist-grade score-${escapeHtml(opportunityScoreClass(row.score.score))}">${escapeHtml(row.score.opportunityLabel)}</span>
+          <span class="design-shortlist-metric"><small>販売</small><strong>${escapeHtml(displayMetricValue(normalized.medianMonthlySales))}</strong></span>
+          <span class="design-shortlist-metric"><small>競合</small><strong>${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</strong></span>
+        </div>
+      `
+    }).join('')
+
+    const thinNote = cluster.thin
+      ? `<span class="design-cluster-warning">シリーズにするには語が少なめです（${cluster.items.length}件）。関連語を足すか、別テーマを優先してください。</span>`
+      : ''
+
     return `
-      <div class="design-shortlist-row">
-        <span class="design-shortlist-rank">${shortlist.offset + index + 1}</span>
-        <span class="design-shortlist-keyword">
-          <strong>${escapeHtml(normalized.keyword)}</strong>
-          <small>${escapeHtml(route.primary?.label ?? '-')}${heroNouns ? ` / 主役: ${escapeHtml(heroNouns)}` : ''}</small>
-        </span>
-        <span class="design-shortlist-grade score-${escapeHtml(opportunityScoreClass(row.score.score))}">${escapeHtml(row.score.opportunityLabel)}</span>
-        <span class="design-shortlist-metric"><small>販売</small><strong>${escapeHtml(displayMetricValue(normalized.medianMonthlySales))}</strong></span>
-        <span class="design-shortlist-metric"><small>競合</small><strong>${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</strong></span>
-      </div>
+      <section class="design-cluster">
+        <div class="design-cluster-heading">
+          <div>
+            <span class="soft-pill">テーマ ${plan.offset + clusterIndex + 1}</span>
+            <strong>${escapeHtml(cluster.label)}</strong>
+          </div>
+          <span class="design-cluster-count">${cluster.items.length}件で1シリーズ</span>
+        </div>
+        ${thinNote}
+        <div class="design-shortlist-list">${rows}</div>
+      </section>
     `
   }).join(''))
 
-  const pageText = shortlist.pageCount > 1
-    ? `${shortlist.page}/${shortlist.pageCount}ページ目`
-    : '全件表示中'
-  elements.designShortlistStatus.textContent = `検証済みA/B候補${shortlist.total}件を${shortlist.clusterCount}テーマに整理し、${pageText}（${shortlist.items.length}件）を表示しています。CSVは未来デザイナーの「2. キーワードセットを作る」へアップロードします。`
+  const pageText = plan.pageCount > 1 ? `${plan.page}/${plan.pageCount}ページ目` : '全テーマ表示中'
+  const thinNote = plan.thinClusters > 0 ? ` 語が少ないテーマが${plan.thinClusters}件あります。` : ''
+  elements.designShortlistStatus.textContent = `検証済みA/B候補${plan.totalItems}件を${plan.totalClusters}テーマに整理し、${pageText}（${plan.clusters.length}テーマ / ${plan.items.length}件）を表示しています。1テーマ＝1シリーズとして${DESIGN_PER_CLUSTER_MIN}〜${DESIGN_PER_CLUSTER_MAX}商品を作ります。${thinNote}CSVは未来デザイナーの「2. キーワードセットを作る」へアップロードします。`
 }
 
 function renderResultsTable() {
@@ -4985,10 +5003,10 @@ function exportStep4Csv() {
 }
 
 function exportDesignShortlistCsv() {
-  const shortlist = currentDesignShortlist()
-  if (shortlist.items.length === 0) return
-  const suffix = shortlist.page > 1 ? `-p${shortlist.page}` : ''
-  exportResultRowsCsv(shortlist.items, `market-finder-design-top${shortlist.size}${suffix}`)
+  const plan = currentDesignClusterPlan()
+  if (plan.items.length === 0) return
+  const suffix = plan.page > 1 ? `-p${plan.page}` : ''
+  exportResultRowsCsv(plan.items, `market-finder-design-${plan.clusters.length}themes${suffix}`)
 }
 
 function exportResultRowsCsv(rows, fileBaseName) {
@@ -6540,12 +6558,12 @@ function bindEvents() {
   elements.downloadStep4CsvBtn.addEventListener('click', exportStep4Csv)
   elements.downloadDesignShortlistBtn.addEventListener('click', exportDesignShortlistCsv)
   elements.designShortlistMoreBtn.addEventListener('click', () => {
-    state.designShortlistOffset += DESIGN_SHORTLIST_SIZE
+    state.designClusterOffset += DESIGN_CLUSTER_COUNT
     renderDesignShortlist()
     persistMarketFinderState()
   })
   elements.designShortlistResetBtn.addEventListener('click', () => {
-    state.designShortlistOffset = 0
+    state.designClusterOffset = 0
     renderDesignShortlist()
     persistMarketFinderState()
   })
