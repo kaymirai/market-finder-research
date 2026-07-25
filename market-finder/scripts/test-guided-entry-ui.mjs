@@ -708,6 +708,20 @@ test('asks who the buyer is before generating candidates and feeds it into gener
   assert.match(app, /\.\.\.buyerIntentCandidates\(\)/)
 })
 
+test('offers the identity vocabulary as chips so the field is never blank', () => {
+  // The suggestions must precede the field they fill, or they read as a result rather
+  // than a starting point.
+  assert.ok(position('buyerIdentitySuggestions') < position('buyerIdentityInput'))
+  assert.ok(position('buyerIdentityShuffleBtn') < position('buyerIdentityInput'))
+  assert.match(html, /id="buyerContextSuggestions"/)
+  assert.match(app, /suggestBuyerIdentities\(\{[\s\S]{0,200}exclude: chosen\.join\('\\n'\)/)
+  assert.match(app, /data-buyer-identity=/)
+  assert.match(app, /data-buyer-context=/)
+  assert.match(app, /state\.buyerIdentitySuggestOffset \+= 1/)
+  assert.match(app, /function appendSeedLine\(input, phrase\)/)
+  assert.match(styles, /\.chip-btn \{/)
+})
+
 test('puts every next action after the result or inputs it uses', () => {
   assert.ok(position('yearInput') < position('trendAutoBtn'))
   assert.ok(position('candidateList') < position('marketplaceStartBtn'))
@@ -1161,5 +1175,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260726-2')
+  assert.equal(stylesheetVersion, '20260726-4')
 })

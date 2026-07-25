@@ -10,7 +10,10 @@ import {
   buildMarketplaceInsightPlan,
   buildKeywordClusterKey,
   buildSeoPlanFromBuckets,
+  BUYER_IDENTITY_LIBRARY,
   clusterKeywordCandidates,
+  detectRiskTerms,
+  suggestBuyerIdentities,
   classifyBuyerIntentPhrase,
   classifyKeywordBucket,
   explainEverbeeScore,
@@ -1174,6 +1177,58 @@ test('takes the niche vocabulary from the user and folds in their own actions', 
 
   assert.ok(keywords.some((keyword) => keyword.includes('bell ringing')))
   assert.ok(keywords.some((keyword) => keyword.includes('sunday practice')))
+})
+
+test('supplies the identity vocabulary so the operator never starts from a blank field', () => {
+  const suggestions = suggestBuyerIdentities({ limit: 12 })
+  assert.equal(suggestions.length, 12)
+
+  // A single press has to span different worlds. Twelve nurse specialties would be a
+  // worse answer than four occupations, a family role and a hobby, because the operator
+  // picks by what they understand, not by what scores highest.
+  assert.ok(new Set(suggestions.map((item) => item.groupId)).size >= 6)
+  assert.ok(new Set(suggestions.map((item) => item.axis)).size >= 3)
+  suggestions.forEach((item) => {
+    assert.equal(item.phrase, item.phrase.trim().toLowerCase())
+    assert.ok(item.groupLabel.length > 0)
+  })
+
+  // Every suggestion must survive the generator it feeds, or the chip is a dead end.
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: suggestions.map((item) => item.phrase).join('\n'),
+    categoryId: 'shirt',
+  })
+  assert.ok(rows.length > 0)
+  assert.equal(rows.every((row) => row.status === 'ready'), true)
+})
+
+test('rotates and excludes so pressing for more never repeats what is already chosen', () => {
+  const first = suggestBuyerIdentities({ limit: 12 })
+  const second = suggestBuyerIdentities({ limit: 12, offset: 1 })
+  const firstPhrases = first.map((item) => item.phrase)
+  assert.notDeepEqual(firstPhrases, second.map((item) => item.phrase))
+
+  const afterPicking = suggestBuyerIdentities({ limit: 12, exclude: firstPhrases.join('\n') })
+  assert.equal(afterPicking.some((item) => firstPhrases.includes(item.phrase)), false)
+
+  const occupationsOnly = suggestBuyerIdentities({ limit: 8, axis: 'occupation' })
+  assert.equal(occupationsOnly.every((item) => item.axis === 'occupation'), true)
+})
+
+test('keeps the suggested vocabulary specific enough to be worth entering', () => {
+  const phrases = BUYER_IDENTITY_LIBRARY.flatMap((group) => group.phrases)
+  assert.ok(phrases.length >= 200)
+  assert.equal(new Set(phrases).size, phrases.length, 'a phrase must not appear in two groups')
+
+  // Head terms every seller already targets are the reason this lane stopped working.
+  // The catalog exists to carry the qualifier, so the bare terms must not be in it.
+  for (const bare of ['nurse', 'teacher', 'mom', 'dad', 'runner', 'gift']) {
+    assert.equal(phrases.includes(bare), false, `${bare} is too broad to suggest`)
+  }
+  assert.equal(phrases.every((phrase) => phrase === phrase.trim().toLowerCase()), true)
+  // A suggestion carrying someone else's trademark would be a defect we shipped, not a
+  // risk the operator chose to take.
+  assert.equal(phrases.every((phrase) => detectRiskTerms(phrase, []).length === 0), true)
 })
 
 test('applies the same risk and structure gates as the event generator', () => {

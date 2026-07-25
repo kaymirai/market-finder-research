@@ -1,4 +1,5 @@
 import {
+  BUYER_CONTEXT_PHRASES,
   MARKET_EVENTS,
   PRODUCT_CATEGORIES,
   advanceMarketplaceInsightResearch,
@@ -20,6 +21,7 @@ import {
   scoreEverbeeResult,
   explainEverbeeScore,
   scoreErankOpportunity,
+  suggestBuyerIdentities,
   classifyCandidateKeyword,
   detectRiskTerms,
   clusterKeywordCandidates,
@@ -30,7 +32,7 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260726-2'
+} from '../../shared/market-keyword-engine/index.js?v=20260726-4'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
@@ -159,6 +161,7 @@ const state = {
   crossNicheProposal: null,
   erankQueryPlan: [],
   designClusterOffset: 0,
+  buyerIdentitySuggestOffset: 0,
   researchRounds: createResearchRoundsState(),
   candidateCatalog: [],
   researchRows: [],
@@ -243,6 +246,10 @@ const elements = {
   seedInput: document.querySelector('#seedInput'),
   buyerIdentityInput: document.querySelector('#buyerIdentityInput'),
   buyerActionInput: document.querySelector('#buyerActionInput'),
+  buyerIdentitySuggestions: document.querySelector('#buyerIdentitySuggestions'),
+  buyerIdentitySuggestHint: document.querySelector('#buyerIdentitySuggestHint'),
+  buyerIdentityShuffleBtn: document.querySelector('#buyerIdentityShuffleBtn'),
+  buyerContextSuggestions: document.querySelector('#buyerContextSuggestions'),
   trendScoutInput: document.querySelector('#trendScoutInput'),
   trendSampleBtn: document.querySelector('#trendSampleBtn'),
   trendAutoBtn: document.querySelector('#trendAutoBtn'),
@@ -572,6 +579,7 @@ function persistMarketFinderState() {
       crossNicheProposal: state.crossNicheProposal,
       erankQueryPlan: state.erankQueryPlan,
       designClusterOffset: state.designClusterOffset,
+      buyerIdentitySuggestOffset: state.buyerIdentitySuggestOffset,
       researchRounds: state.researchRounds,
       candidateCatalog: state.candidateCatalog,
       researchedMarketHistory: state.researchedMarketHistory,
@@ -636,6 +644,7 @@ function restorePersistedState() {
     : null
   state.erankQueryPlan = Array.isArray(savedState.erankQueryPlan) ? savedState.erankQueryPlan : []
   state.designClusterOffset = Math.max(0, Number(savedState.designClusterOffset) || 0)
+  state.buyerIdentitySuggestOffset = Math.max(0, Number(savedState.buyerIdentitySuggestOffset) || 0)
   state.researchRounds = createResearchRoundsState(savedState.researchRounds)
   state.candidateCatalog = Array.isArray(savedState.candidateCatalog) ? savedState.candidateCatalog : []
   state.researchedMarketHistory = normalizeResearchMarketHistory(savedState.researchedMarketHistory)
@@ -1129,6 +1138,57 @@ function renderTargets(options = {}) {
       <span>${escapeHtml(target)}</span>
     </label>
   `).join('')
+}
+
+function buyerIdentityLines() {
+  return String(elements.buyerIdentityInput?.value ?? '')
+    .split(/\r?\n/)
+    .map((line) => normalizePhrase(line))
+    .filter(Boolean)
+}
+
+// Suggestions exclude what is already chosen, so pressing a chip never leaves a dead chip
+// behind and "別の候補を見る" keeps producing names the operator has not already rejected.
+function renderBuyerIdentitySuggestions() {
+  if (!elements.buyerIdentitySuggestions) return
+  const chosen = buyerIdentityLines()
+  const suggestions = suggestBuyerIdentities({
+    limit: 12,
+    offset: state.buyerIdentitySuggestOffset,
+    exclude: chosen.join('\n'),
+  })
+  elements.buyerIdentitySuggestions.innerHTML = suggestions.map((suggestion) => `
+    <button type="button" class="chip-btn" data-buyer-identity="${escapeHtml(suggestion.phrase)}" title="${escapeHtml(suggestion.note)}">
+      <small>${escapeHtml(suggestion.groupLabel)}</small>
+      <span>${escapeHtml(suggestion.phrase)}</span>
+    </button>
+  `).join('')
+  if (elements.buyerIdentitySuggestHint) {
+    elements.buyerIdentitySuggestHint.textContent = chosen.length > 0
+      ? `${chosen.length}件を選択中です。押すと下の欄に入ります。自分が中身を分かる領域を優先すると、デザインの当たり率が上がります。`
+      : '押すと下の欄に入ります。自分が中身を分かる領域を優先すると、デザインの当たり率が上がります。'
+  }
+}
+
+function renderBuyerContextSuggestions() {
+  if (!elements.buyerContextSuggestions) return
+  elements.buyerContextSuggestions.innerHTML = BUYER_CONTEXT_PHRASES.map((phrase) => `
+    <button type="button" class="chip-btn" data-buyer-context="${escapeHtml(phrase)}">
+      <span>${escapeHtml(phrase)}</span>
+    </button>
+  `).join('')
+}
+
+function appendSeedLine(input, phrase) {
+  if (!input) return
+  const existing = String(input.value ?? '')
+    .split(/\r?\n/)
+    .map((line) => normalizePhrase(line))
+    .filter(Boolean)
+  const value = normalizePhrase(phrase)
+  if (!value || existing.includes(value)) return
+  input.value = [...existing, value].join('\n')
+  resetCandidatesForInputChange()
 }
 
 function findResearchRow(keyword) {
@@ -2555,7 +2615,7 @@ function renderErankResults() {
 
   if (ranked.length === 0) {
     elements.erankResultsList.innerHTML = renderErankCaptureStates(captureStates)
-      || '<div class="empty-state">「eRankで検索数を見る」が終わると、ここに結果が表示されます。</div>'
+      || '<div class="empty-state">「eRankで関連語を広げる」が終わると、ここに結果が表示されます。</div>'
     return
   }
 
@@ -3408,7 +3468,7 @@ function crossNicheStageResolver() {
 function crossNicheWorkflowMessage() {
   const count = state.crossNicheWorkflow.batch.length
   if (state.crossNicheWorkflow.status === 'pending-erank') {
-    return `上位${count}件を調査候補へ自動追加しました。次は2段目の「eRankで検索数を見る」を押してください。`
+    return `上位${count}件を調査候補へ自動追加しました。次は2「候補」の「Etsy公式確認を自動実行」を押してください。`
   }
   if (state.crossNicheWorkflow.status === 'pending-etsy') {
     return `eRank確認が終わりました。次は4段目の「Etsy公式確認を自動実行」を押してください。`
@@ -5378,8 +5438,8 @@ function applyTrendScoutTerms() {
   }
 
   setTrendStatus(count > 0
-    ? `${count}件の流行語から調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`
-    : `流行語なしで調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`, 'ready')
+    ? `${count}件の流行語から調査候補を${made}件作りました。次は「Etsy公式確認を自動実行」です。`
+    : `流行語なしで調査候補を${made}件作りました。次は「Etsy公式確認を自動実行」です。`, 'ready')
 }
 
 function prepareForNewCandidateDiscovery() {
@@ -5443,7 +5503,7 @@ async function collectTrendScoutTerms() {
       generateCandidates()
       const made = state.candidates.length
       const message = made > 0
-        ? `候補作成は完了しました。外部サイトの自動取得は未接続ですが、入口ワード${searchSeedAdded}件と商品条件から調査候補を${made}件作りました。次は「eRankで検索数を見る」です。`
+        ? `候補作成は完了しました。外部サイトの自動取得は未接続ですが、入口ワード${searchSeedAdded}件と商品条件から調査候補を${made}件作りました。次は「Etsy公式確認を自動実行」です。`
         : `候補を作れませんでした。外部サイトの自動取得も使う場合は、実Chromeで開き、Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてください。Market Finderページは自動で再読み込みされます。`
       updateProgressModal({
         current: made > 0 ? '調査候補を反映' : '候補なし',
@@ -5489,7 +5549,7 @@ async function collectTrendScoutTerms() {
     let variant = 'ready'
     if (added > 0) {
       const note = errors.length > 0 ? ` 取得できなかったページ: ${errors.slice(0, 2).join(' / ')}` : ''
-      message = `完了しました。入口ワード${searchSeedAdded}件と外部の流行語${added}件を使い、調査候補を${state.candidates.length}件作りました。次は「eRankで検索数を見る」です。${note}`
+      message = `完了しました。入口ワード${searchSeedAdded}件と外部の流行語${added}件を使い、調査候補を${state.candidates.length}件作りました。次は「Etsy公式確認を自動実行」です。${note}`
     } else if (trends.length > 0 && state.candidates.length > 0) {
       message = `完了しました。入口ワード${searchSeedAdded}件と既存の流行語から調査候補を${state.candidates.length}件作りました。`
     } else if (errors.length > 0) {
@@ -6553,8 +6613,27 @@ function bindEvents() {
   elements.yearInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.limitInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.seedInput.addEventListener('input', () => resetCandidatesForInputChange())
-  elements.buyerIdentityInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.buyerIdentityInput.addEventListener('input', () => {
+    renderBuyerIdentitySuggestions()
+    resetCandidatesForInputChange()
+  })
   elements.buyerActionInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.buyerIdentityShuffleBtn?.addEventListener('click', () => {
+    state.buyerIdentitySuggestOffset += 1
+    renderBuyerIdentitySuggestions()
+    persistMarketFinderState()
+  })
+  elements.buyerIdentitySuggestions?.addEventListener('click', (event) => {
+    const phrase = event.target?.closest?.('[data-buyer-identity]')?.dataset?.buyerIdentity
+    if (!phrase) return
+    appendSeedLine(elements.buyerIdentityInput, phrase)
+    renderBuyerIdentitySuggestions()
+  })
+  elements.buyerContextSuggestions?.addEventListener('click', (event) => {
+    const phrase = event.target?.closest?.('[data-buyer-context]')?.dataset?.buyerContext
+    if (!phrase) return
+    appendSeedLine(elements.buyerActionInput, phrase)
+  })
   elements.trendScoutInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.riskInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.targetChips.addEventListener('change', () => resetCandidatesForInputChange())
@@ -6751,6 +6830,8 @@ function init() {
   const persisted = restorePersistedState()
   migrateLegacyResearchRounds()
   renderTargets({ selectedTargets: persisted?.form?.targets })
+  renderBuyerIdentitySuggestions()
+  renderBuyerContextSuggestions()
   bindEvents()
   setFlowMode(persisted?.flowMode ?? 'auto', { persist: false })
   syncResearchMarketHistory()

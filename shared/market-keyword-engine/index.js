@@ -1805,6 +1805,203 @@ export function generateKeywordCandidates(options = {}) {
     .slice(0, limit)
 }
 
+// Four of the eight axes are combination patterns the engine can apply to anything, but
+// Identity, Occupation, Hobby and Emotion-context are vocabulary: they only work when the
+// phrase is the one the group actually uses for itself. Requiring the operator to supply
+// that vocabulary from memory made the widest lane the hardest to enter, so the specific
+// terms live here. Specificity is the whole value — "nurse" is contested by every seller,
+// "dialysis nurse" is contested by almost none.
+export const BUYER_IDENTITY_LIBRARY = Object.freeze([
+  Object.freeze({
+    id: 'occupation-health',
+    axis: 'occupation',
+    label: '医療・ケア職',
+    note: '職種名を自分の呼び名として使う習慣が強く、同僚間の贈り物も多い領域です。',
+    phrases: Object.freeze([
+      'nicu nurse', 'er nurse', 'icu nurse', 'oncology nurse', 'dialysis nurse',
+      'labor and delivery nurse', 'travel nurse', 'school nurse', 'hospice nurse',
+      'psychiatric nurse', 'nurse practitioner', 'charge nurse', 'cna', 'phlebotomist',
+      'respiratory therapist', 'radiology tech', 'ultrasound tech', 'surgical tech',
+      'paramedic', 'emt', 'medical assistant', 'pharmacy tech', 'dental hygienist',
+      'dental assistant', 'sonographer', 'lab tech', 'caregiver',
+    ]),
+  }),
+  Object.freeze({
+    id: 'occupation-education',
+    axis: 'occupation',
+    label: '教育・学校',
+    note: '学年や担当科目まで下げるほど競合が薄くなります。学校スタッフも同じ市場です。',
+    phrases: Object.freeze([
+      'kindergarten teacher', 'preschool teacher', 'first grade teacher', 'second grade teacher',
+      'special education teacher', 'art teacher', 'music teacher', 'science teacher',
+      'math teacher', 'history teacher', 'esl teacher', 'reading interventionist',
+      'paraprofessional', 'substitute teacher', 'school counselor', 'school librarian',
+      'school psychologist', 'principal', 'school secretary', 'lunch lady',
+      'school bus driver', 'school custodian', 'daycare teacher', 'preschool director',
+    ]),
+  }),
+  Object.freeze({
+    id: 'occupation-therapy',
+    axis: 'occupation',
+    label: 'セラピー・福祉',
+    note: '有資格職で人数が多く、資格名がそのまま検索語になります。',
+    phrases: Object.freeze([
+      'speech therapist', 'occupational therapist', 'physical therapist',
+      'aba therapist', 'behavior technician', 'social worker', 'case manager',
+      'child life specialist', 'music therapist', 'recreation therapist',
+      'early interventionist', 'sign language interpreter',
+    ]),
+  }),
+  Object.freeze({
+    id: 'occupation-trades',
+    axis: 'occupation',
+    label: '現場・技能職',
+    note: '職人の自負が強く、家族からの贈り物需要があります。デザインは道具や現場の言い回しが効きます。',
+    phrases: Object.freeze([
+      'electrician', 'welder', 'plumber', 'hvac tech', 'lineman', 'diesel mechanic',
+      'truck driver', 'heavy equipment operator', 'crane operator', 'construction worker',
+      'firefighter', 'dispatcher', 'mail carrier', 'sanitation worker', 'farmer',
+      'rancher', 'beekeeper', 'arborist', 'surveyor', 'machinist', 'carpenter',
+    ]),
+  }),
+  Object.freeze({
+    id: 'occupation-service',
+    axis: 'occupation',
+    label: 'サービス・専門職',
+    note: '繁忙期（確定申告、繁忙シーズン）と結び付けると季節需要が乗ります。',
+    phrases: Object.freeze([
+      'hairstylist', 'nail tech', 'esthetician', 'massage therapist', 'lash tech',
+      'barista', 'baker', 'pastry chef', 'line cook', 'bartender', 'server',
+      'flight attendant', 'real estate agent', 'loan officer', 'accountant',
+      'tax preparer', 'insurance agent', 'photographer', 'wedding planner',
+      'veterinarian', 'vet tech', 'dog groomer', 'dog trainer', 'librarian',
+    ]),
+  }),
+  Object.freeze({
+    id: 'identity-family',
+    axis: 'identity',
+    label: '家族・立場',
+    note: '呼び名そのものが検索語です。mimi / nana / gigi のような愛称は別々の市場として存在します。',
+    phrases: Object.freeze([
+      'dog mom', 'cat mom', 'dog dad', 'cat dad', 'boy mom', 'girl mom', 'girl dad',
+      'boy dad', 'new mom', 'first time mom', 'twin mom', 'bonus dad', 'bonus mom',
+      'stepdad', 'foster mom', 'adoptive mom', 'homeschool mom', 'single mom',
+      'soccer mom', 'dance mom', 'baseball mom', 'football mom', 'swim mom',
+      'big brother', 'big sister', 'godmother', 'auntie', 'uncle',
+      'grandma', 'mimi', 'nana', 'gigi', 'mawmaw', 'oma', 'yaya', 'abuela',
+      'papa', 'pawpaw', 'grandpa', 'great grandma',
+    ]),
+  }),
+  Object.freeze({
+    id: 'identity-advocacy',
+    axis: 'identity',
+    label: '支え合い・当事者',
+    note: '当事者と家族の連帯を表す市場です。医療的な断定や治療をうたう表現は避け、応援の言葉に留めます。',
+    phrases: Object.freeze([
+      'autism mom', 'autism dad', 'nicu mom', 'nicu dad', 'preemie mom',
+      'heart mom', 'dementia caregiver', 'special needs mom', 'type 1 diabetes mom',
+      'foster parent', 'adoptive dad', 'breast cancer survivor', 'ostomy warrior',
+    ]),
+  }),
+  Object.freeze({
+    id: 'hobby-outdoor',
+    axis: 'hobby',
+    label: '屋外・アウトドア',
+    note: '道具名と行動が語彙になります。季節性が強く、シーズン前に仕込みます。',
+    phrases: Object.freeze([
+      'trail runner', 'marathon runner', 'ultra runner', 'triathlete', 'cyclist',
+      'mountain biker', 'gravel cyclist', 'rock climber', 'boulderer', 'backpacker',
+      'thru hiker', 'kayaker', 'paddleboarder', 'surfer', 'snowboarder', 'skier',
+      'camper', 'rv traveler', 'van lifer', 'overlander', 'angler', 'fly fisherman',
+      'bass fisherman', 'deer hunter', 'duck hunter', 'birder', 'geocacher',
+      'disc golfer', 'pickleball player', 'horse rider', 'sailor',
+    ]),
+  }),
+  Object.freeze({
+    id: 'hobby-craft',
+    axis: 'hobby',
+    label: 'ものづくり・手芸',
+    note: '手芸系は内輪の言い回しが濃く、当たると同じ層が繰り返し買います。',
+    phrases: Object.freeze([
+      'crocheter', 'knitter', 'quilter', 'cross stitcher', 'embroiderer', 'sewist',
+      'weaver', 'spinner', 'potter', 'woodworker', 'blacksmith', 'leather worker',
+      'candle maker', 'soap maker', 'resin artist', 'calligrapher', 'scrapbooker',
+      'model builder', 'miniature painter', 'bookbinder', 'stained glass artist',
+    ]),
+  }),
+  Object.freeze({
+    id: 'hobby-home',
+    axis: 'hobby',
+    label: '暮らし・室内',
+    note: '在宅時間の趣味は年間を通じて需要が安定します。',
+    phrases: Object.freeze([
+      'sourdough baker', 'home baker', 'canner', 'home barista', 'tea drinker',
+      'plant lady', 'houseplant collector', 'orchid grower', 'succulent collector',
+      'gardener', 'vegetable gardener', 'chicken keeper', 'aquarium keeper',
+      'book lover', 'romance reader', 'audiobook listener', 'puzzle lover',
+      'board gamer', 'crossword solver', 'thrifter', 'coin collector', 'record collector',
+      'yoga teacher', 'pilates instructor', 'powerlifter', 'run club member', 'masters swimmer',
+    ]),
+  }),
+])
+
+// Emotion-context is the eighth axis. It is not who the buyer is but the state they are in,
+// and on Etsy it surfaces as a small set of joiners the group already says out loud.
+export const BUYER_CONTEXT_PHRASES = Object.freeze([
+  'squad', 'crew', 'club', 'era', 'life', 'mode', 'off duty', 'in training',
+  'appreciation', 'strong', 'vibes', 'fueled by coffee', 'and coffee', 'burnout',
+])
+
+function identityLibraryGroups(axis = '') {
+  const wanted = normalizePhrase(axis)
+  if (!wanted) return BUYER_IDENTITY_LIBRARY
+  return BUYER_IDENTITY_LIBRARY.filter((group) => group.axis === wanted || group.id === wanted)
+}
+
+// Suggestions rotate round-robin across groups rather than walking one group to exhaustion,
+// so a single press shows medical, family and hobby options together. Picking a niche the
+// operator understands matters more than picking the highest-scoring one, and that judgement
+// is only possible when the choices on screen are from different worlds.
+export function suggestBuyerIdentities(options = {}) {
+  const groups = identityLibraryGroups(options.axis)
+  if (groups.length === 0) return []
+  const limit = Math.max(1, Math.min(Number(options.limit) || 12, 60))
+  const offset = Math.max(0, Math.trunc(Number(options.offset) || 0))
+  const excluded = new Set(splitSeedText(options.exclude).map((value) => normalizePhrase(value)).filter(Boolean))
+
+  const pools = groups.map((group) => ({
+    group,
+    phrases: group.phrases.filter((phrase) => !excluded.has(normalizePhrase(phrase))),
+  })).filter((pool) => pool.phrases.length > 0)
+  if (pools.length === 0) return []
+
+  const suggestions = []
+  const seen = new Set()
+  let round = 0
+  while (suggestions.length < limit && round < 200) {
+    let addedThisRound = 0
+    for (const pool of pools) {
+      if (suggestions.length >= limit) break
+      const phrase = pool.phrases[(offset + round) % pool.phrases.length]
+      const key = normalizePhrase(phrase)
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      suggestions.push({
+        phrase: key,
+        axis: pool.group.axis,
+        groupId: pool.group.id,
+        groupLabel: pool.group.label,
+        note: pool.group.note,
+      })
+      addedThisRound += 1
+    }
+    if (addedThisRound === 0) break
+    round += 1
+  }
+
+  return suggestions
+}
+
 // The eight-axis formula describes a person in a situation rather than a topic. Event
 // templates produce the same head terms every competitor's tool produces; naming who the
 // buyer is and what they are doing produces phrases only someone inside that world writes.
