@@ -1511,6 +1511,11 @@ button[data-optional]::before {
   color: var(--rose);
 }
 
+.pill.lever {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .score-chip {
   display: grid;
   gap: 2px;

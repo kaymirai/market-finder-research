@@ -11,6 +11,7 @@ import {
   buildKeywordClusterKey,
   buildSeoPlanFromBuckets,
   BUYER_IDENTITY_LIBRARY,
+  classifyBuyerIdentity,
   clusterKeywordCandidates,
   detectRiskTerms,
   suggestBuyerIdentities,
@@ -1229,6 +1230,65 @@ test('keeps the suggested vocabulary specific enough to be worth entering', () =
   // A suggestion carrying someone else's trademark would be a defect we shipped, not a
   // risk the operator chose to take.
   assert.equal(phrases.every((phrase) => detectRiskTerms(phrase, []).length === 0), true)
+})
+
+test('names the giver, because on Etsy the buyer is often not the wearer', () => {
+  const nurse = generateBuyerIntentCandidates({ identitySeeds: 'nicu nurse', categoryId: 'shirt', perIdentity: 40 })
+  const nurseKeywords = nurse.map((row) => row.keyword)
+  // A colleague buying for a nurse types something the nurse would never type.
+  assert.ok(nurseKeywords.includes('nicu nurse shirt from coworkers'))
+  assert.ok(nurseKeywords.includes('nicu nurse shirt from patients'))
+  assert.ok(nurseKeywords.includes('nicu nurse appreciation shirt'))
+
+  const teacher = generateBuyerIntentCandidates({ identitySeeds: 'kindergarten teacher', categoryId: 'shirt', perIdentity: 40 })
+  assert.ok(teacher.map((row) => row.keyword).includes('kindergarten teacher shirt from students'))
+
+  const mom = generateBuyerIntentCandidates({ identitySeeds: 'dog mom', categoryId: 'shirt', perIdentity: 40 })
+  const momKeywords = mom.map((row) => row.keyword)
+  assert.ok(momKeywords.includes('dog mom shirt from daughter'))
+  assert.ok(momKeywords.includes('dog mom shirt from the kids'))
+})
+
+test('keeps gift phrasing grammatical for the kind of identity it is attached to', () => {
+  assert.equal(classifyBuyerIdentity('nicu nurse').kind, 'occupation')
+  assert.equal(classifyBuyerIdentity('dog mom').kind, 'identity')
+  assert.equal(classifyBuyerIdentity('crocheter').kind, 'hobby')
+  // Not in the catalog, so shape has to carry it.
+  assert.equal(classifyBuyerIdentity('handbell choir member').kind, 'hobby')
+  assert.equal(classifyBuyerIdentity('my grandma').kind, 'identity')
+
+  const nurse = generateBuyerIntentCandidates({ identitySeeds: 'nicu nurse', categoryId: 'shirt', perIdentity: 40 })
+    .map((row) => row.keyword)
+  const mom = generateBuyerIntentCandidates({ identitySeeds: 'dog mom', categoryId: 'shirt', perIdentity: 40 })
+    .map((row) => row.keyword)
+
+  // "for my dog mom" is how people search; "for my nicu nurse" is not.
+  assert.ok(mom.includes('for my dog mom shirt'))
+  assert.equal(nurse.includes('for my nicu nurse shirt'), false)
+  // "nurse appreciation" is a real occasion; "dog mom appreciation" is not.
+  assert.equal(mom.some((keyword) => keyword.includes('appreciation')), false)
+  // A colleague giver makes no sense for a hobby, and a club does for an occupation.
+  const crocheter = generateBuyerIntentCandidates({ identitySeeds: 'crocheter', categoryId: 'shirt', perIdentity: 40 })
+    .map((keyword) => keyword.keyword)
+  assert.ok(crocheter.includes('crocheter shirt from the club'))
+  assert.equal(crocheter.includes('crocheter shirt from coworkers'), false)
+})
+
+test('marks the personalization price lever and the gift intent on every candidate', () => {
+  const rows = generateBuyerIntentCandidates({ identitySeeds: 'nicu nurse', categoryId: 'shirt', perIdentity: 40 })
+  const byKeyword = new Map(rows.map((row) => [row.keyword, row]))
+
+  assert.equal(byKeyword.get('personalized nicu nurse shirt').personalizable, true)
+  assert.equal(byKeyword.get('custom name nicu nurse shirt').personalizable, true)
+  assert.equal(byKeyword.get('retro nicu nurse shirt').personalizable, false)
+
+  assert.equal(byKeyword.get('gift for nicu nurse shirt').giftIntent, true)
+  assert.equal(byKeyword.get('nicu nurse shirt from patients').giftIntent, true)
+  assert.equal(byKeyword.get('retro nicu nurse shirt').giftIntent, false)
+
+  // Personalization is a price lever, so it must not be a rarity in the output.
+  assert.ok(rows.filter((row) => row.personalizable).length >= 4)
+  assert.ok(rows.filter((row) => row.giftIntent).length >= 4)
 })
 
 test('applies the same risk and structure gates as the event generator', () => {

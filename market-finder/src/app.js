@@ -32,7 +32,7 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260726-4'
+} from '../../shared/market-keyword-engine/index.js?v=20260726-5'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
@@ -2224,6 +2224,8 @@ function renderCandidates() {
             ${wearerIntentLabel(candidate.wearerIntent) ? `<span class="pill">${escapeHtml(wearerIntentLabel(candidate.wearerIntent))}</span>` : ''}
             <span class="pill market-track-pill is-${escapeHtml(candidate.intentTrack)}">${escapeHtml(trackLabel)}</span>
             ${candidate.previouslyResearchedElsewhere ? `<span class="pill review">別イベントで調査済み${priorEventLabels ? `: ${escapeHtml(priorEventLabels)}` : ''}</span>` : ''}
+            ${candidate.personalizable ? '<span class="pill lever" title="名入れ版を作れる候補です。名入れ商品は価格を比較されにくく、同じデザインでも単価を上げられます。">名入れ可</span>' : ''}
+            ${candidate.giftIntent ? '<span class="pill lever" title="買う人と着る人が違う語句です。贈る理由がある買い手は購入までが速く、価格にも比較的寛容です。">贈り物</span>' : ''}
             ${candidate.clusterSize > 1 ? `<span class="pill">同系統 ${candidate.clusterSize}語</span>` : ''}
             ${candidate.timing?.label && candidate.timing.label !== 'evergreen' ? `<span class="pill">時期 ${escapeHtml(candidate.timing.label)} / ${escapeHtml(candidate.timing.weeksUntil)}週</span>` : ''}
             ${candidate.sourceFreshness?.freshnessLabel === 'inspiration' || candidate.sourceFreshness?.freshnessLabel === 'expired' ? '<span class="pill review">古いデータ・発想用</span>' : ''}

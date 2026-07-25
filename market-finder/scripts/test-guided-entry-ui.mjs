@@ -708,6 +708,15 @@ test('asks who the buyer is before generating candidates and feeds it into gener
   assert.match(app, /\.\.\.buyerIntentCandidates\(\)/)
 })
 
+test('shows which candidates carry the personalization lever and the gift intent', () => {
+  assert.match(app, /candidate\.personalizable \? '<span class="pill lever"/)
+  assert.match(app, /candidate\.giftIntent \? '<span class="pill lever"/)
+  // The badge has to say why it matters, not just that it applies.
+  assert.match(app, /価格を比較されにくく/)
+  assert.match(app, /買う人と着る人が違う語句/)
+  assert.match(styles, /\.pill\.lever \{/)
+})
+
 test('offers the identity vocabulary as chips so the field is never blank', () => {
   // The suggestions must precede the field they fill, or they read as a result rather
   // than a starting point.
@@ -1175,5 +1184,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260726-4')
+  assert.equal(stylesheetVersion, '20260726-5')
 })

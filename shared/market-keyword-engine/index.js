@@ -2005,20 +2005,97 @@ export function suggestBuyerIdentities(options = {}) {
 // The eight-axis formula describes a person in a situation rather than a topic. Event
 // templates produce the same head terms every competitor's tool produces; naming who the
 // buyer is and what they are doing produces phrases only someone inside that world writes.
+// The relationship axis is deliberately empty: gift and giver phrasing now depends on what
+// kind of identity it is attached to, so it is built by BUYER_GIVER_PHRASES rather than
+// applied blindly here. The key stays so a caller can still force extra phrasings.
 export const BUYER_INTENT_AXES = Object.freeze({
   transition: ['retirement', 'first year', 'first season', 'new', 'graduation', 'promotion', 'anniversary'],
-  relationship: ['gift for', 'for my', 'from the team', 'from the crew'],
+  relationship: [],
   personalization: ['personalized', 'custom name', 'with name'],
   style: ['retro', 'vintage', 'minimalist', 'typographic', 'hand drawn'],
 })
 
+// Etsy is a gift-first marketplace: the person searching is frequently not the person who
+// will wear the result. A wearer types their own identity; a giver types their relationship
+// to the wearer, and arrives already holding a reason to buy today. Those are different
+// phrases, and only naming the giver produces the second kind.
+export const BUYER_GIVER_PHRASES = Object.freeze({
+  'occupation-health': ['from the team', 'from coworkers', 'from patients'],
+  'occupation-education': ['from students', 'from the class', 'from parents'],
+  'occupation-therapy': ['from the team', 'from families'],
+  occupation: ['from the team', 'from coworkers'],
+  identity: ['from daughter', 'from son', 'from the kids', 'from the grandkids'],
+  hobby: ['from the club', 'from the crew'],
+})
+
+// Phrasing is not interchangeable across kinds. "for my grandma" is how people search and
+// "for my nicu nurse" is not; "nurse appreciation" is a real occasion and "dog mom
+// appreciation" is not. Applying every pattern to every identity spends the candidate
+// budget on phrases nobody types.
+const BUYER_GIFT_SUFFIXES = Object.freeze({
+  occupation: ['appreciation'],
+  identity: [],
+  hobby: [],
+})
+
+// A bare "-er" ending splits evenly between work and pastime (welder, birder), so words that
+// mark someone as doing a thing by choice are checked before the occupation shapes.
+const IDENTITY_KIND_PATTERNS = Object.freeze([
+  [/\b(mom|mum|mama|dad|papa|mother|father|grandma|grandpa|granny|nana|mimi|gigi|oma|yaya|abuela|mawmaw|pawpaw|aunt|auntie|uncle|sister|brother|godmother|godfather|parent|wife|husband|fiance|fiancee|bride|groom|daughter|son)\b/, 'identity'],
+  [/\b(member|volunteer|lover|enthusiast|collector|hobbyist|player|rider|keeper|goer|obsessed|addict|club|squad)\b/, 'hobby'],
+  [/\b(nurse|teacher|therapist|worker|driver|tech|technician|assistant|doctor|officer|agent|chef|baker|barista|stylist|engineer|manager|counselor|librarian|principal|paramedic|emt|farmer|rancher|welder|electrician|plumber|machinist|carpenter|veterinarian|pharmacist|dentist|midwife|firefighter|dispatcher|interpreter|surveyor|arborist|specialist|practitioner|hygienist|esthetician|sonographer|phlebotomist|paraprofessional|cna)\b/, 'occupation'],
+  [/(?:ist|ian|or)$/, 'occupation'],
+])
+
+// The catalog already records which world a phrase came from, so a chosen suggestion carries
+// its kind for free. Typed identities fall back to shape, which is imperfect but only ever
+// costs a phrasing variant, never correctness of the identity itself.
+export function classifyBuyerIdentity(identity) {
+  const phrase = normalizePhrase(identity)
+  if (!phrase) return { kind: 'hobby', groupId: '' }
+
+  for (const group of BUYER_IDENTITY_LIBRARY) {
+    if (group.phrases.some((value) => normalizePhrase(value) === phrase)) {
+      return { kind: group.axis, groupId: group.id }
+    }
+  }
+  for (const [pattern, kind] of IDENTITY_KIND_PATTERNS) {
+    if (pattern.test(phrase)) return { kind, groupId: '' }
+  }
+  return { kind: 'hobby', groupId: '' }
+}
+
+function buyerGiverPhrases(kind, groupId, options = {}) {
+  const overrides = options.giverAxes ?? {}
+  const table = { ...BUYER_GIVER_PHRASES, ...overrides }
+  return table[groupId] ?? table[kind] ?? []
+}
+
 function buyerIntentPhrases(identity, product, options = {}) {
   const axes = { ...BUYER_INTENT_AXES, ...(options.axes ?? {}) }
   const actions = (options.actions ?? []).map(normalizePhrase).filter(Boolean)
+  const { kind, groupId } = classifyBuyerIdentity(identity)
   const phrases = [`${identity} ${product}`]
 
   for (const action of actions) {
     phrases.push(`${identity} ${action} ${product}`)
+  }
+  // Personalization is the reason a buyer chose Etsy over a general marketplace and it is
+  // the lever that lets the same design carry a higher price, so it leads rather than
+  // trailing the decorative variants.
+  for (const personalization of axes.personalization ?? []) {
+    phrases.push(`${personalization} ${identity} ${product}`)
+  }
+  for (const suffix of BUYER_GIFT_SUFFIXES[kind] ?? []) {
+    phrases.push(`${identity} ${suffix} ${product}`)
+    for (const personalization of axes.personalization ?? []) {
+      phrases.push(`${personalization} ${identity} ${suffix} ${product}`)
+    }
+  }
+  phrases.push(`gift for ${identity} ${product}`)
+  if (kind === 'identity') phrases.push(`for my ${identity} ${product}`)
+  for (const giver of buyerGiverPhrases(kind, groupId, options)) {
+    phrases.push(`${identity} ${product} ${giver}`)
   }
   for (const transition of axes.transition ?? []) {
     phrases.push(`${transition} ${identity} ${product}`)
@@ -2026,15 +2103,15 @@ function buyerIntentPhrases(identity, product, options = {}) {
   for (const relationship of axes.relationship ?? []) {
     phrases.push(`${relationship} ${identity} ${product}`)
   }
-  for (const personalization of axes.personalization ?? []) {
-    phrases.push(`${personalization} ${identity} ${product}`)
-  }
   for (const style of axes.style ?? []) {
     phrases.push(`${style} ${identity} ${product}`)
   }
 
   return phrases
 }
+
+const PERSONALIZATION_PATTERN = /\b(personalized|personalised|custom|custom name|with name|monogram|monogrammed|name)\b/
+const GIFT_INTENT_PATTERN = /\b(gift|gifts|appreciation|from daughter|from son|from the kids|from the grandkids|from the team|from coworkers|from students|from patients|from parents|from families|from the class|from the club|from the crew|for my|thank you)\b/
 
 // Identity comes from the user because only they know how that group names itself. The
 // engine supplies the combination patterns, not the vocabulary of the niche.
@@ -2078,6 +2155,9 @@ export function generateBuyerIntentCandidates(options = {}) {
         discoveryLane: 'audience',
         queryStrategy: 'buyer-intent',
         buyerIntentIdentity: identity,
+        buyerIntentKind: classifyBuyerIdentity(identity).kind,
+        personalizable: PERSONALIZATION_PATTERN.test(keyword),
+        giftIntent: GIFT_INTENT_PATTERN.test(keyword),
       }
     })
     .sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, 'en'))
