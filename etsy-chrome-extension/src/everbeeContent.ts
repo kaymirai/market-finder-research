@@ -36,7 +36,12 @@
         listingAgeMonths: number | null
         price: number
         shopName: string
+        reviews: number | null
     }
+
+    // EverBee has renamed this column before, and a listing with no reviews is still a
+    // usable row, so reviews are read from any of these and never gate the row.
+    const REVIEW_FIELD_KEYS = ['reviews', 'totalReviews', 'reviewCount', 'numReviews', 'reviewsCount']
 
     type EditableSearchField = HTMLInputElement | HTMLTextAreaElement | HTMLElement
 
@@ -327,6 +332,8 @@
                     return null
                 }
 
+                const reviewField = REVIEW_FIELD_KEYS.find((key) => row.fields[key] !== undefined)
+
                 return {
                     listingId: row.listingId,
                     title,
@@ -337,6 +344,7 @@
                     listingAgeMonths: parseAgeMonths(listingAge),
                     price,
                     shopName: normalizeText(row.fields.shopName ?? ''),
+                    reviews: reviewField ? parseDisplayNumber(row.fields[reviewField]) : null,
                     rowIndex: row.rowIndex,
                 }
             })

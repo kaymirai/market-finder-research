@@ -29,7 +29,7 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260722-1'
+} from '../../shared/market-keyword-engine/index.js?v=20260725-1'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
@@ -2159,11 +2159,26 @@ function scoreReasonLabels(score) {
   else if (score.normalized.everbeeCompetitionBand === 'saturated') reasons.push('EverBee競合過密')
   else if (score.normalized.everbeeCompetitionBand !== 'unknown') reasons.push(`EverBee競合 ${score.normalized.listingsAnalyzed}件`)
   else if (score.gateReasons.includes('competition-unverified')) reasons.push('競合未取得')
+  // Whether a new shop can beat the reviews already on the page outranks the softer
+  // signals below it, so it is placed next to competition rather than appended last.
+  reasons.push(newcomerAccessLabel(score.normalized))
   if (!score.gateReasons.includes('sales-breadth')) reasons.push('複数商品で販売')
   if (!score.gateReasons.includes('sales-concentration')) reasons.push('単一商品への集中なし')
   if (!score.gateReasons.includes('freshness')) reasons.push('有効期限内のデータ')
   if (score.riskTerms.length > 0) reasons.push('要リスク確認')
-  return reasons.slice(0, 5)
+  return reasons.filter(Boolean).slice(0, 6)
+}
+
+// New shops compete against the reviews already on the page, so this is reported next to
+// demand rather than buried in the raw numbers.
+function newcomerAccessLabel(normalized = {}) {
+  if (!normalized.hasReviewData) return ''
+  const median = normalized.medianSellerReviews
+  const share = normalized.lowReviewSellerShare ?? 0
+  if (median === null) return ''
+  if (median <= 50 || share >= 0.5) return `新規でも入りやすい（上位レビュー中央値${median}）`
+  if (median <= 200) return `レビュー差はあるが狙える（中央値${median}）`
+  return `上位のレビューが厚い（中央値${median}）`
 }
 
 function opportunityScoreClass(score) {
@@ -5037,6 +5052,9 @@ function exportResultRowsCsv(rows, fileBaseName) {
     'Total Visible Monthly Sales',
     'Top Sales Share',
     'Median Listing Age Months',
+    'Median Seller Reviews',
+    'Low Review Sellers',
+    'Low Review Seller Share',
     'Etsy Searches 30d',
     'Etsy Listings',
     'Etsy Related Terms',
@@ -5109,6 +5127,9 @@ function exportResultRowsCsv(rows, fileBaseName) {
       evidenceCsvValue(normalized.totalVisibleMonthlySales, Boolean(normalized.everbeeCheckedAt)),
       evidenceCsvValue(normalized.topSalesShare, Boolean(normalized.everbeeCheckedAt)),
       evidenceCsvValue(normalized.medianListingAgeMonths, Boolean(normalized.everbeeCheckedAt)),
+      normalized.medianSellerReviews ?? '',
+      normalized.lowReviewSellerCount ?? '',
+      normalized.lowReviewSellerShare ?? '',
       evidenceCsvValue(normalized.etsySearches30d, Boolean(normalized.etsyCheckedAt)),
       evidenceCsvValue(normalized.etsyListings, Boolean(normalized.etsyCheckedAt)),
       (normalized.etsyRelatedTerms ?? []).join(', '),

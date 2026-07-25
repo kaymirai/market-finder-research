@@ -162,6 +162,7 @@ function everbeeGridDocument(rows) {
         makeCell('listingAge', row.listingAge),
         makeCell('price', row.price),
         makeCell('shopName', row.shopName),
+        ...(row.reviews === undefined ? [] : [makeCell(row.reviewField ?? 'reviews', row.reviews)]),
       ]),
     ]
   })
@@ -226,6 +227,7 @@ test('joins EverBee product and metric rows by data-id and sorts by monthly sale
       listingAgeMonths: 31,
       price: 20,
       shopName: 'OldShop',
+      reviews: null,
     },
     {
       listingId: 'listing-a',
@@ -237,8 +239,72 @@ test('joins EverBee product and metric rows by data-id and sorts by monthly sale
       listingAgeMonths: 6,
       price: 30,
       shopName: 'FreshShop',
+      reviews: null,
     },
   ])
+})
+
+test('reads seller review counts without dropping rows that have none', () => {
+  const hooks = {}
+  const document = everbeeGridDocument([
+    {
+      id: 'listing-a',
+      index: 0,
+      title: 'Reviewed Shirt',
+      totalSales: '140',
+      monthlySales: '42',
+      revenue: '$1,260',
+      listingAge: '6 Mo.',
+      price: '$30.00',
+      shopName: 'FreshShop',
+      reviews: '1,204',
+    },
+    {
+      id: 'listing-b',
+      index: 1,
+      title: 'Renamed Column Shirt',
+      totalSales: '90',
+      monthlySales: '20',
+      revenue: '$400',
+      listingAge: '4 Mo.',
+      price: '$20.00',
+      shopName: 'OtherShop',
+      reviews: '17',
+      reviewField: 'totalReviews',
+    },
+    {
+      id: 'listing-c',
+      index: 2,
+      title: 'No Review Column Shirt',
+      totalSales: '50',
+      monthlySales: '10',
+      revenue: '$200',
+      listingAge: '3 Mo.',
+      price: '$20.00',
+      shopName: 'ThirdShop',
+    },
+  ])
+
+  runInNewContext(everbeeSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    document,
+    location: { href: 'https://app.everbee.io/product-analytics', pathname: '/product-analytics' },
+    setTimeout,
+    URL,
+    window: { setTimeout },
+  })
+
+  const byId = new Map(hooks.extractEverbeeProductRows().map((row) => [row.listingId, row]))
+
+  assert.equal(byId.get('listing-a').reviews, 1204)
+  // EverBee has renamed this column before, so an alias must still be read.
+  assert.equal(byId.get('listing-b').reviews, 17)
+  // A listing with no review column is still a usable row.
+  assert.equal(byId.get('listing-c').reviews, null)
+  assert.equal(byId.size, 3)
 })
 
 test('reloads open Market Finder and research tabs when an unpacked extension is reloaded', () => {

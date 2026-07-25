@@ -11,6 +11,9 @@ var __rest = (this && this.__rest) || function (s, e) {
     return t;
 };
 (() => {
+    // EverBee has renamed this column before, and a listing with no reviews is still a
+    // usable row, so reviews are read from any of these and never gate the row.
+    const REVIEW_FIELD_KEYS = ['reviews', 'totalReviews', 'reviewCount', 'numReviews', 'reviewsCount'];
     const SEARCH_SELECTORS = [
         'input[type="search"]',
         'input[placeholder*="search" i]',
@@ -263,6 +266,7 @@ var __rest = (this && this.__rest) || function (s, e) {
             if (!title || totalSales === null || monthlySales === null || monthlyRevenue === null || !isAgeCell(listingAge) || price === null) {
                 return null;
             }
+            const reviewField = REVIEW_FIELD_KEYS.find((key) => row.fields[key] !== undefined);
             return {
                 listingId: row.listingId,
                 title,
@@ -273,6 +277,7 @@ var __rest = (this && this.__rest) || function (s, e) {
                 listingAgeMonths: parseAgeMonths(listingAge),
                 price,
                 shopName: normalizeText((_c = row.fields.shopName) !== null && _c !== void 0 ? _c : ''),
+                reviews: reviewField ? parseDisplayNumber(row.fields[reviewField]) : null,
                 rowIndex: row.rowIndex,
             };
         })

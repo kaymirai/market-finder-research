@@ -2626,6 +2626,41 @@ function medianNumber(values = []) {
     : sorted[middle]
 }
 
+export const LOW_REVIEW_THRESHOLD = 50
+
+// A new shop competes against the reviews already on the page, not against the search
+// volume. Where the sellers on top carry hundreds of reviews, demand does not help.
+export function newcomerAccess(row = {}) {
+  const productRows = Array.isArray(row.productRows) ? row.productRows : []
+  const selling = productRows
+    .map((product) => ({
+      monthlySales: parseNumber(product?.monthlySales ?? product?.sales) ?? 0,
+      reviews: parseNumber(product?.reviews),
+    }))
+    .filter((product) => product.monthlySales > 0)
+  const reviewCounts = selling
+    .map((product) => product.reviews)
+    .filter((value) => value !== null)
+
+  if (reviewCounts.length === 0) {
+    return {
+      medianSellerReviews: null,
+      lowReviewSellerCount: null,
+      lowReviewSellerShare: null,
+      hasReviewData: false,
+    }
+  }
+
+  const lowReviewSellerCount = reviewCounts.filter((value) => value < LOW_REVIEW_THRESHOLD).length
+
+  return {
+    medianSellerReviews: medianNumber(reviewCounts),
+    lowReviewSellerCount,
+    lowReviewSellerShare: Math.round((lowReviewSellerCount / reviewCounts.length) * 100) / 100,
+    hasReviewData: true,
+  }
+}
+
 function crossNicheSalesEvidence(row = {}) {
   const productRows = Array.isArray(row.productRows) ? row.productRows : []
   const products = productRows
@@ -3571,6 +3606,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       totalVisibleMonthlySales,
       topSalesShare,
       medianListingAgeMonths,
+      ...newcomerAccess(row),
       erankSearchVolume,
       erankClicks,
       erankCtr,
