@@ -13,7 +13,8 @@
         '[role="combobox"] input',
         '[contenteditable="true"]',
     ];
-    const SEARCH_BUTTON_WORDS = ['search', 'lookup', 'submit', 'go', 'find', 'analyze'];
+    const SEARCH_BUTTON_WORDS = ['search', 'lookup', 'submit', 'find', 'analyze'];
+    const SEARCH_BUTTON_NEGATIVE_WORDS = ['dashboard', 'upgrade', 'account', 'log out', 'logout', 'menu', 'close', 'cancel'];
     const ERANK_METRICS_READY_TIMEOUT_MS = 300000;
     const ERANK_METRIC_HEARTBEAT_MS = 2000;
     const ERANK_KD_GRACE_AFTER_COMPETITION_MS = 8000;
@@ -21,6 +22,37 @@
     let erankRunActive = false;
     function wait(ms) {
         return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+    let lastFocusRequestAt = 0;
+    // Chrome clamps timers and skips lazy rendering in hidden tabs, so eRank's Competition
+    // and KD columns may never arrive while the tab sits in the background. Ask the
+    // background to bring it forward, throttled so it cannot fight the user for focus.
+    function requestTabFocusIfHidden() {
+        if (document.visibilityState !== 'hidden')
+            return false;
+        const now = Date.now();
+        if (now - lastFocusRequestAt < 5000)
+            return true;
+        lastFocusRequestAt = now;
+        try {
+            chrome.runtime.sendMessage({ action: 'REQUEST_RESEARCH_TAB_FOCUS' });
+        }
+        catch (_a) {
+            // The background may be restarting; the next poll retries.
+        }
+        return true;
+    }
+    // Time spent hidden is not time the page had a chance to render, so it must not count
+    // towards a timeout or a keyword gets failed for being backgrounded.
+    async function waitVisible(ms) {
+        await wait(ms);
+        let hiddenFor = 0;
+        while (document.visibilityState === 'hidden') {
+            requestTabFocusIfHidden();
+            await wait(500);
+            hiddenFor += 500;
+        }
+        return hiddenFor;
     }
     function waitForMetricDomChange() {
         return new Promise((resolve) => {
@@ -172,26 +204,54 @@
         const fields = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], [role="searchbox"]'));
         return (_a = fields.find((element) => elementLooksSearchable(element))) !== null && _a !== void 0 ? _a : null;
     }
-    async function submitSearch(field) {
+    // eRank's keyword field is not inside a form, so a page-wide text match picks up
+    // unrelated navigation ("Go to Dashboard"). Only a button sitting near the field is a
+    // plausible submit control.
+    function findSubmitButtonNear(field) {
         const form = field.closest('form');
         const formButton = form === null || form === void 0 ? void 0 : form.querySelector('button[type="submit"], input[type="submit"]');
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]'));
-        const button = buttons.find((item) => {
-            var _a, _b, _c;
-            const text = `${(_a = item.innerText) !== null && _a !== void 0 ? _a : ''} ${(_b = item.value) !== null && _b !== void 0 ? _b : ''} ${(_c = item.getAttribute('aria-label')) !== null && _c !== void 0 ? _c : ''}`.toLowerCase();
-            return SEARCH_BUTTON_WORDS.some((word) => text.includes(word));
-        });
-        field.focus();
-        // One submit per keyword: pressing Enter and then clicking the button fired the
-        // search twice, which spent two of the daily eRank lookups and delayed the result.
-        const submitButton = formButton !== null && formButton !== void 0 ? formButton : button;
-        if (submitButton) {
-            submitButton.click();
-            return;
+        if (formButton)
+            return formButton;
+        let scope = field.parentElement;
+        for (let depth = 0; depth < 4 && scope; depth += 1) {
+            const candidates = Array.from(scope.querySelectorAll('button, [role="button"], input[type="submit"]'));
+            const match = candidates.find((item) => {
+                var _a, _b, _c;
+                const text = `${(_a = item.innerText) !== null && _a !== void 0 ? _a : ''} ${(_b = item.value) !== null && _b !== void 0 ? _b : ''} ${(_c = item.getAttribute('aria-label')) !== null && _c !== void 0 ? _c : ''}`.toLowerCase();
+                if (SEARCH_BUTTON_NEGATIVE_WORDS.some((word) => text.includes(word)))
+                    return false;
+                return SEARCH_BUTTON_WORDS.some((word) => text.includes(word)) || text.trim() === '';
+            });
+            if (match)
+                return match;
+            scope = scope.parentElement;
         }
+        return null;
+    }
+    function searchLooksStarted(before) {
+        if (document.querySelector('[role="progressbar"], .p-progress-spinner'))
+            return true;
+        return normalizeText(document.body.innerText || '') !== before;
+    }
+    // Enter is what eRank actually responds to. The button is only a fallback, and it is
+    // clicked only when Enter did nothing, so a keyword never spends two daily lookups.
+    async function submitSearch(field) {
+        const before = normalizeText(document.body.innerText || '');
+        field.focus();
         field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
         field.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', bubbles: true }));
         field.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+        await wait(1200);
+        if (searchLooksStarted(before))
+            return;
+        const button = findSubmitButtonNear(field);
+        if (button) {
+            button.click();
+            return;
+        }
+        const submitEvent = field.closest('form');
+        if (submitEvent)
+            submitEvent.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     }
     // The previous keyword's numbers stay on screen until the new ones arrive, so results
     // only count once the page differs from what was showing when the search was sent.
@@ -199,8 +259,9 @@
         const startedAt = Date.now();
         let lastText = '';
         let stableCount = 0;
-        while (Date.now() - startedAt < 18000) {
-            await wait(450);
+        let hiddenMs = 0;
+        while (Date.now() - startedAt - hiddenMs < 18000) {
+            hiddenMs += await waitVisible(450);
             throwIfDailyLookupLimitReached();
             const text = normalizeText(document.body.innerText || '');
             if (pageHasNoDataMessage())
@@ -303,8 +364,11 @@
         let lastText = '';
         let stableCount = 0;
         let competitionReadyAt = null;
-        while (Date.now() - startedAt < ERANK_METRICS_READY_TIMEOUT_MS) {
+        let hiddenMs = 0;
+        while (Date.now() - startedAt - hiddenMs < ERANK_METRICS_READY_TIMEOUT_MS) {
             await waitForMetricDomChange();
+            // Lazy columns do not render in a hidden tab, so waiting there proves nothing.
+            hiddenMs += await waitVisible(0);
             if (pageHasNoDataMessage())
                 return;
             const snapshot = keywordIdeasMetricSnapshot(keyword);

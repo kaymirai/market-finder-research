@@ -29,9 +29,38 @@ test('waits for slow eRank metric columns before timing out the keyword', () => 
   const metricWait = Number(erankContentTypeScriptSource.match(/ERANK_METRICS_READY_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
   const keywordWait = Number(backgroundTypeScriptSource.match(/MARKET_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
 
+  const erankKeywordWait = Number(backgroundTypeScriptSource.match(/ERANK_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
+
   assert.ok(metricWait >= 180000, `expected metric wait >= 180000ms, received ${metricWait}`)
   assert.ok(keywordWait >= metricWait + 30000, `expected outer timeout to exceed metric wait, received ${keywordWait}`)
-  assert.match(erankContentTypeScriptSource, /Date\.now\(\) - startedAt < ERANK_METRICS_READY_TIMEOUT_MS/)
+  // A keyword whose metrics never render must not hold the queue for the full inner wait,
+  // but the outer bound still has to outlast the inner one or the two overlap on the tab.
+  assert.ok(
+    erankKeywordWait >= metricWait + 30000,
+    `expected eRank outer timeout to exceed metric wait, received ${erankKeywordWait}`,
+  )
+  assert.match(erankContentTypeScriptSource, /startedAt - hiddenMs < ERANK_METRICS_READY_TIMEOUT_MS/)
+})
+
+test('does not spend the metric wait while the research tab is hidden', () => {
+  // Chrome clamps timers and skips lazy rendering in hidden tabs, so time spent there is
+  // not time the page had a chance to load.
+  assert.match(erankContentTypeScriptSource, /function waitVisible/)
+  assert.match(erankContentTypeScriptSource, /document\.visibilityState === 'hidden'/)
+  assert.match(erankContentTypeScriptSource, /REQUEST_RESEARCH_TAB_FOCUS/)
+  assert.match(backgroundTypeScriptSource, /request\.action === 'REQUEST_RESEARCH_TAB_FOCUS'/)
+})
+
+test('submits the eRank search with Enter and only falls back to a nearby button', () => {
+  const submit = erankContentTypeScriptSource.match(/async function submitSearch[\s\S]*?\n    \}/)?.[0] ?? ''
+
+  // eRank's field is not in a form, so a page-wide text match hits "Go to Dashboard".
+  assert.match(erankContentTypeScriptSource, /SEARCH_BUTTON_NEGATIVE_WORDS/)
+  assert.match(erankContentTypeScriptSource, /dashboard/)
+  assert.match(erankContentTypeScriptSource, /function findSubmitButtonNear/)
+  assert.match(submit, /KeyboardEvent\('keydown', \{ key: 'Enter'/)
+  assert.match(submit, /searchLooksStarted/)
+  assert.doesNotMatch(erankContentTypeScriptSource, /SEARCH_BUTTON_WORDS = \[[^\]]*'go'/)
 })
 
 test('finishes stable eRank rows whose demand metrics are explicitly unavailable', () => {

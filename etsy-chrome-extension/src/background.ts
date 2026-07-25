@@ -125,6 +125,7 @@
     let marketTimerId: ReturnType<typeof setTimeout> | null = null
     let marketRunId = 0
     const MARKET_KEYWORD_TIMEOUT_MS = 360000
+    const ERANK_KEYWORD_TIMEOUT_MS = 330000
     const ERANK_DAILY_LOOKUP_LIMIT_ERROR = 'ERANK_DAILY_LOOKUP_LIMIT_REACHED: eRankの1日あたりの検索上限に達しました。翌日のリセット後に再開してください（Basic 100件/日、Pro 200件/日）。'
 
     const trendSourceConfigs: Record<TrendSourceId, TrendSourceConfig> = {
@@ -298,6 +299,17 @@
         if (request.action === 'STOP_MARKET_RESEARCH') {
             stopMarketResearch()
             sendResponse({ stopped: true, state: getMarketState() })
+            return true
+        }
+
+        if (request.action === 'REQUEST_RESEARCH_TAB_FOCUS') {
+            // A hidden tab gets its timers clamped and its lazy columns never render, so
+            // the content script asks to be brought forward rather than stalling silently.
+            const senderTabId = sender.tab?.id
+            if (marketActive && senderTabId !== undefined) {
+                activateTab(senderTabId).catch(() => undefined)
+            }
+            sendResponse({ ok: true })
             return true
         }
 
@@ -1429,7 +1441,13 @@
             let response: ErankTabResponse | EverbeeTabResponse
             if (marketMode === 'erank') {
                 const tabId = await ensureErankTab()
-                response = await runKeywordInErankTab(tabId, keyword)
+                // Without a bound here a keyword whose metrics never render holds the whole
+                // queue for the content script's full internal wait.
+                response = await withTimeout(
+                    runKeywordInErankTab(tabId, keyword),
+                    ERANK_KEYWORD_TIMEOUT_MS,
+                    `eRank timed out for "${keyword}". Skipped this keyword.`
+                )
             } else {
                 response = await withTimeout(
                     runEverbeeKeyword(keyword),
