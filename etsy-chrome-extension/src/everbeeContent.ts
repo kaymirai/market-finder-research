@@ -294,12 +294,13 @@
         price: number
     }
 
-    function extractEverbeeProductRows(): EverbeeProductRow[] {
-        const rowsById = new Map<string, {
-            listingId: string
-            rowIndex: number
-            fields: Record<string, string>
-        }>()
+    type HarvestedRow = {
+        listingId: string
+        rowIndex: number
+        fields: Record<string, string>
+    }
+
+    function harvestVisibleCells(rowsById: Map<string, HarvestedRow>) {
         const visibleRows = Array.from(document.querySelectorAll('[role="row"][data-id]')) as HTMLElement[]
 
         for (const row of visibleRows) {
@@ -319,7 +320,32 @@
             }
             rowsById.set(listingId, current)
         }
+    }
 
+    // EverBee's grid virtualises columns: anything right of the viewport is not in the DOM,
+    // and scrolling back removes it again. Cells are therefore harvested during the sweep
+    // rather than read once at the end.
+    async function collectEverbeeRowFields(): Promise<Map<string, HarvestedRow>> {
+        const rowsById = new Map<string, HarvestedRow>()
+        harvestVisibleCells(rowsById)
+
+        const scroller = document.querySelector('.MuiDataGrid-virtualScroller') as HTMLElement | null
+        if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return rowsById
+
+        const originalLeft = scroller.scrollLeft
+        for (let offset = 0; offset <= scroller.scrollWidth; offset += 400) {
+            scroller.scrollLeft = offset
+            await wait(200)
+            harvestVisibleCells(rowsById)
+        }
+        scroller.scrollLeft = originalLeft
+        await wait(250)
+        harvestVisibleCells(rowsById)
+
+        return rowsById
+    }
+
+    function buildEverbeeProductRows(rowsById: Map<string, HarvestedRow>): EverbeeProductRow[] {
         return Array.from(rowsById.values())
             .map((row) => {
                 const title = normalizeText(row.fields.product ?? '')
@@ -355,6 +381,16 @@
                 || a.rowIndex - b.rowIndex)
             .slice(0, 24)
             .map(({ rowIndex: _rowIndex, ...row }) => row)
+    }
+
+    function extractEverbeeProductRows(): EverbeeProductRow[] {
+        const rowsById = new Map<string, HarvestedRow>()
+        harvestVisibleCells(rowsById)
+        return buildEverbeeProductRows(rowsById)
+    }
+
+    async function extractEverbeeProductRowsWithHiddenColumns(): Promise<EverbeeProductRow[]> {
+        return buildEverbeeProductRows(await collectEverbeeRowFields())
     }
 
     function parseAgeMonths(value: string) {
@@ -597,10 +633,10 @@
         return snippets
     }
 
-    function extractMetrics(keyword: string): EverbeeResult {
+    async function extractMetrics(keyword: string): Promise<EverbeeResult> {
         const rawBodyText = document.body.innerText || ''
         const bodyText = normalizeText(rawBodyText)
-        const productRows = extractEverbeeProductRows()
+        const productRows = await extractEverbeeProductRowsWithHiddenColumns()
         const visibleTableMetrics = productRows.length > 0
             ? summarizeVisibleProductAnalyticsRows(productRows.map((row) => ({
                 totalSales: row.totalSales,
@@ -648,7 +684,7 @@
         const currentSearchTerm = new URL(location.href).searchParams.get('search_term') ?? ''
         if (location.pathname.includes('/product-analytics') && currentSearchTerm.trim()) {
             await wait(2500)
-            return extractMetrics(keyword)
+            return await extractMetrics(keyword)
         }
 
         const field = findSearchField()
@@ -662,13 +698,14 @@
 
         await wait(4500)
         await waitForLikelyResults(keyword)
-        return extractMetrics(keyword)
+        return await extractMetrics(keyword)
     }
 
     const testHooks = (globalThis as typeof globalThis & {
         __ETSY_MIRAI_TEST_HOOKS__?: Record<string, unknown>
     }).__ETSY_MIRAI_TEST_HOOKS__
     if (testHooks) testHooks.extractEverbeeProductRows = extractEverbeeProductRows
+    if (testHooks) testHooks.extractEverbeeProductRowsWithHiddenColumns = extractEverbeeProductRowsWithHiddenColumns
 
     chrome.runtime.onMessage.addListener((request: EverbeeRunRequest, _sender, sendResponse) => {
         if (request.action !== 'EVERBEE_RUN_KEYWORD') return false

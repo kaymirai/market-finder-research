@@ -232,9 +232,8 @@ var __rest = (this && this.__rest) || function (s, e) {
     function isPercentCell(value) {
         return /^[-+]?\d[\d,.]*%$/.test(value);
     }
-    function extractEverbeeProductRows() {
+    function harvestVisibleCells(rowsById) {
         var _a, _b, _c, _d;
-        const rowsById = new Map();
         const visibleRows = Array.from(document.querySelectorAll('[role="row"][data-id]'));
         for (const row of visibleRows) {
             const listingId = normalizeText((_a = row.getAttribute('data-id')) !== null && _a !== void 0 ? _a : '');
@@ -254,6 +253,28 @@ var __rest = (this && this.__rest) || function (s, e) {
             }
             rowsById.set(listingId, current);
         }
+    }
+    // EverBee's grid virtualises columns: anything right of the viewport is not in the DOM,
+    // and scrolling back removes it again. Cells are therefore harvested during the sweep
+    // rather than read once at the end.
+    async function collectEverbeeRowFields() {
+        const rowsById = new Map();
+        harvestVisibleCells(rowsById);
+        const scroller = document.querySelector('.MuiDataGrid-virtualScroller');
+        if (!scroller || scroller.scrollWidth <= scroller.clientWidth)
+            return rowsById;
+        const originalLeft = scroller.scrollLeft;
+        for (let offset = 0; offset <= scroller.scrollWidth; offset += 400) {
+            scroller.scrollLeft = offset;
+            await wait(200);
+            harvestVisibleCells(rowsById);
+        }
+        scroller.scrollLeft = originalLeft;
+        await wait(250);
+        harvestVisibleCells(rowsById);
+        return rowsById;
+    }
+    function buildEverbeeProductRows(rowsById) {
         return Array.from(rowsById.values())
             .map((row) => {
             var _a, _b, _c;
@@ -291,6 +312,14 @@ var __rest = (this && this.__rest) || function (s, e) {
             var { rowIndex: _rowIndex } = _a, row = __rest(_a, ["rowIndex"]);
             return row;
         });
+    }
+    function extractEverbeeProductRows() {
+        const rowsById = new Map();
+        harvestVisibleCells(rowsById);
+        return buildEverbeeProductRows(rowsById);
+    }
+    async function extractEverbeeProductRowsWithHiddenColumns() {
+        return buildEverbeeProductRows(await collectEverbeeRowFields());
     }
     function parseAgeMonths(value) {
         const numberMatch = value.match(/\d+(?:\.\d+)?/);
@@ -525,10 +554,10 @@ var __rest = (this && this.__rest) || function (s, e) {
         }
         return snippets;
     }
-    function extractMetrics(keyword) {
+    async function extractMetrics(keyword) {
         const rawBodyText = document.body.innerText || '';
         const bodyText = normalizeText(rawBodyText);
-        const productRows = extractEverbeeProductRows();
+        const productRows = await extractEverbeeProductRowsWithHiddenColumns();
         const visibleTableMetrics = productRows.length > 0
             ? summarizeVisibleProductAnalyticsRows(productRows.map((row) => ({
                 totalSales: row.totalSales,
@@ -574,7 +603,7 @@ var __rest = (this && this.__rest) || function (s, e) {
         const currentSearchTerm = (_a = new URL(location.href).searchParams.get('search_term')) !== null && _a !== void 0 ? _a : '';
         if (location.pathname.includes('/product-analytics') && currentSearchTerm.trim()) {
             await wait(2500);
-            return extractMetrics(keyword);
+            return await extractMetrics(keyword);
         }
         const field = findSearchField();
         if (!field)
@@ -586,11 +615,13 @@ var __rest = (this && this.__rest) || function (s, e) {
         await submitSearch(field);
         await wait(4500);
         await waitForLikelyResults(keyword);
-        return extractMetrics(keyword);
+        return await extractMetrics(keyword);
     }
     const testHooks = globalThis.__ETSY_MIRAI_TEST_HOOKS__;
     if (testHooks)
         testHooks.extractEverbeeProductRows = extractEverbeeProductRows;
+    if (testHooks)
+        testHooks.extractEverbeeProductRowsWithHiddenColumns = extractEverbeeProductRowsWithHiddenColumns;
     chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         if (request.action !== 'EVERBEE_RUN_KEYWORD')
             return false;
