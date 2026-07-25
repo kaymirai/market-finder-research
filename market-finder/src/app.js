@@ -47,9 +47,10 @@ import {
 } from './cross-niche-workflow.js?v=20260720-1'
 import {
   attachErankQueryProvenance,
+  buildErankBaseFollowUpPlan,
   buildErankQueryPlan,
   summarizeErankQueryPlan,
-} from './erank-query-plan.js?v=20260722-1'
+} from './erank-query-plan.js?v=20260725-4'
 import {
   createResearchRoundsState,
   researchRowsForRound,
@@ -1365,6 +1366,39 @@ function buildCurrentErankQueryPlan(candidates = state.candidates, options = {})
   })
 }
 
+function searchedErankQueries() {
+  return state.researchRows
+    .filter((row) => rowHasErankInput(row) || row.erankCheckedAt || row.erankAttemptedAt)
+    .map((row) => normalizePhrase(row.keyword))
+    .filter(Boolean)
+}
+
+function erankRowHasDemand(keyword) {
+  const row = findResearchRow(keyword)
+  if (!row) return false
+  return [row.erankSearchVolume, row.erankClicks]
+    .some((value) => Number(String(value ?? '').replace(/,/g, '')) > 0)
+}
+
+// Second stage of the daily-lookup budget: only candidates whose full phrase came back
+// without demand are worth spending another lookup on their base phrase.
+function buildErankFollowUpQueryPlan() {
+  return buildErankBaseFollowUpPlan(state.candidates, {
+    eventTerm: selectedEvent().searchTerm,
+    candidateLimit: ERANK_RESEARCH_LIMIT,
+    baseQueryFor: (keyword, candidate) => candidate.queryStrategy === 'cross-niche'
+      ? keyword
+      : erankProbeKeyword(keyword),
+    excludeQueries: searchedErankQueries(),
+    needsFollowUp: (keyword) => {
+      const row = findResearchRow(keyword)
+      if (!row) return false
+      const attempted = rowHasErankInput(row) || Boolean(row.erankCheckedAt || row.erankAttemptedAt)
+      return attempted && !erankRowHasDemand(keyword)
+    },
+  })
+}
+
 function erankResearchKeywords() {
   state.erankQueryPlan = buildCurrentErankQueryPlan()
   return state.erankQueryPlan.map((item) => item.query)
@@ -2021,8 +2055,8 @@ function renderCandidates() {
   const querySummary = summarizeErankQueryPlan(buildCurrentErankQueryPlan())
   if (elements.erankQueryPlanSummary) {
     elements.erankQueryPlanSummary.textContent = querySummary.queryCount > 0
-      ? `${activeRoundLabel()}: 候補${querySummary.candidateCount}件 / 実検索${querySummary.queryCount}件（完全語句${querySummary.directCount}・基底語${querySummary.baseCount}）`
-      : '候補を作ると、完全語句とイベントを外した基底語の検索内訳が表示されます。'
+      ? `${activeRoundLabel()}: 候補${querySummary.candidateCount}件を${querySummary.queryCount}検索で確認します（eRankの1日上限を消費します）。基底語は需要が出なかった候補だけ後から追加確認します。`
+      : '候補を作ると、eRankで消費する検索数が表示されます。'
   }
   elements.candidateCount.textContent = state.activeDiscoveryLane === 'all'
     ? String(displayedCandidates.length)
@@ -2435,6 +2469,17 @@ function renderErankGroup(title, help, rows, options = {}) {
   return `<section class="erank-group">${body}</section>`
 }
 
+function renderErankBaseFollowUpAction() {
+  const followUpCount = buildErankFollowUpQueryPlan().length
+  if (followUpCount === 0) return ''
+  return `
+    <div class="erank-capture-actions">
+      <button type="button" class="ghost-btn" data-erank-base-follow-up>需要が出なかった候補を基底語で再確認（${followUpCount}件）</button>
+      <small>イベント名や年号を外した語句で、あと${followUpCount}検索だけ使います。</small>
+    </div>
+  `
+}
+
 function renderErankResults() {
   const ranked = erankResultRows()
   const captureStates = erankCaptureStateRows()
@@ -2455,6 +2500,7 @@ function renderErankResults() {
 
   elements.erankResultsList.innerHTML = [
     renderErankCaptureStates(captureStates),
+    renderErankBaseFollowUpAction(),
     renderErankGroup('次にEtsy公式で確認する候補', '検索・クリック・KDの反応がよい語句です。Marketplace Insightsで直近30日の需要を確かめます。', proceedRows, { limit: 16 }),
     renderErankGroup('関連語から追加探索する候補', '弱くはないけれど、もう少し関連語を広げたい語句です。Etsy公式確認候補づくりの材料にも使います。', expandRows, { limit: 10 }),
     renderErankGroup('今回は保留した候補', '需要が弱い候補です。権利リスクがなくSearchまたはClicksがある上位候補は、Etsy Plusの公式データで再確認できます。', holdRows, { limit: 12, collapsible: true }),
@@ -5826,6 +5872,39 @@ async function retryFailedErankResearch() {
   }
 }
 
+async function startErankBaseFollowUp() {
+  const followUp = buildErankFollowUpQueryPlan()
+  const keywords = followUp.map((item) => item.query)
+  if (keywords.length === 0) {
+    setSimpleStatus('基底語で再確認する候補はありません。完全語句で需要が出なかった候補が対象です。')
+    return
+  }
+  state.erankQueryPlan = [...state.erankQueryPlan, ...followUp]
+  state.acceptExtensionResults = true
+
+  try {
+    openProgressModal({
+      mode: 'erank',
+      title: 'eRank基底語の再確認',
+      total: keywords.length,
+      message: `${keywords.length}件をイベント名なしの基底語で確認しています。`,
+    })
+    await requestExtension('CLEAR_MARKET_RESULTS')
+    const startResponse = await requestExtension('START_ERANK_RESEARCH', {
+      keywords,
+      erankUrl: 'https://erank.com/tools/keyword-tool',
+      delayMs: Math.max(3000, Math.min(Number(elements.delayInput.value) * 1000 || 5000, 20000)),
+    })
+    ensureExtensionStarted(startResponse, 'eRankの基底語確認を開始できませんでした。')
+    setSimpleStatus(`需要が出なかった候補${keywords.length}件を、イベント名を外した基底語で再確認します。取得済みの結果は保持します。`)
+    pollExtensionState()
+  } catch (error) {
+    const message = friendlyExtensionError(error)
+    setSimpleStatus(message)
+    failProgress(message)
+  }
+}
+
 async function startBroadEverbeeResearch() {
   const keywords = broadQueryList()
   if (keywords.length === 0) {
@@ -6212,6 +6291,7 @@ function bindEvents() {
   elements.erankResultsList.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return
     if (event.target.closest('[data-retry-erank-failures]')) retryFailedErankResearch()
+    if (event.target.closest('[data-erank-base-follow-up]')) startErankBaseFollowUp()
   })
   elements.marketplaceModeControl.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return
