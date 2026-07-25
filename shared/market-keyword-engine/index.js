@@ -2074,40 +2074,192 @@ function buyerGiverPhrases(kind, groupId, options = {}) {
 function buyerIntentPhrases(identity, product, options = {}) {
   const axes = { ...BUYER_INTENT_AXES, ...(options.axes ?? {}) }
   const actions = (options.actions ?? []).map(normalizePhrase).filter(Boolean)
+  const measured = unique((options.measuredModifiers ?? []).map(normalizePhrase).filter(Boolean))
   const { kind, groupId } = classifyBuyerIdentity(identity)
-  const phrases = [`${identity} ${product}`]
+  const phrases = [{ phrase: `${identity} ${product}`, evidence: 'identity' }]
+  const add = (phrase, evidence) => phrases.push({ phrase, evidence })
 
   for (const action of actions) {
-    phrases.push(`${identity} ${action} ${product}`)
+    add(`${identity} ${action} ${product}`, 'operator')
+  }
+  // Modifiers counted in this market lead the list. They cost the same lookup as a guess
+  // and are the only ones already known to appear in what buyers type or sellers sell.
+  for (const modifier of measured) {
+    add(`${modifier} ${identity} ${product}`, 'measured')
+    add(`${identity} ${modifier} ${product}`, 'measured')
   }
   // Personalization is the reason a buyer chose Etsy over a general marketplace and it is
-  // the lever that lets the same design carry a higher price, so it leads rather than
-  // trailing the decorative variants.
+  // the lever that lets the same design carry a higher price, so it leads the assumed
+  // vocabulary even when the local evidence has not reached it yet.
   for (const personalization of axes.personalization ?? []) {
-    phrases.push(`${personalization} ${identity} ${product}`)
+    add(`${personalization} ${identity} ${product}`, 'assumed')
   }
   for (const suffix of BUYER_GIFT_SUFFIXES[kind] ?? []) {
-    phrases.push(`${identity} ${suffix} ${product}`)
+    add(`${identity} ${suffix} ${product}`, 'assumed')
     for (const personalization of axes.personalization ?? []) {
-      phrases.push(`${personalization} ${identity} ${suffix} ${product}`)
+      add(`${personalization} ${identity} ${suffix} ${product}`, 'assumed')
     }
   }
-  phrases.push(`gift for ${identity} ${product}`)
-  if (kind === 'identity') phrases.push(`for my ${identity} ${product}`)
+  add(`gift for ${identity} ${product}`, 'assumed')
+  if (kind === 'identity') add(`for my ${identity} ${product}`, 'assumed')
   for (const giver of buyerGiverPhrases(kind, groupId, options)) {
-    phrases.push(`${identity} ${product} ${giver}`)
+    add(`${identity} ${product} ${giver}`, 'assumed')
   }
   for (const transition of axes.transition ?? []) {
-    phrases.push(`${transition} ${identity} ${product}`)
+    add(`${transition} ${identity} ${product}`, 'assumed')
   }
   for (const relationship of axes.relationship ?? []) {
-    phrases.push(`${relationship} ${identity} ${product}`)
+    add(`${relationship} ${identity} ${product}`, 'assumed')
   }
   for (const style of axes.style ?? []) {
-    phrases.push(`${style} ${identity} ${product}`)
+    add(`${style} ${identity} ${product}`, 'assumed')
   }
 
   return phrases
+}
+
+// Every modifier list in this file started as somebody's guess about how Americans shop.
+// Guesses are testable: the app already collects what Etsy reports people search and what
+// EverBee reports is actually selling, so the words can be counted instead of assumed. A
+// modifier absent from both sides is not a subtle opportunity, it is a phrase nobody types.
+const MODIFIER_MIN_TOKEN_LENGTH = 2
+
+// GENERIC_WORDS cannot be reused here. It contains gift, personalized, custom, vintage and
+// from precisely because those words carry no niche on their own — but they are the words
+// this measurement exists to settle, so removing them would answer the question by
+// assumption. Only the product itself and bare grammar are stripped.
+const MODIFIER_STOP_WORDS = new Set([
+  'shirt', 'shirts', 'tee', 'tees', 'tshirt', 'tshirts', 't-shirt', 'top', 'tops',
+  'sweatshirt', 'sweatshirts', 'crewneck', 'hoodie', 'hoodies', 'mug', 'mugs',
+  'tote', 'bag', 'bags', 'poster', 'sticker', 'stickers',
+  'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'by', 'is', 'it',
+  'unisex', 'women', 'womens', 'men', 'mens', 'kids', 'adult', 'youth', 'ladies',
+  'graphic', 'apparel', 'clothing', 'size', 'sizes', 'color', 'colors',
+])
+
+function modifierCoreTokens(options = {}) {
+  const category = getCategory(options.categoryId)
+  const event = getEvent(options)
+  return new Set([
+    ...MODIFIER_STOP_WORDS,
+    ...phraseTokens(category.searchTerm),
+    ...(category.tags ?? []).flatMap(phraseTokens),
+    ...phraseTokens(event.searchTerm),
+    ...splitSeedText(options.identitySeeds).flatMap(phraseTokens),
+    ...splitSeedText(options.excludeTokens).flatMap(phraseTokens),
+  ])
+}
+
+function modifierNgrams(value, coreTokens) {
+  const tokens = phraseTokens(value).filter((token) => !isYearishToken(token))
+  const grams = new Set()
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const single = tokens[index]
+    if (single.length >= MODIFIER_MIN_TOKEN_LENGTH && !coreTokens.has(single)) grams.add(single)
+    if (index < tokens.length - 1) {
+      const pair = `${tokens[index]} ${tokens[index + 1]}`
+      // A pair is only interesting when it says something neither word says alone.
+      if (!coreTokens.has(tokens[index]) && !coreTokens.has(tokens[index + 1])) grams.add(pair)
+    }
+  }
+
+  return [...grams]
+}
+
+// Demand and supply are counted separately on purpose. A word both sides use is a market
+// already served; a word buyers type and sellers have not adopted is the one worth having.
+export function analyzeModifierUsage(evidence = {}, options = {}) {
+  const coreTokens = modifierCoreTokens(options)
+  const stats = new Map()
+  const entryFor = (gram) => {
+    if (!stats.has(gram)) {
+      stats.set(gram, {
+        modifier: gram,
+        demandKeywords: 0,
+        demandSearches: 0,
+        supplyListings: 0,
+        supplySales: 0,
+      })
+    }
+    return stats.get(gram)
+  }
+
+  const demandRows = Array.isArray(evidence.demandKeywords) ? evidence.demandKeywords : []
+  const supplyRows = Array.isArray(evidence.supplyListings) ? evidence.supplyListings : []
+  let totalDemandSearches = 0
+  let totalSupplySales = 0
+
+  for (const row of demandRows) {
+    const keyword = normalizePhrase(row?.keyword ?? row?.query ?? row)
+    if (!keyword) continue
+    const searches = Math.max(0, parseNumber(row?.etsySearches30d ?? row?.searches) ?? 0)
+    totalDemandSearches += searches
+    for (const gram of modifierNgrams(keyword, coreTokens)) {
+      const entry = entryFor(gram)
+      entry.demandKeywords += 1
+      entry.demandSearches += searches
+    }
+  }
+
+  for (const row of supplyRows) {
+    const title = normalizePhrase(row?.title ?? row?.label ?? row)
+    if (!title) continue
+    const sales = Math.max(0, parseNumber(row?.monthlySales ?? row?.sales) ?? 0)
+    totalSupplySales += sales
+    for (const gram of modifierNgrams(title, coreTokens)) {
+      const entry = entryFor(gram)
+      entry.supplyListings += 1
+      entry.supplySales += sales
+    }
+  }
+
+  const rows = [...stats.values()].map((entry) => {
+    const demandShare = totalDemandSearches > 0 ? (entry.demandSearches / totalDemandSearches) * 100 : 0
+    const supplyShare = totalSupplySales > 0 ? (entry.supplySales / totalSupplySales) * 100 : 0
+    return {
+      ...entry,
+      demandShare: Math.round(demandShare * 10) / 10,
+      supplyShare: Math.round(supplyShare * 10) / 10,
+      // Positive means buyers ask for it more than sellers say it.
+      gap: Math.round((demandShare - supplyShare) * 10) / 10,
+      observed: entry.demandKeywords > 0 || entry.supplyListings > 0,
+      demandOnly: entry.demandKeywords > 0 && entry.supplyListings === 0,
+    }
+  })
+
+  return {
+    rows: rows.sort((left, right) => (
+      right.demandSearches - left.demandSearches
+      || right.supplySales - left.supplySales
+      || left.modifier.localeCompare(right.modifier, 'en')
+    )),
+    totals: {
+      demandKeywords: demandRows.length,
+      demandSearches: totalDemandSearches,
+      supplyListings: supplyRows.length,
+      supplySales: totalSupplySales,
+    },
+  }
+}
+
+// Turns the measurement into the vocabulary the generator uses. Anything the evidence has
+// never seen is dropped rather than ranked last, because carrying an unobserved phrase into
+// the candidate list spends a real eRank lookup on a guess.
+export function measuredModifierPhrases(analysis = {}, options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit) || 12, 60))
+  const minKeywords = Math.max(1, Number(options.minDemandKeywords) || 1)
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const rows = Array.isArray(analysis.rows) ? analysis.rows : []
+
+  return rows
+    .filter((row) => row.demandKeywords >= minKeywords || row.supplyListings >= 2)
+    // Measured does not mean safe. The highest-gap modifier in a Halloween run was a
+    // trademarked coinage, and volume is exactly why a seller would reach for it.
+    .filter((row) => detectRiskTerms(row.modifier, customRiskTerms).length === 0)
+    .sort((left, right) => right.gap - left.gap || right.demandSearches - left.demandSearches)
+    .slice(0, limit)
+    .map((row) => row.modifier)
 }
 
 const PERSONALIZATION_PATTERN = /\b(personalized|personalised|custom|custom name|with name|monogram|monogrammed|name)\b/
@@ -2127,10 +2279,15 @@ export function generateBuyerIntentCandidates(options = {}) {
   const perIdentity = Math.max(1, Math.min(Number(options.perIdentity) || 25, 60))
   const limit = Math.max(1, Math.min(Number(options.limit) || 200, 400))
 
+  const evidenceByKeyword = new Map()
   const keywords = unique(
     identities.flatMap((identity) => buyerIntentPhrases(identity, product, options)
       .slice(0, perIdentity))
-      .map((keyword) => normalizePhrase(keyword))
+      .map((entry) => {
+        const keyword = normalizePhrase(entry.phrase)
+        if (keyword && !evidenceByKeyword.has(keyword)) evidenceByKeyword.set(keyword, entry.evidence)
+        return keyword
+      })
       .filter((keyword) => countWords(keyword) >= 2)
       .filter((keyword) => !hasRepeatedAdjacentPhrase(keyword))
       .filter((keyword) => !hasDuplicateGarmentProductTerms(keyword))
@@ -2144,6 +2301,7 @@ export function generateBuyerIntentCandidates(options = {}) {
       const identity = identities.find((value) => keyword.includes(value)) ?? ''
       return {
         keyword,
+        modifierEvidence: evidenceByKeyword.get(keyword) ?? 'assumed',
         eventId: '',
         eventLabel: '買い手意図',
         categoryId: category.id,

@@ -3,6 +3,8 @@ import {
   MARKET_EVENTS,
   PRODUCT_CATEGORIES,
   advanceMarketplaceInsightResearch,
+  analyzeModifierUsage,
+  measuredModifierPhrases,
   buildKeywordClusterKey,
   buildCrossNicheDrilldown,
   buildMarketplaceInsightPlan,
@@ -32,7 +34,7 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260726-5'
+} from '../../shared/market-keyword-engine/index.js?v=20260726-6'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
@@ -250,6 +252,9 @@ const elements = {
   buyerIdentitySuggestHint: document.querySelector('#buyerIdentitySuggestHint'),
   buyerIdentityShuffleBtn: document.querySelector('#buyerIdentityShuffleBtn'),
   buyerContextSuggestions: document.querySelector('#buyerContextSuggestions'),
+  modifierEvidenceTotals: document.querySelector('#modifierEvidenceTotals'),
+  modifierEvidenceTable: document.querySelector('#modifierEvidenceTable'),
+  modifierEvidenceNote: document.querySelector('#modifierEvidenceNote'),
   trendScoutInput: document.querySelector('#trendScoutInput'),
   trendSampleBtn: document.querySelector('#trendSampleBtn'),
   trendAutoBtn: document.querySelector('#trendAutoBtn'),
@@ -902,6 +907,7 @@ function buyerIntentCandidates() {
     ...currentOptions(),
     identitySeeds: elements.buyerIdentityInput.value,
     actions: (elements.buyerActionInput?.value ?? '').split(/\r?\n|,/),
+    measuredModifiers: measuredModifiersForGeneration(),
   })
 }
 
@@ -1099,6 +1105,90 @@ const analyzeResearchRows = createMemoizedAnalysis((rows, options) => {
 
 function currentResearchAnalysis() {
   return analyzeResearchRows(state.researchRows, currentOptions())
+}
+
+// Both sides of the measurement come from work the operator has already paid for: Etsy's own
+// related-keyword lists say what is searched, and the EverBee rows say what is selling. No
+// extra lookups are spent to find out which modifiers are real.
+function modifierEvidenceInput() {
+  const plan = state.marketplaceInsightPlan
+  const planItems = Array.isArray(plan?.items) ? plan.items : []
+  const demandKeywords = [
+    ...planItems
+      .filter((item) => item.status === 'completed')
+      .map((item) => ({ keyword: item.query, etsySearches30d: item.result?.etsySearches30d })),
+    ...(Array.isArray(plan?.relatedKeywordMetrics) ? plan.relatedKeywordMetrics : []),
+    ...planItems.flatMap((item) => (
+      Array.isArray(item.result?.etsyRelatedKeywordMetrics) ? item.result.etsyRelatedKeywordMetrics : []
+    )),
+  ].filter((row) => normalizePhrase(row?.keyword))
+
+  const supplyListings = state.researchRows.flatMap((row) => (
+    Array.isArray(row.productRows) ? row.productRows : []
+  )).map((product) => ({
+    title: product?.title ?? product?.label,
+    monthlySales: product?.monthlySales,
+  })).filter((row) => normalizePhrase(row.title))
+
+  return { demandKeywords, supplyListings }
+}
+
+function currentModifierAnalysis() {
+  return analyzeModifierUsage(modifierEvidenceInput(), {
+    ...currentOptions(),
+    identitySeeds: elements.buyerIdentityInput?.value ?? '',
+  })
+}
+
+// The built-in modifier lists are somebody's guess until this table contradicts them, so the
+// table shows the guesses being checked as well as the winners. Seeing "gift 0 / 0" is the
+// point: it is the only way to notice that a phrase the tool generates is one nobody types.
+const MODIFIER_ASSUMPTIONS_TO_REPORT = ['gift', 'personalized', 'custom', 'from', 'appreciation', 'vintage', 'retro']
+
+function renderModifierEvidence() {
+  if (!elements.modifierEvidenceTable) return
+  const analysis = currentModifierAnalysis()
+  const { totals } = analysis
+
+  elements.modifierEvidenceTotals.textContent = totals.demandKeywords === 0 && totals.supplyListings === 0
+    ? 'まだ実測データがありません'
+    : `Etsy検索語${totals.demandKeywords}件 / 売れている商品${totals.supplyListings}件から集計`
+
+  if (analysis.rows.length === 0) {
+    elements.modifierEvidenceTable.innerHTML = '<div class="empty-state">3「Etsy公式」と5「最終結果」のEverBee確認を行うと、この市場で実際に使われている語を数えます。それまでは組み込みの想定語で候補を作ります。</div>'
+    elements.modifierEvidenceNote.textContent = ''
+    return
+  }
+
+  const rowsByModifier = new Map(analysis.rows.map((row) => [row.modifier, row]))
+  const top = analysis.rows.slice(0, 12)
+  elements.modifierEvidenceTable.innerHTML = `
+    <table>
+      <thead><tr><th>修飾語</th><th>需要 語/検索</th><th>供給 件/月販</th><th>差</th></tr></thead>
+      <tbody>
+        ${top.map((row) => `
+          <tr class="${row.demandOnly ? 'is-open' : ''}">
+            <td>${escapeHtml(row.modifier)}${row.demandOnly ? '<span class="pill lever">未使用</span>' : ''}</td>
+            <td>${row.demandKeywords} / ${row.demandSearches.toLocaleString('en-US')}</td>
+            <td>${row.supplyListings} / ${row.supplySales.toLocaleString('en-US')}</td>
+            <td>${row.gap > 0 ? '+' : ''}${row.gap}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `
+
+  const checked = MODIFIER_ASSUMPTIONS_TO_REPORT.map((modifier) => {
+    const row = rowsByModifier.get(modifier)
+    return `${modifier} ${row ? `${row.demandKeywords}/${row.supplyListings}` : '0/0'}`
+  }).join('、')
+  elements.modifierEvidenceNote.textContent = `組み込みの想定語の実測（需要語数/供給件数）: ${checked}。0/0の語はこの市場では観測されていません。`
+}
+
+function measuredModifiersForGeneration() {
+  const analysis = currentModifierAnalysis()
+  if (analysis.totals.demandKeywords === 0 && analysis.totals.supplyListings === 0) return []
+  return measuredModifierPhrases(analysis, { limit: 10, customRiskTerms: elements.riskInput?.value ?? '' })
 }
 
 function fillSelects() {
@@ -2224,6 +2314,8 @@ function renderCandidates() {
             ${wearerIntentLabel(candidate.wearerIntent) ? `<span class="pill">${escapeHtml(wearerIntentLabel(candidate.wearerIntent))}</span>` : ''}
             <span class="pill market-track-pill is-${escapeHtml(candidate.intentTrack)}">${escapeHtml(trackLabel)}</span>
             ${candidate.previouslyResearchedElsewhere ? `<span class="pill review">別イベントで調査済み${priorEventLabels ? `: ${escapeHtml(priorEventLabels)}` : ''}</span>` : ''}
+            ${candidate.modifierEvidence === 'measured' ? '<span class="pill measured" title="この市場のEtsy検索語またはEverBeeの売れている商品タイトルで実際に観測された修飾語です。">実測語</span>' : ''}
+            ${candidate.modifierEvidence === 'assumed' ? '<span class="pill" title="組み込みの想定語です。この市場での使用はまだ確認できていません。Etsy公式とEverBeeの確認が進むと実測語に置き換わります。">想定語</span>' : ''}
             ${candidate.personalizable ? '<span class="pill lever" title="名入れ版を作れる候補です。名入れ商品は価格を比較されにくく、同じデザインでも単価を上げられます。">名入れ可</span>' : ''}
             ${candidate.giftIntent ? '<span class="pill lever" title="買う人と着る人が違う語句です。贈る理由がある買い手は購入までが速く、価格にも比較的寛容です。">贈り物</span>' : ''}
             ${candidate.clusterSize > 1 ? `<span class="pill">同系統 ${candidate.clusterSize}語</span>` : ''}
@@ -4389,6 +4481,7 @@ function renderActiveResearchStage(options = {}) {
         break
       case 'candidates':
         renderCandidates()
+        renderModifierEvidence()
         renderMarketplaceStartAction()
         break
       case 'erank':

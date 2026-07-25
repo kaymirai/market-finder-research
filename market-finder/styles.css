@@ -1516,6 +1516,52 @@ button[data-optional]::before {
   color: #92400e;
 }
 
+.pill.measured {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.modifier-evidence {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.modifier-evidence-table {
+  overflow-x: auto;
+}
+
+.modifier-evidence-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.modifier-evidence-table th,
+.modifier-evidence-table td {
+  padding: 5px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.modifier-evidence-table th:first-child,
+.modifier-evidence-table td:first-child {
+  text-align: left;
+  font-weight: 700;
+}
+
+.modifier-evidence-table tr.is-open td {
+  background: #f0fdf4;
+}
+
+.modifier-evidence-table .pill {
+  margin-left: 6px;
+}
+
 .score-chip {
   display: grid;
   gap: 2px;

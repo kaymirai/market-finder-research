@@ -11,8 +11,10 @@ import {
   buildKeywordClusterKey,
   buildSeoPlanFromBuckets,
   BUYER_IDENTITY_LIBRARY,
+  analyzeModifierUsage,
   classifyBuyerIdentity,
   clusterKeywordCandidates,
+  measuredModifierPhrases,
   detectRiskTerms,
   suggestBuyerIdentities,
   classifyBuyerIntentPhrase,
@@ -1230,6 +1232,75 @@ test('keeps the suggested vocabulary specific enough to be worth entering', () =
   // A suggestion carrying someone else's trademark would be a defect we shipped, not a
   // risk the operator chose to take.
   assert.equal(phrases.every((phrase) => detectRiskTerms(phrase, []).length === 0), true)
+})
+
+test('counts modifiers from collected evidence instead of trusting the built-in list', () => {
+  const analysis = analyzeModifierUsage({
+    demandKeywords: [
+      { keyword: 'halloween nurse shirt', etsySearches30d: 1300 },
+      { keyword: 'nicu nurse halloween shirt', etsySearches30d: 97 },
+      { keyword: 'halloween teacher shirt personalized', etsySearches30d: 7 },
+    ],
+    supplyListings: [
+      { title: 'Personalized Halloween Nurse Sweatshirt', monthlySales: 5 },
+      { title: 'Retro Ghost Reading Books Sweatshirt', monthlySales: 14 },
+      { title: 'NICU Nurse Halloween Sweatshirt', monthlySales: 4 },
+    ],
+  }, { categoryId: 'shirt', eventId: 'halloween' })
+
+  const byModifier = new Map(analysis.rows.map((row) => [row.modifier, row]))
+  // The product and the event are the core, not modifiers.
+  assert.equal(byModifier.has('shirt'), false)
+  assert.equal(byModifier.has('halloween'), false)
+
+  // "personalized" is exactly the word the built-in list asserts, so it has to be countable
+  // rather than filtered out as a generic word before the count happens.
+  assert.equal(byModifier.get('personalized').demandKeywords, 1)
+  assert.equal(byModifier.get('personalized').supplyListings, 1)
+  // A word neither side used must be absent, not present with a zero.
+  assert.equal(byModifier.has('gift'), false)
+  assert.equal(byModifier.has('from'), false)
+
+  // Demand without supply is the opportunity the table exists to expose.
+  assert.equal(byModifier.get('teacher').demandOnly, true)
+  assert.ok(byModifier.get('teacher').gap > 0)
+  assert.equal(byModifier.get('nicu').demandOnly, false)
+})
+
+test('never promotes a measured modifier that carries someone else s trademark', () => {
+  const analysis = analyzeModifierUsage({
+    demandKeywords: [
+      { keyword: 'summerween shirt', etsySearches30d: 5700 },
+      { keyword: 'spooky season shirt', etsySearches30d: 2300 },
+    ],
+    supplyListings: [],
+  }, { categoryId: 'shirt', eventId: 'halloween' })
+
+  // Volume is precisely why a seller would reach for it, so the risk gate runs after the
+  // measurement rather than being assumed away by it.
+  assert.equal(analysis.rows[0].modifier, 'summerween')
+  assert.equal(measuredModifierPhrases(analysis).includes('summerween'), false)
+  assert.ok(measuredModifierPhrases(analysis).includes('spooky'))
+})
+
+test('marks whether a candidate rests on measured or assumed vocabulary', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'nicu nurse',
+    categoryId: 'shirt',
+    perIdentity: 40,
+    measuredModifiers: ['spooky', 'book lover'],
+  })
+  const byKeyword = new Map(rows.map((row) => [row.keyword, row]))
+
+  assert.equal(byKeyword.get('spooky nicu nurse shirt').modifierEvidence, 'measured')
+  assert.equal(byKeyword.get('book lover nicu nurse shirt').modifierEvidence, 'measured')
+  assert.equal(byKeyword.get('retro nicu nurse shirt').modifierEvidence, 'assumed')
+  assert.equal(byKeyword.get('nicu nurse shirt').modifierEvidence, 'identity')
+
+  // With no evidence yet the generator still works, and says so on every row.
+  const noEvidence = generateBuyerIntentCandidates({ identitySeeds: 'nicu nurse', categoryId: 'shirt' })
+  assert.equal(noEvidence.some((row) => row.modifierEvidence === 'measured'), false)
+  assert.ok(noEvidence.every((row) => ['assumed', 'identity', 'operator'].includes(row.modifierEvidence)))
 })
 
 test('names the giver, because on Etsy the buyer is often not the wearer', () => {

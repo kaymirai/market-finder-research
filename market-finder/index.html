@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260726-5">
+    <link rel="stylesheet" href="./styles.css?v=20260726-6">
   </head>
   <body>
     <main class="app-shell">
@@ -294,6 +294,16 @@
             <div><dt>Trend候補</dt><dd>自動探索で拾った流行語候補です。人気かどうかはEtsy公式/EverBeeで確認します。</dd></div>
             <div><dt>eRank確認済み</dt><dd>eRankの数字を取得済みです。eRank結果で関連語の広がりを見ます。</dd></div>
           </dl>
+
+          <section id="modifierEvidencePanel" class="modifier-evidence">
+            <div class="mini-heading">
+              <span>修飾語の実測</span>
+              <small id="modifierEvidenceTotals">まだ実測データがありません</small>
+            </div>
+            <p class="panel-help">この市場で実際に使われている語だけを数えています。需要はEtsy公式の検索語、供給はEverBeeで売れている商品タイトルです。「需要あり・供給なし」が狙い目、両方0の語は誰も使っていません。</p>
+            <div id="modifierEvidenceTable" class="modifier-evidence-table"></div>
+            <small id="modifierEvidenceNote"></small>
+          </section>
 
           <div class="button-row candidate-actions advanced-only">
             <button id="copyReadyBtn" type="button" class="ghost-btn" data-optional="任意">調査欄へ候補を入れる</button>
@@ -771,6 +781,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260726-5"></script>
+    <script type="module" src="./src/app.js?v=20260726-6"></script>
   </body>
 </html>

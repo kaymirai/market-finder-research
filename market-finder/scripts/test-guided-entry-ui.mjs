@@ -238,6 +238,7 @@ test('dispatches only the selected stage detail renderers', () => {
     'renderBroadHints',
     'renderSearchSeedRows',
     'renderCandidates',
+    'renderModifierEvidence',
     'renderMarketplaceStartAction',
     'renderErankResults',
     'renderMarketplaceInsightPlan',
@@ -250,7 +251,7 @@ test('dispatches only the selected stage detail renderers', () => {
   )
   const expected = {
     conditions: ['trend', 'broad', 'seeds', 'queue', 'inspector'],
-    candidates: ['candidates', 'etsy-start', 'queue', 'inspector'],
+    candidates: ['candidates', 'modifiers', 'etsy-start', 'queue', 'inspector'],
     erank: ['erank', 'queue', 'inspector'],
     etsy: ['etsy', 'queue', 'inspector'],
     results: ['results', 'cross-niche', 'seo'],
@@ -266,6 +267,7 @@ test('dispatches only the selected stage detail renderers', () => {
       render('broad'),
       render('seeds'),
       render('candidates'),
+      render('modifiers'),
       render('etsy-start'),
       render('erank'),
       render('etsy'),
@@ -1184,5 +1186,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260726-5')
+  assert.equal(stylesheetVersion, '20260726-6')
 })
