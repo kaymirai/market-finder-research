@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node scripts/test-extension-reload.mjs"
+    "test:erank-direct-metrics": "node scripts/test-erank-direct-metrics.mjs",
+    "test": "npm run test:erank-direct-metrics && npm run build && node scripts/test-extension-reload.mjs"
   },
   "keywords": [],
   "author": "",

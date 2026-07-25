@@ -188,6 +188,7 @@ function everbeeGridDocument(rows) {
         makeCell('listingAge', row.listingAge),
         makeCell('price', row.price),
         makeCell('shopName', row.shopName),
+        ...(row.reviews === undefined ? [] : [makeCell(row.reviewField ?? 'reviews', row.reviews)]),
       ]),
     ]
   })
@@ -196,6 +197,64 @@ function everbeeGridDocument(rows) {
     body: { innerText: '' },
     querySelectorAll(selector) {
       return selector === '[role="row"][data-id]' ? elements.reverse() : []
+    },
+  }
+}
+
+// EverBee renders its grid with MUI DataGrid column virtualisation: cells to the right of
+// the viewport are absent from the DOM until the grid is scrolled, and are removed again
+// when it scrolls back.
+function everbeeVirtualisedGridDocument(rows, hiddenFields) {
+  let scrollLeft = 0
+  const scroller = {
+    className: 'MuiDataGrid-virtualScroller',
+    scrollWidth: 3000,
+    clientWidth: 850,
+    get scrollLeft() {
+      return scrollLeft
+    },
+    set scrollLeft(value) {
+      scrollLeft = value
+    },
+  }
+
+  const makeCell = (field, value) => ({
+    innerText: String(value ?? ''),
+    getAttribute(name) {
+      return name === 'data-field' ? field : null
+    },
+  })
+
+  const rowElements = rows.map((row) => ({
+    getAttribute(name) {
+      if (name === 'data-id') return row.id
+      if (name === 'data-rowindex') return String(row.index)
+      return null
+    },
+    querySelectorAll(selector) {
+      if (!selector.includes('[role="cell"]')) return []
+      const visible = [
+        makeCell('product', row.title),
+        makeCell('totalSales', row.totalSales),
+        makeCell('sales', row.monthlySales),
+        makeCell('revenue', row.revenue),
+        makeCell('listingAge', row.listingAge),
+        makeCell('price', row.price),
+        makeCell('shopName', row.shopName),
+      ]
+      // Only revealed once the grid has been scrolled far enough right.
+      if (scrollLeft < 1200) return visible
+      return [...visible, ...hiddenFields.map((field) => makeCell(field, row[field]))]
+    },
+  }))
+
+  return {
+    body: { innerText: '' },
+    querySelector(selector) {
+      return selector.includes('MuiDataGrid-virtualScroller') ? scroller : null
+    },
+    querySelectorAll(selector) {
+      return selector === '[role="row"][data-id]' ? rowElements : []
     },
   }
 }
@@ -252,6 +311,7 @@ test('joins EverBee product and metric rows by data-id and sorts by monthly sale
       listingAgeMonths: 31,
       price: 20,
       shopName: 'OldShop',
+      reviews: null,
     },
     {
       listingId: 'listing-a',
@@ -263,8 +323,109 @@ test('joins EverBee product and metric rows by data-id and sorts by monthly sale
       listingAgeMonths: 6,
       price: 30,
       shopName: 'FreshShop',
+      reviews: null,
     },
   ])
+})
+
+test('sweeps the virtualised grid so off-screen columns are not silently lost', async () => {
+  const hooks = {}
+  const document = everbeeVirtualisedGridDocument([
+    {
+      id: 'listing-a',
+      index: 0,
+      title: 'Reviewed Shirt',
+      totalSales: '140',
+      monthlySales: '42',
+      revenue: '$1,260',
+      listingAge: '6 Mo.',
+      price: '$30.00',
+      shopName: 'FreshShop',
+      reviews: '312',
+    },
+  ], ['reviews'])
+
+  runInNewContext(everbeeSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    document,
+    location: { href: 'https://app.everbee.io/product-analytics', pathname: '/product-analytics' },
+    setTimeout,
+    URL,
+    window: { setTimeout },
+  })
+
+  // Reading only what is on screen misses the review column entirely.
+  assert.equal(hooks.extractEverbeeProductRows()[0].reviews, null)
+
+  const swept = await hooks.extractEverbeeProductRowsWithHiddenColumns()
+  assert.equal(swept[0].reviews, 312)
+  assert.equal(swept[0].title, 'Reviewed Shirt')
+})
+
+test('reads seller review counts without dropping rows that have none', () => {
+  const hooks = {}
+  const document = everbeeGridDocument([
+    {
+      id: 'listing-a',
+      index: 0,
+      title: 'Reviewed Shirt',
+      totalSales: '140',
+      monthlySales: '42',
+      revenue: '$1,260',
+      listingAge: '6 Mo.',
+      price: '$30.00',
+      shopName: 'FreshShop',
+      reviews: '1,204',
+    },
+    {
+      id: 'listing-b',
+      index: 1,
+      title: 'Renamed Column Shirt',
+      totalSales: '90',
+      monthlySales: '20',
+      revenue: '$400',
+      listingAge: '4 Mo.',
+      price: '$20.00',
+      shopName: 'OtherShop',
+      reviews: '17',
+      reviewField: 'totalReviews',
+    },
+    {
+      id: 'listing-c',
+      index: 2,
+      title: 'No Review Column Shirt',
+      totalSales: '50',
+      monthlySales: '10',
+      revenue: '$200',
+      listingAge: '3 Mo.',
+      price: '$20.00',
+      shopName: 'ThirdShop',
+    },
+  ])
+
+  runInNewContext(everbeeSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    document,
+    location: { href: 'https://app.everbee.io/product-analytics', pathname: '/product-analytics' },
+    setTimeout,
+    URL,
+    window: { setTimeout },
+  })
+
+  const byId = new Map(hooks.extractEverbeeProductRows().map((row) => [row.listingId, row]))
+
+  assert.equal(byId.get('listing-a').reviews, 1204)
+  // EverBee has renamed this column before, so an alias must still be read.
+  assert.equal(byId.get('listing-b').reviews, 17)
+  // A listing with no review column is still a usable row.
+  assert.equal(byId.get('listing-c').reviews, null)
+  assert.equal(byId.size, 3)
 })
 
 test('reloads open Market Finder and research tabs when an unpacked extension is reloaded', () => {

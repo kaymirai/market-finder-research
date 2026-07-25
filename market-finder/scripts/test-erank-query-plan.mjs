@@ -3,15 +3,77 @@ import test from 'node:test'
 
 import {
   attachErankQueryProvenance,
+  buildErankBaseFollowUpPlan,
   buildErankQueryPlan,
   summarizeErankQueryPlan,
 } from '../src/erank-query-plan.js'
+
+test('spends one daily lookup per candidate by default', () => {
+  const plan = buildErankQueryPlan([
+    { keyword: 'halloween ghost shirt', status: 'ready' },
+    { keyword: 'halloween cute ghost shirt', status: 'ready' },
+  ], {
+    eventTerm: 'halloween',
+    baseQueryFor: () => 'ghost shirt',
+  })
+
+  assert.deepEqual(plan.map((item) => item.query), [
+    'halloween ghost shirt',
+    'halloween cute ghost shirt',
+  ])
+  assert.deepEqual(summarizeErankQueryPlan(plan), {
+    candidateCount: 2,
+    queryCount: 2,
+    directCount: 2,
+    baseCount: 0,
+  })
+})
+
+test('skips queries that were already searched', () => {
+  const plan = buildErankQueryPlan([
+    { keyword: 'halloween ghost shirt', status: 'ready' },
+    { keyword: 'teacher shirt', status: 'ready' },
+  ], {
+    eventTerm: 'halloween',
+    excludeQueries: ['Halloween Ghost Shirt'],
+  })
+
+  assert.deepEqual(plan.map((item) => item.query), ['teacher shirt'])
+})
+
+test('follows up with base phrases only for candidates that lacked demand', () => {
+  const plan = buildErankBaseFollowUpPlan([
+    { keyword: 'halloween ghost shirt', status: 'ready' },
+    { keyword: 'halloween witch shirt', status: 'ready' },
+  ], {
+    eventTerm: 'halloween',
+    baseQueryFor: (keyword) => keyword.replace(/^halloween /, ''),
+    needsFollowUp: (keyword) => keyword === 'halloween witch shirt',
+  })
+
+  assert.deepEqual(plan.map((item) => item.query), ['witch shirt'])
+  assert.equal(plan[0].queryKind, 'base')
+  assert.equal(plan[0].sourceKeyword, 'halloween witch shirt')
+})
+
+test('does not follow up with a base phrase that was already searched', () => {
+  const plan = buildErankBaseFollowUpPlan([
+    { keyword: 'halloween ghost shirt', status: 'ready' },
+  ], {
+    eventTerm: 'halloween',
+    baseQueryFor: () => 'ghost shirt',
+    excludeQueries: ['ghost shirt'],
+  })
+
+  assert.deepEqual(plan, [])
+})
 
 test('queues the full event phrase before its normalized base phrase', () => {
   const plan = buildErankQueryPlan([
     { keyword: 'halloween ghost shirt', status: 'ready' },
   ], {
     eventTerm: 'halloween',
+    includeBaseQueries: true,
     baseQueryFor: () => 'ghost shirt',
   })
 
@@ -39,6 +101,7 @@ test('deduplicates a shared base query and retains every source candidate', () =
     { keyword: 'halloween cute ghost shirt', status: 'ready' },
   ], {
     eventTerm: 'halloween',
+    includeBaseQueries: true,
     baseQueryFor: () => 'ghost shirt',
   })
 
@@ -60,6 +123,7 @@ test('does not add a duplicate base query when it equals the direct phrase', () 
     { keyword: 'teacher shirt', status: 'ready' },
   ], {
     eventTerm: 'halloween',
+    includeBaseQueries: true,
     baseQueryFor: () => 'teacher shirt',
   })
 
@@ -72,6 +136,7 @@ test('counts candidate phrases separately from actual direct and base searches',
     { keyword: 'teacher shirt', status: 'ready' },
   ], {
     eventTerm: 'halloween',
+    includeBaseQueries: true,
     baseQueryFor: (keyword) => keyword.replace(/^halloween /, ''),
   })
 
@@ -88,6 +153,7 @@ test('adds query provenance and distinguishes failed captures from unsearched ph
     { keyword: 'halloween ghost shirt', status: 'ready' },
   ], {
     eventTerm: 'halloween',
+    includeBaseQueries: true,
     baseQueryFor: () => 'ghost shirt',
   })
   const attemptedAt = '2026-07-22T10:00:00.000Z'
@@ -108,4 +174,10 @@ test('adds query provenance and distinguishes failed captures from unsearched ph
   })
 
   assert.equal(attachErankQueryProvenance({ keyword: 'ghost shirt' }, plan).erankCaptureStatus, 'unsearched')
+
+  assert.equal(attachErankQueryProvenance({
+    keyword: 'halloween ghost shirt',
+    erankCaptureStatus: 'no-data',
+    erankCheckedAt: attemptedAt,
+  }, plan).erankCaptureStatus, 'no-data')
 })

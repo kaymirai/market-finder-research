@@ -30,7 +30,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-market-finder.ps1 -N
 開くURL:
 
 ```text
-http://127.0.0.1:4173/market-finder/
+http://127.0.0.1:ポート番号/market-finder/
 ```
 
 ## Chrome拡張連携
@@ -113,6 +113,20 @@ node market-finder/scripts/validate-halloween-research.mjs
 ```
 
 この検証では、同じB候補でも掲載数が少ない語を上位にし、Etsy公式とeRankで需要帯が食い違う語は5点下げます。A/B/C/Dの昇格条件自体は変更しません。
+
+## 最終評価一覧
+
+最終ステップでは、候補ごとにeRank、Etsy Marketplace Insights、EverBeeの取得結果を横並びで比較できます。
+
+- `Unknown`: 提供元を確認済みですが、推定値が表示されていません。0ではありません。
+- `未取得`: その提供元をまだ確認していません。
+- `取得失敗`: 接続やページ解析に失敗しています。再試行できます。
+- `検証済み`: 必要な確認が終わり、総合点を確定できます。
+- `採点前`: クロスニッチなどの探索候補です。探索優先度は総合点とは別に表示します。
+
+「未検証をまとめて検証」は、eRank、Etsy公式、EverBeeの順に、不足している段階だけを最大12件ずつ処理します。既に取得した結果と過去の調査ラウンドは保持されます。
+
+未来デザイナー用CSVと参考用eRank CSVには、`Verification Status`、`Missing Stages`、`Score Type`、`eRank Capture Status`が追加されます。
 
 ## SEOタイトル / タグ設計
 

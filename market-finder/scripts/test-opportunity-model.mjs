@@ -23,6 +23,7 @@ import {
   keywordMatchesCategoryProduct,
   mergeMarketplaceInsightRelatedMetrics,
   rankMarketplaceInsightRelatedCandidates,
+  newcomerAccess,
   scoreEverbeeResult,
   selectMarketplaceInsightFollowUpBatch,
   evaluateMarketplaceInsightResearchStop,
@@ -1138,4 +1139,42 @@ test('builds no more than 13 valid tags and omits year-only tags', () => {
   assert.ok(plan.tags.length <= 13)
   assert.equal(plan.tags.every((tag) => tag.length <= 20), true)
   assert.equal(plan.tags.some((tag) => /^\d{4}$/.test(tag)), false)
+})
+
+test('reports whether a new shop can compete with the reviews already on the page', () => {
+  const easy = newcomerAccess({
+    productRows: [
+      { monthlySales: 10, reviews: 12 },
+      { monthlySales: 8, reviews: 40 },
+      { monthlySales: 5, reviews: 30 },
+    ],
+  })
+  assert.equal(easy.hasReviewData, true)
+  assert.equal(easy.medianSellerReviews, 30)
+  assert.equal(easy.lowReviewSellerCount, 3)
+  assert.equal(easy.lowReviewSellerShare, 1)
+
+  const hard = newcomerAccess({
+    productRows: [
+      { monthlySales: 10, reviews: 900 },
+      { monthlySales: 8, reviews: 480 },
+      { monthlySales: 5, reviews: 12 },
+    ],
+  })
+  assert.equal(hard.medianSellerReviews, 480)
+  assert.equal(hard.lowReviewSellerCount, 1)
+
+  // Listings that are not selling say nothing about how hard the top of the page is.
+  const sellingOnly = newcomerAccess({
+    productRows: [
+      { monthlySales: 0, reviews: 1 },
+      { monthlySales: 6, reviews: 300 },
+    ],
+  })
+  assert.equal(sellingOnly.medianSellerReviews, 300)
+
+  // Review data is optional: a capture without it must not invent a verdict.
+  const missing = newcomerAccess({ productRows: [{ monthlySales: 6 }] })
+  assert.equal(missing.hasReviewData, false)
+  assert.equal(missing.medianSellerReviews, null)
 })

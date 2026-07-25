@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260722-2">
+    <link rel="stylesheet" href="./styles.css?v=20260725-11">
   </head>
   <body>
     <main class="app-shell">
@@ -17,6 +17,26 @@
           <h1>売れそうなEtsy商品を探す</h1>
           <p class="top-summary">商品を選んで、検索されている言葉と売れている商品を順番に確認します。</p>
         </div>
+        <section id="researchStatusBar" class="research-status-bar" aria-label="現在の調査状態">
+          <div class="research-status-item">
+            <small>調査条件</small>
+            <strong id="researchGlobalCondition">読み込み中</strong>
+          </div>
+          <div class="research-status-item">
+            <small>接続</small>
+            <strong id="researchGlobalConnection">確認中</strong>
+          </div>
+          <div class="research-status-item research-status-activity">
+            <small>実行中</small>
+            <strong id="researchGlobalActivity" aria-live="polite">待機中</strong>
+          </div>
+          <div class="research-global-stop">
+            <button id="researchGlobalStopBtn" type="button" class="danger-btn" disabled aria-describedby="researchGlobalStopReason">
+              <span aria-hidden="true">■</span><span>停止</span>
+            </button>
+            <small id="researchGlobalStopReason">停止できる調査はありません</small>
+          </div>
+        </section>
         <div class="top-actions advanced-only">
           <button id="copyKeywordsBtn" type="button" class="ghost-btn" data-optional="予備">候補リストをコピー</button>
           <button id="downloadJobBtn" type="button" class="dark-btn" data-optional="予備">接続できない時のJSON</button>
@@ -81,8 +101,22 @@
         <div class="simple-status" id="simpleStatus">まず商品を選んで「候補を自動で探す」を押してください。</div>
       </section>
 
-      <section class="workspace-grid">
-        <aside class="panel controls-panel">
+      <nav id="researchStageTabs" class="research-stage-tabs flow-auto-only" aria-label="調査ステージ">
+        <button type="button" data-research-stage="conditions" aria-selected="true"><span>1</span><strong>条件</strong><small id="researchStageConditionsStatus">未着手</small></button>
+        <button type="button" data-research-stage="candidates" aria-selected="false"><span>2</span><strong>候補</strong><small id="researchStageCandidatesStatus">未着手</small></button>
+        <button type="button" data-research-stage="erank" aria-selected="false"><span>3</span><strong>eRank</strong><small id="researchStageErankStatus">未着手</small></button>
+        <button type="button" data-research-stage="etsy" aria-selected="false"><span>4</span><strong>Etsy公式</strong><small id="researchStageEtsyStatus">未着手</small></button>
+        <button type="button" data-research-stage="results" aria-selected="false"><span>5</span><strong>最終結果</strong><small id="researchStageResultsStatus">未着手</small></button>
+      </nav>
+
+      <section id="researchConsole" class="research-console flow-auto-only">
+        <aside id="researchQueue" class="research-console-queue" aria-label="調査キュー">
+          <div id="researchQueueFilters" class="research-queue-filters"></div>
+          <div id="researchQueueList" class="research-queue-list"></div>
+        </aside>
+        <div id="researchWorkspace" class="research-console-workspace">
+          <section class="workspace-grid">
+        <aside class="panel controls-panel" data-research-panel="conditions">
           <div class="panel-heading">
             <p class="section-kicker">1 / 5</p>
             <h2>条件を決めて候補を作る</h2>
@@ -206,7 +240,7 @@
           </div>
         </aside>
 
-        <section class="panel candidates-panel">
+        <section class="panel candidates-panel" data-research-panel="candidates" hidden>
           <div class="panel-heading row-heading">
             <div>
               <p class="section-kicker">2 / 5</p>
@@ -241,11 +275,15 @@
           </div>
           <div class="step-primary-action">
             <div class="mini-guide">候補を確認したら、eRankで検索数・クリック・競合・KDを調べます。</div>
-            <div id="erankQueryPlanSummary" class="inline-status">初回候補の完全語句と基底語を確認します。</div>
+            <div id="erankQueryPlanSummary" class="inline-status">候補を作ると、eRankで消費する検索数が表示されます。</div>
             <button id="candidateErankBtn" type="button" class="primary-btn full-width">eRankで検索数を見る</button>
           </div>
         </section>
 
+        <aside id="researchInspector" class="research-console-inspector" aria-label="選択キーワードの詳細">
+          <details class="advanced-research-input advanced-only">
+            <summary>詳細入力</summary>
+            <div id="researchInspectorContent" class="research-inspector-content">
         <aside class="panel research-panel">
           <div class="panel-heading">
             <p class="section-kicker">予備入力</p>
@@ -261,9 +299,9 @@
             <p class="box-help">「調査欄へ候補を入れる」を押すと、この欄に調査対象が入ります。「この欄をEverBee取得」を押すと、その欄の中身だけを順番に検索します。</p>
             <ul class="preflight-list">
               <li>Chrome拡張を読み込み済み</li>
-              <li>このページを 127.0.0.1:4173 で開いている</li>
+              <li>このページを localhost または 127.0.0.1 で開いている</li>
               <li>EverBeeにログイン済み</li>
-              <li>拡張バージョン 1.31</li>
+              <li>拡張バージョン 1.36</li>
             </ul>
 
             <label class="field">
@@ -402,9 +440,12 @@
             <button id="importCsvBtn" type="button" class="ghost-btn full-width" data-optional="CSV">貼り付けを読み込む</button>
           </div>
         </aside>
-      </section>
+            </div>
+          </details>
+        </aside>
+          </section>
 
-      <section class="erank-section">
+      <section class="erank-section" data-research-panel="erank" hidden>
         <div class="results-heading">
           <div>
             <p class="section-kicker">3 / 5</p>
@@ -413,7 +454,6 @@
           </div>
           <div class="heading-actions">
             <span class="count-badge"><strong id="erankCount">0</strong><small>eRank結果</small></span>
-            <button id="downloadErankCsvBtn" type="button" class="ghost-btn" data-optional="保存">eRank結果CSV保存</button>
           </div>
         </div>
         <div class="service-note">
@@ -441,7 +481,7 @@
         </div>
       </section>
 
-      <section id="marketplaceInsightPanel" class="marketplace-section">
+      <section id="marketplaceInsightPanel" class="marketplace-section" data-research-panel="etsy" hidden>
         <div class="results-heading">
           <div>
             <p class="section-kicker">4 / 5</p>
@@ -487,6 +527,7 @@
         </div>
       </section>
 
+      <section data-research-panel="results" hidden>
       <section class="results-section">
         <div class="results-heading">
           <div>
@@ -501,8 +542,48 @@
               <span>C: 派生探索・追加確認</span>
               <span>D: 除外候補</span>
             </div>
-            <button id="downloadStep4CsvBtn" type="button" class="ghost-btn" data-optional="保存">結果CSV保存</button>
           </div>
+        </div>
+        <div id="finalResultToolbar" class="final-result-toolbar">
+          <div class="final-result-context">
+            <strong>調査結果と商品化テスト候補</strong>
+            <span id="finalResultFreshness">最新の確認日時を表示します</span>
+          </div>
+          <div class="final-result-actions">
+            <button id="copyFinalKeywordsBtn" type="button" class="ghost-btn" aria-describedby="finalResultFreshness">キーワードをコピー</button>
+            <button id="downloadErankCsvBtn" type="button" class="ghost-btn" data-optional="保存" aria-describedby="finalResultFreshness">参考用eRank CSV</button>
+            <button id="downloadStep4CsvBtn" type="button" class="primary-btn" data-optional="保存" aria-describedby="finalResultFreshness">未来デザイナー用CSV</button>
+          </div>
+        </div>
+        <section id="finalKeywordDecision" class="final-keyword-decision" aria-live="polite"></section>
+        <section id="designShortlistPanel" class="design-shortlist-panel">
+          <div class="design-shortlist-heading">
+            <div>
+              <p class="section-kicker">未来デザイナーへ渡す</p>
+              <h3>次に作る4テーマ</h3>
+              <p class="panel-help">検証済みA/B候補を買い手意図のテーマにまとめ、上位4テーマを出します。1テーマ＝1シリーズとして5〜8商品を作ります。調査結果はすべて残るので、足りなければ「次の4テーマ」を見られます。</p>
+            </div>
+            <span id="designShortlistCount" class="count-badge"><strong>0</strong><small>テーマ</small></span>
+          </div>
+          <div id="designShortlistList" class="design-shortlist-list"></div>
+          <div class="design-shortlist-actions">
+            <button id="downloadDesignShortlistBtn" type="button" class="primary-btn">このテーマ群をCSV保存</button>
+            <button id="designShortlistMoreBtn" type="button" class="ghost-btn">次の4テーマ</button>
+            <button id="designShortlistResetBtn" type="button" class="text-btn">最初のテーマに戻す</button>
+          </div>
+          <div id="designShortlistStatus" class="inline-status">EverBeeの売上確認が終わると、次に作るテーマがここに出ます。</div>
+        </section>
+        <div class="final-evidence-controls">
+          <div id="finalEvidenceFilters" class="final-evidence-filters" role="group" aria-label="最終結果の表示切り替え">
+            <button type="button" data-final-evidence-filter="all" aria-pressed="true">すべて</button>
+            <button type="button" data-final-evidence-filter="recommended" aria-pressed="false">推奨</button>
+            <button type="button" data-final-evidence-filter="pending" aria-pressed="false">検証待ち</button>
+            <button type="button" data-final-evidence-filter="hold" aria-pressed="false">保留</button>
+            <button type="button" data-final-evidence-filter="excluded" aria-pressed="false">除外</button>
+            <button type="button" data-final-evidence-filter="failed" aria-pressed="false">取得失敗</button>
+          </div>
+          <p id="finalEvidenceScopeStatus" class="final-evidence-scope-status">選抜した候補だけを検証対象にします。</p>
+          <button id="verifyPendingEvidenceBtn" type="button" class="primary-btn">選抜済みを自動検証</button>
         </div>
         <div id="researchRoundProgress" class="research-round-progress" hidden></div>
         <div id="researchRoundTabs" class="research-round-tabs" role="tablist" aria-label="調査ラウンド"></div>
@@ -518,6 +599,10 @@
           <span><strong>Top Share</strong> 70%以上は単一ヒットへの集中としてAから除外</span>
           <span><strong>Freshness</strong> eRankとEverBeeが45日以内の時だけA/B候補</span>
         </div>
+        <div id="finalEvidenceScrollProxy" class="final-evidence-scroll-proxy" aria-label="最終結果を横に移動">
+          <div id="finalEvidenceScrollProxyTrack" class="final-evidence-scroll-proxy-track"></div>
+        </div>
+        <div id="finalEvidenceTable" class="final-evidence-table-shell" aria-live="polite"></div>
         <section id="crossNicheSection" class="cross-niche-section" hidden>
           <div class="cross-niche-heading">
             <div>
@@ -532,6 +617,7 @@
             <span><strong>需要維持率</strong> 親市場の検索需要をどれだけ残したか</span>
             <span><strong>効率改善</strong> 検索数 ÷ 競合数が親の何倍になったか</span>
           </div>
+          <div id="crossNicheProposal" class="cross-niche-proposal" hidden></div>
           <div id="crossNicheStatus" class="inline-status cross-niche-status">候補が見つかると通常調査へ自動追加し、再検証後に最終順位を確定します。</div>
           <div id="crossNicheList" class="cross-niche-list"></div>
         </section>
@@ -589,6 +675,9 @@
 
         <ul id="seoWarnings" class="seo-warnings"></ul>
         <div id="seoStatus" class="inline-status">eRank/EverBeeの結果を入れたあと、ここでタイトルとタグに整えます。</div>
+      </section>
+      </section>
+        </div>
       </section>
     </main>
 
@@ -655,6 +744,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260722-2"></script>
+    <script type="module" src="./src/app.js?v=20260725-11"></script>
   </body>
 </html>

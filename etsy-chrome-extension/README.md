@@ -18,7 +18,7 @@ C:\work\AntiGravity\Etsy_product\etsy-chrome-extension
 
 ## Market Finderから使う
 
-1. `http://127.0.0.1:4173/market-finder/` を開く
+1. 起動時に案内された `http://127.0.0.1:ポート番号/market-finder/` を開く
 2. イベントと商品カテゴリを選び、キーワードを生成する
 3. `eRankで広く見る` を押す
 4. 拡張がeRankを開き、広めの検索語で検索数・クリック・競合を順番に確認する
