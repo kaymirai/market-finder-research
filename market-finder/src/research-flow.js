@@ -133,6 +133,44 @@ export function buildEtsyCandidatesFromErank(erankRows = [], candidates = []) {
     ))
 }
 
+export function buildEtsyCandidatesFromPool(candidates = []) {
+  const byKeyword = new Map()
+
+  candidates.forEach((source) => {
+    const keyword = normalizeKeyword(source?.keyword ?? source?.query)
+    const riskTerms = Array.isArray(source?.score?.riskTerms) ? source.score.riskTerms : []
+    if (!keyword || byKeyword.has(keyword) || riskTerms.length > 0) return
+    if (source.status && source.status !== 'ready') return
+
+    const candidate = {
+      keyword,
+      query: keyword,
+      discoveryLane: source.discoveryLane ?? 'baseline',
+      queryStrategy: source.queryStrategy ?? 'direct',
+      opportunityIndex: Number(source.score?.total) || 0,
+      officialFirst: true,
+    }
+    if (Array.isArray(source.axisTerms) && source.axisTerms.length > 0) candidate.axisTerms = [...source.axisTerms]
+    if (source.sourceQuery) candidate.sourceQuery = source.sourceQuery
+    if (source.intentTrack) candidate.intentTrack = source.intentTrack
+    if (source.historyClusterKey) candidate.historyClusterKey = source.historyClusterKey
+    if (source.buyerIntentIdentity) candidate.buyerIntentIdentity = source.buyerIntentIdentity
+    if (Object.prototype.hasOwnProperty.call(source, 'previouslyResearchedElsewhere')) {
+      candidate.previouslyResearchedElsewhere = Boolean(source.previouslyResearchedElsewhere)
+    }
+    if (Array.isArray(source.priorEventIds) && source.priorEventIds.length > 0) {
+      candidate.priorEventIds = [...source.priorEventIds]
+    }
+    byKeyword.set(keyword, candidate)
+  })
+
+  return [...byKeyword.values()].sort((left, right) => (
+    Number(left.previouslyResearchedElsewhere) - Number(right.previouslyResearchedElsewhere)
+    || right.opportunityIndex - left.opportunityIndex
+    || left.keyword.localeCompare(right.keyword, 'en')
+  ))
+}
+
 export function marketplaceCompletedKeywords(plan) {
   const completed = Array.isArray(plan?.items)
     ? plan.items.filter((item) => item.status === 'completed' && hasValues([

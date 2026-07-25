@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260726-1">
+    <link rel="stylesheet" href="./styles.css?v=20260726-2">
   </head>
   <body>
     <main class="app-shell">
@@ -108,8 +108,8 @@
       <nav id="researchStageTabs" class="research-stage-tabs flow-auto-only" aria-label="調査ステージ">
         <button type="button" data-research-stage="conditions" aria-selected="true"><span>1</span><strong>条件</strong><small id="researchStageConditionsStatus">未着手</small></button>
         <button type="button" data-research-stage="candidates" aria-selected="false"><span>2</span><strong>候補</strong><small id="researchStageCandidatesStatus">未着手</small></button>
-        <button type="button" data-research-stage="erank" aria-selected="false"><span>3</span><strong>eRank</strong><small id="researchStageErankStatus">未着手</small></button>
-        <button type="button" data-research-stage="etsy" aria-selected="false"><span>4</span><strong>Etsy公式</strong><small id="researchStageEtsyStatus">未着手</small></button>
+        <button type="button" data-research-stage="etsy" aria-selected="false"><span>3</span><strong>Etsy公式</strong><small id="researchStageEtsyStatus">未着手</small></button>
+        <button type="button" data-research-stage="erank" aria-selected="false"><span>4</span><strong>eRank</strong><small id="researchStageErankStatus">未着手</small></button>
         <button type="button" data-research-stage="results" aria-selected="false"><span>5</span><strong>最終結果</strong><small id="researchStageResultsStatus">未着手</small></button>
       </nav>
 
@@ -280,19 +280,19 @@
           <div id="candidateList" class="candidate-list"></div>
 
           <dl class="badge-guide" aria-label="候補バッジの見方">
-            <div><dt>調査OK</dt><dd>次のeRank確認に入れてよい候補です。人気確定ではありません。</dd></div>
+            <div><dt>調査OK</dt><dd>次のEtsy公式確認に入れてよい候補です。人気確定ではありません。</dd></div>
             <div><dt>2 words</dt><dd>キーワードの単語数です。短すぎる語句は広すぎる場合があります。</dd></div>
-            <div><dt>Trend候補</dt><dd>自動探索で拾った流行語候補です。人気かどうかはeRank/EverBeeで確認します。</dd></div>
-            <div><dt>eRank確認済み</dt><dd>eRankの数字を取得済みです。下のeRank結果で需要点を見ます。</dd></div>
+            <div><dt>Trend候補</dt><dd>自動探索で拾った流行語候補です。人気かどうかはEtsy公式/EverBeeで確認します。</dd></div>
+            <div><dt>eRank確認済み</dt><dd>eRankの数字を取得済みです。eRank結果で関連語の広がりを見ます。</dd></div>
           </dl>
 
           <div class="button-row candidate-actions advanced-only">
             <button id="copyReadyBtn" type="button" class="ghost-btn" data-optional="任意">調査欄へ候補を入れる</button>
           </div>
-          <div class="step-primary-action">
-            <div class="mini-guide">候補を確認したら、eRankで検索数・クリック・競合・KDを調べます。</div>
-            <div id="erankQueryPlanSummary" class="inline-status">候補を作ると、eRankで消費する検索数が表示されます。</div>
-            <button id="candidateErankBtn" type="button" class="primary-btn full-width">eRankで検索数を見る</button>
+          <div id="marketplaceStartAction" class="step-primary-action">
+            <div class="mini-guide">候補を確認したら、Etsy公式データ（Marketplace Insights）で直近30日の検索数と掲載数を確かめます。</div>
+            <button id="marketplaceStartBtn" type="button" class="primary-btn full-width">Etsy公式確認を自動実行</button>
+            <div id="marketplaceStartStatus" class="inline-status">候補が入ると利用できます。</div>
           </div>
         </section>
 
@@ -461,48 +461,12 @@
         </aside>
           </section>
 
-      <section class="erank-section" data-research-panel="erank" hidden>
-        <div class="results-heading">
-          <div>
-            <p class="section-kicker">3 / 5</p>
-            <h2>eRankの需要結果を確認する</h2>
-            <p class="panel-help">検索数やクリックがある語句を確認し、良さそうな語句だけEtsy公式データで確かめます。</p>
-          </div>
-          <div class="heading-actions">
-            <span class="count-badge"><strong id="erankCount">0</strong><small>eRank結果</small></span>
-          </div>
-        </div>
-        <div class="service-note">
-          <strong>次はEtsy公式です。</strong>
-          <span>eRankで需要が確認できた候補を、Marketplace Insightsの直近30日データで確かめます。</span>
-        </div>
-        <div class="metric-glossary">
-          <span><strong>Search</strong> 検索されている量</span>
-          <span><strong>Clicks</strong> 実際にクリックされた量</span>
-          <span><strong>Competition</strong> eRank上の競合数</span>
-          <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
-        </div>
-        <div class="score-guide" aria-label="需要スコアの見方">
-          <span class="guide-chip weak"><strong>0-39</strong> 弱い</span>
-          <span class="guide-chip review"><strong>40-61</strong> 追加確認</span>
-          <span class="guide-chip promising"><strong>62-79</strong> 有望</span>
-          <span class="guide-chip strong"><strong>80-100</strong> 強い</span>
-          <span class="guide-chip danger"><strong>赤</strong> 除外・需要未確認</span>
-        </div>
-        <div id="erankSummary" class="research-summary"></div>
-        <div id="erankResultsList" class="erank-results-list"></div>
-        <div id="marketplaceStartAction" class="step-primary-action">
-          <button id="marketplaceStartBtn" type="button" class="primary-btn full-width">Etsy公式確認を自動実行</button>
-          <div id="marketplaceStartStatus" class="inline-status">eRank結果が入ると利用できます。</div>
-        </div>
-      </section>
-
       <section id="marketplaceInsightPanel" class="marketplace-section" data-research-panel="etsy" hidden>
         <div class="results-heading">
           <div>
-            <p class="section-kicker">4 / 5</p>
+            <p class="section-kicker">3 / 5</p>
             <h2>Etsy公式の結果を確認する</h2>
-            <p class="panel-help">直近30日の検索数、掲載数、関連語を取り込み、EverBeeで売上を見る候補を絞ります。</p>
+            <p class="panel-help">直近30日の検索数、掲載数、関連語を取り込み、絞り込みの土台にします。Etsyが自分で出している数字なので、ここを最優先で見ます。</p>
           </div>
           <span id="marketplaceAccessBadge" class="soft-pill">週15回無料</span>
         </div>
@@ -524,7 +488,7 @@
         </div>
         <div class="marketplace-current">
           <small>次の検索</small>
-          <strong id="marketplaceCurrentQuery">eRank結果を確認してください</strong>
+          <strong id="marketplaceCurrentQuery">候補を作成してください</strong>
         </div>
         <div class="marketplace-actions">
           <button id="marketplaceBuildPlanBtn" type="button" class="ghost-btn">無料15語プランを作り直す</button>
@@ -535,8 +499,45 @@
           <button id="marketplaceSkipBtn" type="button" class="text-btn">この語句をスキップ</button>
         </div>
         <ol id="marketplaceQueue" class="marketplace-queue"></ol>
-        <div id="marketplaceStatus" class="inline-status">eRank結果を確認すると、Etsy公式で調べる候補が準備されます。</div>
+        <div id="marketplaceStatus" class="inline-status">候補を作ると、Etsy公式で調べる候補が準備されます。</div>
         <div id="marketplaceResultsList" class="marketplace-results-list"></div>
+        <div class="step-primary-action">
+          <div class="mini-guide">Etsy公式で数字が取れたら、eRankで関連語を広げます。eRankは1日の検索回数に上限があるので、絞り込みではなく広げる用途に使います。</div>
+          <div id="erankQueryPlanSummary" class="inline-status">候補を作ると、eRankで消費する検索数が表示されます。</div>
+          <button id="candidateErankBtn" type="button" class="primary-btn full-width">eRankで関連語を広げる</button>
+        </div>
+      </section>
+
+      <section class="erank-section" data-research-panel="erank" hidden>
+        <div class="results-heading">
+          <div>
+            <p class="section-kicker">4 / 5</p>
+            <h2>eRankの需要結果を確認する</h2>
+            <p class="panel-help">検索数やクリックがある語句と、その関連語を見ます。ここは候補を広げるための材料で、合否はEtsy公式とEverBeeの数字で決めます。</p>
+          </div>
+          <div class="heading-actions">
+            <span class="count-badge"><strong id="erankCount">0</strong><small>eRank結果</small></span>
+          </div>
+        </div>
+        <div class="service-note">
+          <strong>次はEverBeeです。</strong>
+          <span>Etsy公式とeRankで残った候補を、実際に売れているかどうかで確かめます。</span>
+        </div>
+        <div class="metric-glossary">
+          <span><strong>Search</strong> 検索されている量</span>
+          <span><strong>Clicks</strong> 実際にクリックされた量</span>
+          <span><strong>Competition</strong> eRank上の競合数</span>
+          <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
+        </div>
+        <div class="score-guide" aria-label="需要スコアの見方">
+          <span class="guide-chip weak"><strong>0-39</strong> 弱い</span>
+          <span class="guide-chip review"><strong>40-61</strong> 追加確認</span>
+          <span class="guide-chip promising"><strong>62-79</strong> 有望</span>
+          <span class="guide-chip strong"><strong>80-100</strong> 強い</span>
+          <span class="guide-chip danger"><strong>赤</strong> 除外・需要未確認</span>
+        </div>
+        <div id="erankSummary" class="research-summary"></div>
+        <div id="erankResultsList" class="erank-results-list"></div>
         <div class="step-primary-action">
           <button id="erankToEverbeeBtn" type="button" class="primary-btn full-width">EverBeeで売上を確認する</button>
           <div id="everbeeQueueStatus" class="inline-status">Etsy公式結果を取り込むと、その候補を優先して売上確認します。</div>
@@ -761,6 +762,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260726-1"></script>
+    <script type="module" src="./src/app.js?v=20260726-2"></script>
   </body>
 </html>

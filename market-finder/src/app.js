@@ -30,13 +30,14 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260726-1'
+} from '../../shared/market-keyword-engine/index.js?v=20260726-2'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
 } from './research-performance.js?v=20260720-1'
 import {
   buildEtsyCandidatesFromErank,
+  buildEtsyCandidatesFromPool,
   extensionResultsImportMode,
   marketplaceCompletedKeywords,
   shouldDiscardMarketplacePlan,
@@ -1273,7 +1274,9 @@ function erankRowsWithOpportunity() {
 
 function etsyValidationCandidates() {
   if (restoredResultsAwaitingConfirmation()) return []
-  return buildEtsyCandidatesFromErank(erankResultRows(), state.candidates)
+  const fromErank = buildEtsyCandidatesFromErank(erankResultRows(), state.candidates)
+  if (fromErank.length > 0) return fromErank
+  return buildEtsyCandidatesFromPool(state.candidates)
 }
 
 function restoredResultsAwaitingConfirmation() {
@@ -1748,7 +1751,7 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = []
   if (validationCandidates.length === 0) {
     if (preserveExisting && state.marketplaceInsightPlan?.items?.length > 0) return true
     state.marketplaceInsightPlan = null
-    state.marketplaceInsightMessage = `eRankで需要を確認すると、${quota}語までEtsy公式確認プランを作成できます。`
+    state.marketplaceInsightMessage = `候補を作ると、${quota}語までEtsy公式確認プランを作成できます。`
     return false
   }
 
@@ -1948,44 +1951,50 @@ function renderMarketplaceInsightResults() {
   `
 }
 
-function renderMarketplaceInsightPlan() {
-  renderGlobalResearchStatus()
-  const mode = state.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
-  const defaultQuota = mode === 'plus' ? 60 : 15
+function renderMarketplaceStartAction() {
   const eligibleCandidates = etsyValidationCandidates()
   const officialProbeCount = eligibleCandidates.filter((candidate) => candidate.officialProbe).length
   const hasErankResults = erankResultRows().length > 0
   const restoredAwaiting = restoredResultsAwaitingConfirmation()
+  const hasPlan = Boolean(state.marketplaceInsightPlan?.items?.length)
+  elements.marketplaceStartBtn.disabled = state.marketplaceInsightBusy || state.marketplaceInsightAutoRunning || eligibleCandidates.length === 0
+  elements.marketplaceStartStatus.textContent = restoredAwaiting
+      ? '前回の保存結果です。結果一覧の上にある「この前回結果から続ける」を押すと利用できます。'
+    : hasPlan
+      ? 'Etsy公式確認プランを作成済みです。押すと続きから自動実行します。'
+    : eligibleCandidates.length === 0
+      ? '候補を作るとEtsy公式で確認できます。'
+      : !state.extensionConnected
+        ? `候補は準備できています。実Chromeで開き、Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてから押してください。`
+        : officialProbeCount > 0
+          ? `eRank保留のうち需要数値がある安全な上位${officialProbeCount}件を、Etsy公式データで再確認します。`
+        : hasErankResults
+          ? `eRankで絞った${eligibleCandidates.length}件をEtsy公式で順番に自動確認します。`
+        : `候補${eligibleCandidates.length}件をEtsy公式で順番に自動確認します。`
+}
+
+function renderMarketplaceInsightPlan() {
+  renderGlobalResearchStatus()
+  renderMarketplaceStartAction()
+  const mode = state.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
+  const defaultQuota = mode === 'plus' ? 60 : 15
+  const eligibleCandidates = etsyValidationCandidates()
+  const restoredAwaiting = restoredResultsAwaitingConfirmation()
   const officialKeywords = marketplaceCompletedKeywords(state.marketplaceInsightPlan)
   const hasPlan = Boolean(state.marketplaceInsightPlan?.items?.length)
   const canUsePlan = hasPlan && !restoredAwaiting
-  elements.marketplaceStartBtn.hidden = canUsePlan
   elements.marketplaceBuildPlanBtn.hidden = !canUsePlan
   elements.marketplaceNextBtn.hidden = !canUsePlan || state.marketplaceInsightAutoRunning
   elements.marketplaceAutoStopBtn.hidden = !state.marketplaceInsightAutoRunning
   elements.marketplaceCaptureBtn.hidden = !canUsePlan
   elements.marketplaceNextBatchBtn.hidden = !canUsePlan
   elements.marketplaceSkipBtn.hidden = !canUsePlan
-  elements.marketplaceStartBtn.disabled = state.marketplaceInsightBusy || state.marketplaceInsightAutoRunning || eligibleCandidates.length === 0
-  elements.marketplaceStartStatus.textContent = restoredAwaiting
-      ? '前回の保存結果です。eRank結果の上にある「この前回結果から続ける」を押すと利用できます。'
-    : hasPlan
-      ? 'Etsy公式確認プランを作成済みです。下のボタンから自動実行または再開できます。'
-    : !hasErankResults
-      ? 'eRankで需要を確認すると利用できます。'
-      : eligibleCandidates.length === 0
-        ? 'eRank結果はありますが、Etsy公式へ進める基準を通った候補は0件です。上の「今回は保留した候補」を確認してください。'
-      : !state.extensionConnected
-        ? `eRank確認は完了しています。実Chromeで開き、Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてから押してください。`
-        : officialProbeCount > 0
-          ? `eRank保留のうち需要数値がある安全な上位${officialProbeCount}件を、Etsy公式データで再確認します。`
-        : `eRankで絞った${eligibleCandidates.length}件をEtsy公式で順番に自動確認します。`
   elements.erankToEverbeeBtn.disabled = state.marketplaceInsightBusy || restoredAwaiting || (officialKeywords.length === 0 && erankResultRows().length === 0)
   elements.everbeeQueueStatus.textContent = officialKeywords.length > 0
     ? `Etsy公式で取得した${officialKeywords.length}件を優先してEverBeeへ渡します。`
     : erankResultRows().length > 0
       ? 'Etsy公式は未取得です。押した場合は確認後にeRank候補で続行できます。'
-      : 'Etsy公式結果を取り込むと、その候補を優先して売上確認します。'
+      : '先に3「Etsy公式」で数字を取り込むと、その候補を優先して売上確認します。'
   elements.marketplaceFreeModeBtn.classList.toggle('is-active', mode === 'free')
   elements.marketplaceFreeModeBtn.setAttribute('aria-pressed', String(mode === 'free'))
   elements.marketplacePlusModeBtn.classList.toggle('is-active', mode === 'plus')
@@ -3707,14 +3716,14 @@ function nextResearchAction() {
   if (readyKeywords().length === 0) {
     return { text: '1「条件」で商品とイベントを選び、「候補を自動で探す」を押してください。', blocking: false }
   }
-  if (erankResultRows().length === 0) {
-    return { text: '2「候補」を確認し、「eRankで検索数を見る」を押してください。', blocking: false }
-  }
   if (marketplaceCompletedKeywords(state.marketplaceInsightPlan).length === 0) {
-    return { text: '4「Etsy公式」で「Etsy公式確認を自動実行」を押してください。', blocking: false }
+    return { text: '2「候補」を確認し、「Etsy公式確認を自動実行」を押してください。', blocking: false }
+  }
+  if (erankResultRows().length === 0) {
+    return { text: '3「Etsy公式」の下にある「eRankで関連語を広げる」を押してください。', blocking: false }
   }
   if (everbeeResultRows().length === 0) {
-    return { text: '4「Etsy公式」の下にある「EverBeeで売上を確認する」を押してください。', blocking: false }
+    return { text: '4「eRank」の下にある「EverBeeで売上を確認する」を押してください。', blocking: false }
   }
   return { text: '5「最終結果」で今日作るテーマを選び、CSVを未来デザイナーへ渡してください。', blocking: false }
 }
@@ -4262,7 +4271,7 @@ function researchConsoleMetrics() {
     erankResultCount: erankResultRows().length,
     erankFailureCount: captureStates.filter((row) => row.status === 'failed').length,
     erankPendingCount: captureStates.filter((row) => ['unsearched', 'active', 'partial'].includes(row.status)).length,
-    etsyEligibleCount: buildEtsyCandidatesFromErank(erankResultRows(), state.candidates).length,
+    etsyEligibleCount: etsyValidationCandidates().length,
     etsyCompletedCount: marketplaceItems.filter((item) => item.status === 'completed').length,
     etsyPendingCount: marketplaceItems.filter((item) => !['completed', 'skipped'].includes(item.status)).length,
     everbeeResultCount: everbeeResultRows().length,
@@ -4318,6 +4327,7 @@ function renderActiveResearchStage(options = {}) {
         break
       case 'candidates':
         renderCandidates()
+        renderMarketplaceStartAction()
         break
       case 'erank':
         renderErankResults()
@@ -5686,7 +5696,8 @@ function setRunningControls(active) {
   elements.broadStartBtn.disabled = active
   elements.candidateErankBtn.disabled = active || readyKeywords().length === 0
   elements.marketplaceStartBtn.disabled = active || etsyValidationCandidates().length === 0
-  elements.erankToEverbeeBtn.disabled = active || erankResultRows().length === 0
+  elements.erankToEverbeeBtn.disabled = active
+    || (erankResultRows().length === 0 && marketplaceCompletedKeywords(state.marketplaceInsightPlan).length === 0)
   elements.stopExtensionBtn.disabled = !active
   elements.progressStopBtn.disabled = !active
 }
@@ -6278,7 +6289,7 @@ async function startMarketplaceInsight() {
     return false
   }
   if (etsyValidationCandidates().length === 0) {
-    state.marketplaceInsightMessage = 'Etsy公式へ進めるeRank確認済み候補がありません。先にeRankで検索数を確認してください。'
+    state.marketplaceInsightMessage = 'Etsy公式へ進める候補がありません。先に1「条件」で候補を作ってください。'
     renderMarketplaceInsightPlan()
     return false
   }

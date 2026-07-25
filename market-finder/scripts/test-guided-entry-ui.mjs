@@ -36,7 +36,7 @@ test('uses one set of five numbered workflow steps', () => {
 
 test('renders the five-stage research console', () => {
   assert.match(html, /id="researchStageTabs"/)
-  const stages = ['conditions', 'candidates', 'erank', 'etsy', 'results']
+  const stages = ['conditions', 'candidates', 'etsy', 'erank', 'results']
   let previousStagePosition = -1
   let previousPanelPosition = -1
 
@@ -238,6 +238,7 @@ test('dispatches only the selected stage detail renderers', () => {
     'renderBroadHints',
     'renderSearchSeedRows',
     'renderCandidates',
+    'renderMarketplaceStartAction',
     'renderErankResults',
     'renderMarketplaceInsightPlan',
     'renderResultsTable',
@@ -249,7 +250,7 @@ test('dispatches only the selected stage detail renderers', () => {
   )
   const expected = {
     conditions: ['trend', 'broad', 'seeds', 'queue', 'inspector'],
-    candidates: ['candidates', 'queue', 'inspector'],
+    candidates: ['candidates', 'etsy-start', 'queue', 'inspector'],
     erank: ['erank', 'queue', 'inspector'],
     etsy: ['etsy', 'queue', 'inspector'],
     results: ['results', 'cross-niche', 'seo'],
@@ -265,6 +266,7 @@ test('dispatches only the selected stage detail renderers', () => {
       render('broad'),
       render('seeds'),
       render('candidates'),
+      render('etsy-start'),
       render('erank'),
       render('etsy'),
       render('results'),
@@ -708,15 +710,24 @@ test('asks who the buyer is before generating candidates and feeds it into gener
 
 test('puts every next action after the result or inputs it uses', () => {
   assert.ok(position('yearInput') < position('trendAutoBtn'))
-  assert.ok(position('candidateList') < position('candidateErankBtn'))
-  assert.ok(position('erankResultsList') < position('marketplaceStartBtn'))
-  assert.ok(position('marketplaceResultsList') < position('erankToEverbeeBtn'))
+  assert.ok(position('candidateList') < position('marketplaceStartBtn'))
+  assert.ok(position('marketplaceResultsList') < position('candidateErankBtn'))
+  assert.ok(position('erankResultsList') < position('erankToEverbeeBtn'))
   assert.ok(position('erankToEverbeeBtn') < position('resultsList'))
 })
 
 test('does not render duplicate automatic research buttons above the steps', () => {
   assert.doesNotMatch(html, /id="simpleImportErankBtn"/)
   assert.doesNotMatch(html, /id="simpleStartBtn"/)
+})
+
+test('runs Etsy official before eRank and does not gate it on eRank results', () => {
+  const stages = ['conditions', 'candidates', 'etsy', 'erank', 'results']
+  assert.deepEqual([...html.matchAll(/data-research-stage="([a-z]+)"/g)].map((match) => match[1]), stages)
+  assert.match(app, /const fromErank = buildEtsyCandidatesFromErank\(erankResultRows\(\), state\.candidates\)\n\s*if \(fromErank\.length > 0\) return fromErank\n\s*return buildEtsyCandidatesFromPool\(state\.candidates\)/)
+  assert.match(app, /'2「候補」を確認し、「Etsy公式確認を自動実行」を押してください。'/)
+  assert.match(app, /'3「Etsy公式」の下にある「eRankで関連語を広げる」を押してください。'/)
+  assert.match(app, /'4「eRank」の下にある「EverBeeで売上を確認する」を押してください。'/)
 })
 
 test('starts Etsy after eRank and renders official results before EverBee', () => {
@@ -743,12 +754,12 @@ test('automatically opens, waits for, captures, and advances Etsy candidates', (
   assert.doesNotMatch(app, /結果が見えたら「表示中の結果を取り込む」を押してください/)
 })
 
-test('keeps the Etsy action clickable when eRank is ready but the extension is disconnected', () => {
+test('keeps the Etsy action clickable when candidates are ready but the extension is disconnected', () => {
   assert.match(app, /const hasErankResults = erankResultRows\(\)\.length > 0/)
   assert.match(app, /elements\.marketplaceStartBtn\.disabled = state\.marketplaceInsightBusy \|\| state\.marketplaceInsightAutoRunning \|\| eligibleCandidates\.length === 0/)
   assert.doesNotMatch(app, /elements\.marketplaceStartBtn\.disabled = [^\n]*!state\.extensionConnected/)
-  assert.match(app, /eRank結果はありますが、Etsy公式へ進める基準を通った候補は0件です/)
-  assert.match(app, /eRank確認は完了しています。実Chromeで開き、Chrome拡張/)
+  assert.match(app, /候補を作るとEtsy公式で確認できます。/)
+  assert.match(app, /候補は準備できています。実Chromeで開き、Chrome拡張/)
 })
 
 test('labels completed eRank results and the next Etsy action clearly', () => {
@@ -1150,5 +1161,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260726-1')
+  assert.equal(stylesheetVersion, '20260726-2')
 })

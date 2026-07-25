@@ -10,7 +10,7 @@ EtsyMiraiProducerへ組み込む前に、イベント別の低競合キーワー
 - 広めの市場で売れた商品のタイトル・タグから種ワードを抽出
 - `event + target + product + year` を軸に候補を増やす
 - Chrome拡張へ直接依頼して、eRank Keyword ToolとEverBee Product Analyticsを順番に検索
-- eRankで検索需要を見て、良さそうな候補だけEverBeeで売上確認
+- Etsy公式データで先に絞り、eRankは関連語で候補を広げる用途に使い、残った候補をEverBeeで売上確認
 - eRankの需要・供給と、EverBeeで複数商品が売れている広がりを別々に評価
 - `Opportunity A-D` と `Confidence High/Medium/Low` を分けて表示
 - 古い検索種や一般トレンドは発想用に留め、45日以内のeRank/EverBeeまたは7日以内のEtsy公式データだけをA/B判定に使用
@@ -36,11 +36,12 @@ http://127.0.0.1:ポート番号/market-finder/
 ## Chrome拡張連携
 
 1. `etsy-chrome-extension` をChromeでLoad unpackedする
-2. 拡張のバージョンが `1.26` になっていることを確認
+2. 拡張のバージョンが `1.37` になっていることを確認
 3. 実Chromeで開いているMarket Finderページが自動再読み込みされることを確認
 4. 画面上部のかんたんモードで `候補を作る` を押す
-5. `eRankで広く見る` を押す
-6. `EverBeeで売上確認` を押す
+5. `Etsy公式確認を自動実行` を押す
+6. 候補を広げたい時だけ `eRankで関連語を広げる` を押す
+7. `EverBeeで売上を確認する` を押す
 
 調査開始後は進捗モーダルが開き、現在のキーワード、完了件数、残り件数、完了/停止/エラー状態を確認できます。
 モーダル内の `停止` から途中停止もできます。
