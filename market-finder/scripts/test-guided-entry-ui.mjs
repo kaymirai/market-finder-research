@@ -751,12 +751,20 @@ test('shows product-level EverBee sales in monthly-sales order with recent winne
   assert.doesNotMatch(app, /sales: result\.topMonthlySales/)
 })
 
-test('automatically routes cross-niche candidates while preserving earlier results', () => {
+test('confirms the cross-niche round before swapping the candidate list', () => {
   assert.match(html, /id="crossNicheSection"/)
   assert.match(html, /id="crossNicheList"/)
   assert.match(html, /id="crossNicheStatus"/)
+  assert.match(html, /id="crossNicheProposal"/)
   assert.ok(position('crossNicheSection') < position('resultsList'))
-  assert.match(html, /高競合の売れ筋を自動で掘り下げる/)
+  assert.ok(position('crossNicheProposal') < position('crossNicheList'))
+  assert.match(app, /function renderCrossNicheProposal\(\)/)
+  assert.match(app, /function applyCrossNicheProposal\(\)/)
+  assert.match(app, /function dismissCrossNicheProposal\(\)/)
+  assert.match(app, /data-cross-niche-apply/)
+  assert.match(app, /data-cross-niche-dismiss/)
+  // The candidate list may only be replaced from the explicit confirmation path.
+  assert.doesNotMatch(app, /if \(result\.didQueue\) \{[\s\S]{0,400}state\.candidates = queuedCandidates/)
   assert.doesNotMatch(html, /id="buildNextRoundBtn"/)
   assert.doesNotMatch(html, /上位候補を次の調査へ追加/)
   assert.match(app, /buildCrossNicheDrilldown/)
@@ -775,7 +783,6 @@ test('automatically routes cross-niche candidates while preserving earlier resul
   assert.match(app, /if \(!isCrossNicheWorkflowPending\(state\.crossNicheWorkflow\)\) \{\s*if \(added > 0\) generateCandidates/)
   assert.match(app, /buildErankQueryPlan/)
   assert.match(app, /setFlowMode\('auto'\)/)
-  assert.match(app, /document\.querySelector\('\.candidates-panel'\)\?\.scrollIntoView/)
   assert.match(app, /crossNicheParent/)
   assert.match(app, /'Cross Niche Parent'/)
   assert.match(app, /'Cross Niche Depth'/)
@@ -1116,5 +1123,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260725-5')
+  assert.equal(stylesheetVersion, '20260725-6')
 })

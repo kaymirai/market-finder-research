@@ -3878,3 +3878,47 @@ button.research-table-row {
   gap: 8px;
   align-items: center;
 }
+
+.cross-niche-proposal {
+  border: 1px solid var(--blue);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 12px 0;
+  background: rgba(37, 99, 235, .06);
+}
+
+.cross-niche-proposal-body {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.cross-niche-proposal-body > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cross-niche-proposal-body p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cross-niche-proposal-parents {
+  opacity: .8;
+}
+
+.cross-niche-proposal-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.cross-niche-proposal-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+}

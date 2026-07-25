@@ -152,6 +152,7 @@ const state = {
   marketplaceInsightAutoRunning: false,
   marketplaceInsightMessage: '',
   crossNicheWorkflow: createCrossNicheWorkflowState(),
+  crossNicheProposal: null,
   erankQueryPlan: [],
   designShortlistOffset: 0,
   researchRounds: createResearchRoundsState(),
@@ -337,6 +338,7 @@ const elements = {
   crossNicheCount: document.querySelector('#crossNicheCount'),
   crossNicheList: document.querySelector('#crossNicheList'),
   crossNicheStatus: document.querySelector('#crossNicheStatus'),
+  crossNicheProposal: document.querySelector('#crossNicheProposal'),
   copyKeywordsBtn: document.querySelector('#copyKeywordsBtn'),
   copyReadyBtn: document.querySelector('#copyReadyBtn'),
   downloadJobBtn: document.querySelector('#downloadJobBtn'),
@@ -556,6 +558,7 @@ function persistMarketFinderState() {
       marketplaceInsightPlan: state.marketplaceInsightPlan,
       marketplaceInsightMessage: state.marketplaceInsightMessage,
       crossNicheWorkflow: state.crossNicheWorkflow,
+      crossNicheProposal: state.crossNicheProposal,
       erankQueryPlan: state.erankQueryPlan,
       designShortlistOffset: state.designShortlistOffset,
       researchRounds: state.researchRounds,
@@ -615,6 +618,9 @@ function restorePersistedState() {
   state.marketplaceInsightPlan = savedState.marketplaceInsightPlan ?? null
   state.marketplaceInsightMessage = String(savedState.marketplaceInsightMessage ?? '')
   state.crossNicheWorkflow = createCrossNicheWorkflowState(savedState.crossNicheWorkflow)
+  state.crossNicheProposal = Array.isArray(savedState.crossNicheProposal?.candidates)
+    ? savedState.crossNicheProposal
+    : null
   state.erankQueryPlan = Array.isArray(savedState.erankQueryPlan) ? savedState.erankQueryPlan : []
   state.designShortlistOffset = Math.max(0, Number(savedState.designShortlistOffset) || 0)
   state.researchRounds = createResearchRoundsState(savedState.researchRounds)
@@ -3352,11 +3358,20 @@ function crossNicheWorkflowMessage() {
   if (state.crossNicheWorkflow.status === 'complete') {
     return `クロスニッチ再調査は完了しました。初回結果と実測済みの子キーワードを合わせて最終順位を確定しました。`
   }
-  return '高競合で複数商品が売れている市場が見つかると、上位候補を通常調査へ自動追加します。'
+  return '高競合で複数商品が売れている市場が見つかると、次のラウンドへ進むかどうかを確認します。'
 }
 
-function syncCrossNicheWorkflow({ announce = false, scroll = false } = {}) {
+function crossNicheProposalMessage() {
+  const proposal = state.crossNicheProposal
+  if (!proposal) return ''
+  return `追加探索の候補が${proposal.candidates.length}件見つかりました。「この${proposal.candidates.length}件を調査する」を押すと次のラウンドへ進みます。今の結果はそのまま残ります。`
+}
+
+// The batch is proposed instead of applied: swapping the candidate list while results are
+// still being imported loses track of which round the user was reading.
+function syncCrossNicheWorkflow({ announce = false } = {}) {
   if (restoredResultsAwaitingConfirmation()) return { didQueue: false, queuedCandidates: [] }
+  if (state.crossNicheProposal) return { didQueue: false, queuedCandidates: [] }
 
   const drilldown = currentCrossNicheDrilldown()
   const result = advanceCrossNicheWorkflow({
@@ -3367,57 +3382,24 @@ function syncCrossNicheWorkflow({ announce = false, scroll = false } = {}) {
     limit: 12,
   })
   const previousStatus = state.crossNicheWorkflow.status
-  state.crossNicheWorkflow = result.workflow
 
   if (result.didQueue) {
-    const previousRound = currentResearchRound()
-    if (previousRound) {
-      const previousRows = analyzeResearchRows(
-        researchRowsForRound(state.researchRows, previousRound),
-        currentOptions(),
-      ).everbeeRows
-      state.researchRounds = updateResearchRound(state.researchRounds, previousRound.id, {
-        status: 'complete',
-        resultKeywords: previousRows.map((row) => row.keyword),
-        opportunityCounts: summarizeOpportunityCounts(previousRows),
-        completedAt: new Date().toISOString(),
-        stopReason: previousRound.type === 'initial'
-          ? '初回確認を完了し、高競合の売れ筋から追加探索へ移行'
-          : 'この深度の確認を完了し、次の深度へ移行',
-      })
+    state.crossNicheProposal = {
+      workflow: result.workflow,
+      candidates: limitNextResearchCandidates(
+        result.queuedCandidates.map(crossNicheCandidateForResearch),
+        12,
+      ),
+      parentKeywords: [...new Set(result.queuedCandidates.map((candidate) => candidate.parentKeyword).filter(Boolean))],
+      createdAt: new Date().toISOString(),
     }
-    const queuedCandidates = limitNextResearchCandidates(
-      result.queuedCandidates.map(crossNicheCandidateForResearch),
-      12
-    )
-    state.candidates = queuedCandidates
-    mergeCandidateCatalog(queuedCandidates)
-    state.researchRounds = startResearchRound(state.researchRounds, {
-      type: 'cross-niche',
-      depth: state.crossNicheWorkflow.round,
-      candidateKeywords: queuedCandidates.map((candidate) => candidate.keyword),
-      status: state.crossNicheWorkflow.status,
-      startedAt: new Date().toISOString(),
-      startReason: '高競合でも複数商品が売れている親市場を、買い手意図で追加探索',
-    })
-    state.candidateRoundId = state.researchRounds.activeRoundId
-    state.researchRounds.selectedRoundId = 'all'
-    state.activeDiscoveryLane = 'all'
-    state.marketplaceInsightPlan = null
-    state.marketplaceInsightMessage = ''
-    state.selectedResultKey = ''
-    state.seoPlan = null
-    elements.researchJobInput.value = ''
-    state.candidateMessage = crossNicheWorkflowMessage()
-    setFlowMode('auto', { persist: false })
-    if (scroll) {
-      window.setTimeout(() => {
-        document.querySelector('.candidates-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }, 0)
-    }
+    if (announce) setSimpleStatus(crossNicheProposalMessage())
+    return { didQueue: false, queuedCandidates: [], proposed: true }
   }
 
-  if (!result.didQueue && previousStatus !== state.crossNicheWorkflow.status) {
+  state.crossNicheWorkflow = result.workflow
+
+  if (previousStatus !== state.crossNicheWorkflow.status) {
     const activeRound = currentResearchRound()
     if (activeRound?.type === 'cross-niche') {
       syncActiveRoundStatus(state.crossNicheWorkflow.status, {
@@ -3428,17 +3410,125 @@ function syncCrossNicheWorkflow({ announce = false, scroll = false } = {}) {
     }
   }
 
-  if (announce && (result.didQueue || previousStatus !== state.crossNicheWorkflow.status)) {
+  if (announce && previousStatus !== state.crossNicheWorkflow.status) {
     setSimpleStatus(crossNicheWorkflowMessage())
   }
   return result
 }
 
+function applyCrossNicheProposal() {
+  const proposal = state.crossNicheProposal
+  if (!proposal) return
+
+  const previousRound = currentResearchRound()
+  if (previousRound) {
+    const previousRows = analyzeResearchRows(
+      researchRowsForRound(state.researchRows, previousRound),
+      currentOptions(),
+    ).everbeeRows
+    state.researchRounds = updateResearchRound(state.researchRounds, previousRound.id, {
+      status: 'complete',
+      resultKeywords: previousRows.map((row) => row.keyword),
+      opportunityCounts: summarizeOpportunityCounts(previousRows),
+      completedAt: new Date().toISOString(),
+      stopReason: previousRound.type === 'initial'
+        ? '初回確認を完了し、高競合の売れ筋から追加探索へ移行'
+        : 'この深度の確認を完了し、次の深度へ移行',
+    })
+  }
+
+  // A restored proposal must still describe the batch it applies, or the workflow would
+  // immediately look finished and propose the same round again.
+  state.crossNicheWorkflow = createCrossNicheWorkflowState({
+    ...proposal.workflow,
+    batch: proposal.workflow?.batch?.length > 0
+      ? proposal.workflow.batch
+      : proposal.candidates.map((candidate) => ({
+        keyword: candidate.keyword,
+        parentKeyword: candidate.crossNicheParent,
+        modifier: (candidate.axisTerms ?? [])[0] ?? '',
+        depth: candidate.crossNicheDepth ?? 1,
+        priorityScore: candidate.score ?? 0,
+      })),
+  })
+  state.candidates = proposal.candidates
+  mergeCandidateCatalog(proposal.candidates)
+  state.researchRounds = startResearchRound(state.researchRounds, {
+    type: 'cross-niche',
+    depth: state.crossNicheWorkflow.round,
+    candidateKeywords: proposal.candidates.map((candidate) => candidate.keyword),
+    status: state.crossNicheWorkflow.status,
+    startedAt: new Date().toISOString(),
+    startReason: '高競合でも複数商品が売れている親市場を、買い手意図で追加探索',
+  })
+  state.candidateRoundId = state.researchRounds.activeRoundId
+  state.researchRounds.selectedRoundId = 'all'
+  state.activeDiscoveryLane = 'all'
+  state.marketplaceInsightPlan = null
+  state.marketplaceInsightMessage = ''
+  state.selectedResultKey = ''
+  state.seoPlan = null
+  state.erankQueryPlan = []
+  elements.researchJobInput.value = ''
+  state.candidateMessage = crossNicheWorkflowMessage()
+  state.crossNicheProposal = null
+  setFlowMode('auto', { persist: false })
+  setSimpleStatus(crossNicheWorkflowMessage())
+  renderAll()
+}
+
+function dismissCrossNicheProposal() {
+  const proposal = state.crossNicheProposal
+  if (!proposal) return
+
+  // Keep the batch out of future proposals without starting the round.
+  state.crossNicheWorkflow = createCrossNicheWorkflowState({
+    ...state.crossNicheWorkflow,
+    consideredKeywords: proposal.workflow.consideredKeywords,
+  })
+  state.crossNicheProposal = null
+  setSimpleStatus('追加探索を見送りました。今の結果のまま、5「最終結果」で商品化を進められます。')
+  renderAll()
+}
+
+function renderCrossNicheProposal() {
+  const proposal = state.crossNicheProposal
+  if (!elements.crossNicheProposal) return
+  elements.crossNicheProposal.hidden = !proposal
+  if (!proposal) {
+    renderHtmlIfChanged(elements.crossNicheProposal, '')
+    return
+  }
+
+  const depth = proposal.workflow?.round ?? 1
+  const parents = proposal.parentKeywords ?? []
+  const preview = proposal.candidates.slice(0, 6).map((candidate) => (
+    `<span class="soft-pill">${escapeHtml(candidate.keyword)}</span>`
+  )).join('')
+  const rest = proposal.candidates.length - Math.min(6, proposal.candidates.length)
+
+  renderHtmlIfChanged(elements.crossNicheProposal, `
+    <div class="cross-niche-proposal-body">
+      <div>
+        <strong>次のラウンドへ進みますか？</strong>
+        <p>${escapeHtml(activeRoundLabel())}の確認が終わり、追加探索の候補が${proposal.candidates.length}件見つかりました。進むと候補一覧がクロスニッチ${depth}に切り替わります。今の結果は5「最終結果」に残ります。</p>
+        ${parents.length > 0 ? `<p class="cross-niche-proposal-parents">元の市場: ${escapeHtml(parents.join(' / '))}</p>` : ''}
+        <div class="cross-niche-proposal-preview">${preview}${rest > 0 ? `<span class="soft-pill">ほか${rest}件</span>` : ''}</div>
+      </div>
+      <div class="cross-niche-proposal-actions">
+        <button type="button" class="primary-btn" data-cross-niche-apply>この${proposal.candidates.length}件を調査する</button>
+        <button type="button" class="ghost-btn" data-cross-niche-dismiss>今回は見送る</button>
+      </div>
+    </div>
+  `)
+}
+
 function renderCrossNicheDrilldown() {
   const drilldown = currentCrossNicheDrilldown()
   const hasParents = drilldown.parents.length > 0
-  elements.crossNicheSection.hidden = !hasParents
+  elements.crossNicheSection.hidden = !hasParents && !state.crossNicheProposal
   elements.crossNicheCount.innerHTML = `<strong>${drilldown.candidates.length}</strong><small>候補</small>`
+  renderCrossNicheProposal()
 
   if (!hasParents) {
     elements.crossNicheList.innerHTML = ''
@@ -3495,7 +3585,9 @@ function renderCrossNicheDrilldown() {
     `
   }).join('')
 
-  elements.crossNicheStatus.textContent = crossNicheWorkflowMessage()
+  elements.crossNicheStatus.textContent = state.crossNicheProposal
+    ? crossNicheProposalMessage()
+    : crossNicheWorkflowMessage()
 }
 
 async function copySelectedNounBrief(button) {
@@ -4501,7 +4593,7 @@ function addManualResearch() {
   elements.etsyListingsInput.value = ''
   elements.etsyRelatedTermsInput.value = ''
   elements.notesInput.value = ''
-  syncCrossNicheWorkflow({ announce: true, scroll: true })
+  syncCrossNicheWorkflow({ announce: true })
   renderAll()
 }
 
@@ -4514,7 +4606,7 @@ function importCsv() {
     const count = fillEverbeeJobFromErank()
     setSimpleStatus(`検索結果を読み込みました。関連語も使って、売上確認する候補を${count}件作りました。`)
   }
-  syncCrossNicheWorkflow({ announce: true, scroll: true })
+  syncCrossNicheWorkflow({ announce: true })
   renderAll()
 }
 
@@ -4619,7 +4711,7 @@ function importExtensionResults(extensionState) {
     setSimpleStatus(nextMessage)
   }
   if (!extensionState.active) {
-    syncCrossNicheWorkflow({ announce: true, scroll: state.progress.mode === 'keyword' })
+    syncCrossNicheWorkflow({ announce: true })
   }
   persistMarketFinderState()
   return true
@@ -5283,7 +5375,7 @@ async function collectTrendScoutTerms() {
 function acceptRestoredResearchResults() {
   if (!state.restoredResearchSavedAt || state.researchRows.length === 0) return
   state.restoredResultsAccepted = true
-  const result = syncCrossNicheWorkflow({ announce: true, scroll: true })
+  const result = syncCrossNicheWorkflow({ announce: true })
   if (!result.didQueue) {
     setSimpleStatus('前回の保存結果を今回の続きとして使います。現在の調査段階から再開します。')
   }
@@ -6372,6 +6464,11 @@ function bindEvents() {
     if (!(event.target instanceof Element)) return
     if (event.target.closest('[data-retry-erank-failures]')) retryFailedErankResearch()
     if (event.target.closest('[data-erank-base-follow-up]')) startErankBaseFollowUp()
+  })
+  elements.crossNicheProposal.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return
+    if (event.target.closest('[data-cross-niche-apply]')) applyCrossNicheProposal()
+    if (event.target.closest('[data-cross-niche-dismiss]')) dismissCrossNicheProposal()
   })
   elements.marketplaceModeControl.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return
