@@ -1746,7 +1746,7 @@
                 if (updatedTabId === tabId && changeInfo.status === 'complete') {
                     clearTimeout(timeoutId)
                     chrome.tabs.onUpdated.removeListener(listener)
-                    setTimeout(() => resolve(), 1500)
+                    setTimeout(() => resolve(), 500)
                 }
             }
 

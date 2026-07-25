@@ -182,29 +182,32 @@
             return SEARCH_BUTTON_WORDS.some((word) => text.includes(word));
         });
         field.focus();
+        // One submit per keyword: pressing Enter and then clicking the button fired the
+        // search twice, which spent two of the daily eRank lookups and delayed the result.
+        const submitButton = formButton !== null && formButton !== void 0 ? formButton : button;
+        if (submitButton) {
+            submitButton.click();
+            return;
+        }
         field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
         field.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', bubbles: true }));
         field.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
-        await wait(500);
-        if (formButton) {
-            formButton.click();
-            return;
-        }
-        if (button)
-            button.click();
     }
-    async function waitForLikelyResults(keyword) {
+    // The previous keyword's numbers stay on screen until the new ones arrive, so results
+    // only count once the page differs from what was showing when the search was sent.
+    async function waitForLikelyResults(keyword, previousText = '') {
         const startedAt = Date.now();
         let lastText = '';
         let stableCount = 0;
         while (Date.now() - startedAt < 18000) {
-            await wait(900);
+            await wait(450);
             throwIfDailyLookupLimitReached();
             const text = normalizeText(document.body.innerText || '');
             if (pageHasNoDataMessage())
                 return;
             const hasMetric = /(average searches|avg searches|average clicks|avg clicks|etsy competition|search trend|competition|ctr)/i.test(text);
             const hasKeyword = text.toLowerCase().includes(keyword.toLowerCase().slice(0, 16));
+            const changed = !previousText || text !== previousText;
             if (text === lastText) {
                 stableCount += 1;
             }
@@ -212,7 +215,7 @@
                 stableCount = 0;
                 lastText = text;
             }
-            if (hasMetric && (stableCount >= 1 || hasKeyword))
+            if (changed && hasMetric && (stableCount >= 1 || hasKeyword))
                 return;
         }
     }
@@ -313,7 +316,6 @@
                 lastText = snapshot.text;
             }
             const elapsed = Date.now() - startedAt;
-            const waitedEnoughForLazyColumns = elapsed >= 12000;
             const requiredCompetitionRows = Math.max(1, Math.min(snapshot.rows, 3));
             const targetReady = snapshot.targetFound
                 && snapshot.targetDemandResolved
@@ -343,6 +345,13 @@
             const looksReady = hasVisibleMetrics
                 && partialLoadResolved
                 && stableCount >= 3;
+            // Lazy columns need a floor, but a row that already resolved demand, competition
+            // and KD has nothing left to load, so it does not have to serve the full wait.
+            const targetFullyResolved = snapshot.targetFound
+                && snapshot.targetDemandResolved
+                && snapshot.targetCompetitionResolved
+                && (snapshot.targetHasKd || snapshot.targetKdResolved);
+            const waitedEnoughForLazyColumns = elapsed >= (targetFullyResolved ? 4000 : 12000);
             if (waitedEnoughForLazyColumns && looksReady)
                 return;
         }
@@ -1298,11 +1307,12 @@
         field.scrollIntoView({ block: 'center' });
         field.focus();
         setNativeValue(field, keyword);
-        await wait(250);
+        await wait(150);
+        const textBeforeSearch = normalizeText(document.body.innerText || '');
         await submitSearch(field);
-        await wait(4500);
+        await wait(600);
         throwIfDailyLookupLimitReached();
-        await waitForLikelyResults(keyword);
+        await waitForLikelyResults(keyword, textBeforeSearch);
         throwIfDailyLookupLimitReached();
         if (pageHasNoDataMessage())
             return extractMetrics(keyword);
