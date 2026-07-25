@@ -162,3 +162,20 @@ test('exports verification metadata with both result CSVs', () => {
   assert.match(app, /Unknown/)
   assert.match(app, /const unknownMetric = row\.status === 'no-data' \? 'Unknown' : ''/)
 })
+
+test('hands the design step twenty verified keywords without discarding the rest', () => {
+  assert.match(html, /id="designShortlistPanel"/)
+  assert.match(html, /id="downloadDesignShortlistBtn"/)
+  assert.match(html, /id="designShortlistMoreBtn"/)
+  assert.match(html, /id="designShortlistResetBtn"/)
+  assert.match(html, /今日デザインする20件/)
+  assert.ok(html.indexOf('id="designShortlistPanel"') > html.indexOf('id="finalKeywordDecision"'))
+  assert.match(app, /function renderDesignShortlist\(\)/)
+  assert.match(app, /function currentDesignShortlist\(\)/)
+  assert.match(app, /function exportDesignShortlistCsv\(\)/)
+  assert.match(app, /selectDesignShortlist/)
+  // Only verified rows may reach the design handoff.
+  assert.match(app, /row\.evidenceState\.status === 'verified'\)\s*\n\s*\.map\(\(row\) => row\.everbeeRow\)/)
+  // The full export must stay available so the shortlist is a view, not a filter on the data.
+  assert.match(app, /function exportStep4Csv\(\)\s*\{\s*exportResultRowsCsv\(everbeeResultRows\(\)/)
+})

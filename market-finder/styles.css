@@ -3806,3 +3806,75 @@ button.research-table-row {
     display: none;
   }
 }
+
+.design-shortlist-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 14px 0 18px;
+}
+
+.design-shortlist-heading {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.design-shortlist-heading h3 {
+  margin: 4px 0 0;
+}
+
+.design-shortlist-list {
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.design-shortlist-row {
+  display: grid;
+  grid-template-columns: 36px minmax(200px, 3fr) 64px repeat(2, minmax(72px, .7fr));
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, .06);
+}
+
+.design-shortlist-rank {
+  font-weight: 700;
+  opacity: .6;
+  text-align: right;
+}
+
+.design-shortlist-keyword {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.design-shortlist-keyword small {
+  opacity: .7;
+}
+
+.design-shortlist-metric {
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+}
+
+.design-shortlist-metric small {
+  opacity: .6;
+}
+
+.design-shortlist-grade {
+  font-weight: 700;
+  text-align: center;
+}
+
+.design-shortlist-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

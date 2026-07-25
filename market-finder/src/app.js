@@ -52,6 +52,10 @@ import {
   summarizeErankQueryPlan,
 } from './erank-query-plan.js?v=20260725-4'
 import {
+  DESIGN_SHORTLIST_SIZE,
+  selectDesignShortlist,
+} from './design-shortlist.js?v=20260725-1'
+import {
   createResearchRoundsState,
   researchRowsForRound,
   selectResearchRound,
@@ -149,6 +153,7 @@ const state = {
   marketplaceInsightMessage: '',
   crossNicheWorkflow: createCrossNicheWorkflowState(),
   erankQueryPlan: [],
+  designShortlistOffset: 0,
   researchRounds: createResearchRoundsState(),
   candidateCatalog: [],
   researchRows: [],
@@ -256,6 +261,13 @@ const elements = {
   discoveryLaneTabs: document.querySelector('#discoveryLaneTabs'),
   discoveryStrategySummary: document.querySelector('#discoveryStrategySummary'),
   erankQueryPlanSummary: document.querySelector('#erankQueryPlanSummary'),
+  designShortlistPanel: document.querySelector('#designShortlistPanel'),
+  designShortlistList: document.querySelector('#designShortlistList'),
+  designShortlistCount: document.querySelector('#designShortlistCount'),
+  designShortlistStatus: document.querySelector('#designShortlistStatus'),
+  downloadDesignShortlistBtn: document.querySelector('#downloadDesignShortlistBtn'),
+  designShortlistMoreBtn: document.querySelector('#designShortlistMoreBtn'),
+  designShortlistResetBtn: document.querySelector('#designShortlistResetBtn'),
   marketplaceInsightPanel: document.querySelector('#marketplaceInsightPanel'),
   marketplaceModeControl: document.querySelector('#marketplaceModeControl'),
   marketplaceFreeModeBtn: document.querySelector('#marketplaceFreeModeBtn'),
@@ -545,6 +557,7 @@ function persistMarketFinderState() {
       marketplaceInsightMessage: state.marketplaceInsightMessage,
       crossNicheWorkflow: state.crossNicheWorkflow,
       erankQueryPlan: state.erankQueryPlan,
+      designShortlistOffset: state.designShortlistOffset,
       researchRounds: state.researchRounds,
       candidateCatalog: state.candidateCatalog,
       researchedMarketHistory: state.researchedMarketHistory,
@@ -603,6 +616,7 @@ function restorePersistedState() {
   state.marketplaceInsightMessage = String(savedState.marketplaceInsightMessage ?? '')
   state.crossNicheWorkflow = createCrossNicheWorkflowState(savedState.crossNicheWorkflow)
   state.erankQueryPlan = Array.isArray(savedState.erankQueryPlan) ? savedState.erankQueryPlan : []
+  state.designShortlistOffset = Math.max(0, Number(savedState.designShortlistOffset) || 0)
   state.researchRounds = createResearchRoundsState(savedState.researchRounds)
   state.candidateCatalog = Array.isArray(savedState.candidateCatalog) ? savedState.candidateCatalog : []
   state.researchedMarketHistory = normalizeResearchMarketHistory(savedState.researchedMarketHistory)
@@ -2933,6 +2947,19 @@ function evidenceConversionLabel(row = {}) {
   return String(row.notes ?? '').match(/Conversion:\s*([^/]+)/i)?.[1]?.trim() ?? ''
 }
 
+// The shortlist always reads every verified round, so narrowing the design handoff never
+// narrows the research behind it.
+function currentDesignShortlist() {
+  const verifiedRows = finalEvidenceRows()
+    .filter((row) => row.evidenceState.status === 'verified')
+    .map((row) => row.everbeeRow)
+    .filter(Boolean)
+  return selectDesignShortlist(verifiedRows, {
+    size: DESIGN_SHORTLIST_SIZE,
+    offset: state.designShortlistOffset,
+  })
+}
+
 function finalEvidenceRows() {
   const analysis = currentResearchAnalysis()
   const scoredByKeyword = new Map(analysis.scoredRows.map((row) => [normalizePhrase(row.keyword), row]))
@@ -3175,11 +3202,54 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
   return visibleRows
 }
 
+function renderDesignShortlist() {
+  if (!elements.designShortlistPanel) return
+  const shortlist = currentDesignShortlist()
+
+  elements.designShortlistCount.innerHTML = `<strong>${shortlist.items.length}</strong><small>件</small>`
+  elements.downloadDesignShortlistBtn.disabled = shortlist.items.length === 0
+  elements.designShortlistMoreBtn.disabled = !shortlist.hasMore
+  elements.designShortlistResetBtn.disabled = shortlist.offset === 0
+
+  if (shortlist.items.length === 0) {
+    renderHtmlIfChanged(
+      elements.designShortlistList,
+      '<div class="empty-state small">検証済みのA/B候補が入ると、ここに出ます。</div>',
+    )
+    elements.designShortlistStatus.textContent = 'EverBeeの売上確認が終わると、デザインに進む20件がここに出ます。'
+    return
+  }
+
+  renderHtmlIfChanged(elements.designShortlistList, shortlist.items.map((row, index) => {
+    const normalized = row.score.normalized
+    const route = row.productRoute ?? {}
+    const heroNouns = (row.idea?.nounBrief?.heroNouns ?? []).slice(0, 3).join(' / ')
+    return `
+      <div class="design-shortlist-row">
+        <span class="design-shortlist-rank">${shortlist.offset + index + 1}</span>
+        <span class="design-shortlist-keyword">
+          <strong>${escapeHtml(normalized.keyword)}</strong>
+          <small>${escapeHtml(route.primary?.label ?? '-')}${heroNouns ? ` / 主役: ${escapeHtml(heroNouns)}` : ''}</small>
+        </span>
+        <span class="design-shortlist-grade score-${escapeHtml(opportunityScoreClass(row.score.score))}">${escapeHtml(row.score.opportunityLabel)}</span>
+        <span class="design-shortlist-metric"><small>販売</small><strong>${escapeHtml(displayMetricValue(normalized.medianMonthlySales))}</strong></span>
+        <span class="design-shortlist-metric"><small>競合</small><strong>${escapeHtml(displayMetricValue(normalized.listingsAnalyzed))}</strong></span>
+      </div>
+    `
+  }).join(''))
+
+  const pageText = shortlist.pageCount > 1
+    ? `${shortlist.page}/${shortlist.pageCount}ページ目`
+    : '全件表示中'
+  elements.designShortlistStatus.textContent = `検証済みA/B候補${shortlist.total}件を${shortlist.clusterCount}テーマに整理し、${pageText}（${shortlist.items.length}件）を表示しています。CSVは未来デザイナーの「2. キーワードセットを作る」へアップロードします。`
+}
+
 function renderResultsTable() {
   renderFinalResultToolbar()
   renderResearchRoundControls()
   const allRows = finalEvidenceRows()
   renderFinalKeywordDecision(allRows)
+  renderDesignShortlist()
   state.finalEvidenceCount = allRows.length
   const stageStatus = document.querySelector('#researchStageResultsStatus')
   if (stageStatus) stageStatus.textContent = allRows.length > 0 ? `${allRows.length}件` : '売上確認待ち'
@@ -4819,7 +4889,17 @@ function exportErankCsv() {
 }
 
 function exportStep4Csv() {
-  const rows = everbeeResultRows()
+  exportResultRowsCsv(everbeeResultRows(), 'market-finder-step4-everbee')
+}
+
+function exportDesignShortlistCsv() {
+  const shortlist = currentDesignShortlist()
+  if (shortlist.items.length === 0) return
+  const suffix = shortlist.page > 1 ? `-p${shortlist.page}` : ''
+  exportResultRowsCsv(shortlist.items, `market-finder-design-top${shortlist.size}${suffix}`)
+}
+
+function exportResultRowsCsv(rows, fileBaseName) {
   if (rows.length === 0) return
   const evidenceByKeyword = new Map(finalEvidenceRows().map((row) => [row.keyword, row]))
 
@@ -4960,7 +5040,7 @@ function exportStep4Csv() {
   })
 
   const date = new Date().toISOString().slice(0, 10)
-  downloadTextFile(`market-finder-step4-everbee-${date}.csv`, `\ufeff${[header.map(csvCell).join(','), ...lines].join('\n')}`, 'text/csv;charset=utf-8')
+  downloadTextFile(`${fileBaseName}-${date}.csv`, `\ufeff${[header.map(csvCell).join(','), ...lines].join('\n')}`, 'text/csv;charset=utf-8')
 }
 
 function exportAvailableResearchCsv({ includeErank = true, includeEverbee = true } = {}) {
@@ -6361,6 +6441,17 @@ function bindEvents() {
   elements.downloadJobBtn.addEventListener('click', downloadJob)
   elements.downloadErankCsvBtn.addEventListener('click', exportErankCsv)
   elements.downloadStep4CsvBtn.addEventListener('click', exportStep4Csv)
+  elements.downloadDesignShortlistBtn.addEventListener('click', exportDesignShortlistCsv)
+  elements.designShortlistMoreBtn.addEventListener('click', () => {
+    state.designShortlistOffset += DESIGN_SHORTLIST_SIZE
+    renderDesignShortlist()
+    persistMarketFinderState()
+  })
+  elements.designShortlistResetBtn.addEventListener('click', () => {
+    state.designShortlistOffset = 0
+    renderDesignShortlist()
+    persistMarketFinderState()
+  })
   elements.candidateErankBtn.addEventListener('click', simpleStartErankResearch)
   elements.erankToEverbeeBtn.addEventListener('click', simpleStartResearch)
   elements.autoBucketBtn.addEventListener('click', () => autoBucketKeywords(true))

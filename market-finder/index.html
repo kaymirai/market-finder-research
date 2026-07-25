@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260725-4">
+    <link rel="stylesheet" href="./styles.css?v=20260725-5">
   </head>
   <body>
     <main class="app-shell">
@@ -556,6 +556,23 @@
           </div>
         </div>
         <section id="finalKeywordDecision" class="final-keyword-decision" aria-live="polite"></section>
+        <section id="designShortlistPanel" class="design-shortlist-panel">
+          <div class="design-shortlist-heading">
+            <div>
+              <p class="section-kicker">未来デザイナーへ渡す</p>
+              <h3>今日デザインする20件</h3>
+              <p class="panel-help">検証済みA/B候補から、テーマが重ならないように20件だけ選びます。調査結果はすべて残るので、足りなければ「次の20件」を見られます。</p>
+            </div>
+            <span id="designShortlistCount" class="count-badge"><strong>0</strong><small>件</small></span>
+          </div>
+          <div id="designShortlistList" class="design-shortlist-list"></div>
+          <div class="design-shortlist-actions">
+            <button id="downloadDesignShortlistBtn" type="button" class="primary-btn">この20件をCSV保存</button>
+            <button id="designShortlistMoreBtn" type="button" class="ghost-btn">次の20件</button>
+            <button id="designShortlistResetBtn" type="button" class="text-btn">最初の20件に戻す</button>
+          </div>
+          <div id="designShortlistStatus" class="inline-status">EverBeeの売上確認が終わると、デザインに進む20件がここに出ます。</div>
+        </section>
         <div class="final-evidence-controls">
           <div id="finalEvidenceFilters" class="final-evidence-filters" role="group" aria-label="最終結果の表示切り替え">
             <button type="button" data-final-evidence-filter="all" aria-pressed="true">すべて</button>
@@ -726,6 +743,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260725-4"></script>
+    <script type="module" src="./src/app.js?v=20260725-5"></script>
   </body>
 </html>
