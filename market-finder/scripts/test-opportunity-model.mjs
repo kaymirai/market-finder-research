@@ -15,6 +15,7 @@ import {
   classifyKeywordBucket,
   explainEverbeeScore,
   generateBroadEventCandidates,
+  generateBuyerIntentCandidates,
   getBroadEventDiscoveryProfile,
   getMarketTiming,
   getMarketplaceInsightFreshness,
@@ -1139,6 +1140,57 @@ test('builds no more than 13 valid tags and omits year-only tags', () => {
   assert.ok(plan.tags.length <= 13)
   assert.equal(plan.tags.every((tag) => tag.length <= 20), true)
   assert.equal(plan.tags.some((tag) => /^\d{4}$/.test(tag)), false)
+})
+
+test('builds keywords from who the buyer is, not from an event name', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'school librarian\ntrail crew volunteer',
+    categoryId: 'shirt',
+  })
+  const keywords = rows.map((row) => row.keyword)
+
+  assert.ok(rows.length > 0)
+  // The identity has to survive into the phrase, or the axis added nothing.
+  assert.ok(keywords.some((keyword) => keyword.includes('school librarian')))
+  assert.ok(keywords.some((keyword) => keyword.includes('trail crew volunteer')))
+  assert.ok(keywords.every((keyword) => keyword.includes('shirt')))
+  // Life transition, personalization and style axes each reach the output.
+  assert.ok(keywords.some((keyword) => keyword.startsWith('retirement ')))
+  assert.ok(keywords.some((keyword) => keyword.startsWith('personalized ')))
+  assert.ok(keywords.some((keyword) => keyword.startsWith('retro ')))
+  rows.forEach((row) => {
+    assert.equal(row.queryStrategy, 'buyer-intent')
+    assert.equal(row.categoryId, 'shirt')
+  })
+})
+
+test('takes the niche vocabulary from the user and folds in their own actions', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'handbell choir member',
+    categoryId: 'shirt',
+    actions: ['bell ringing', 'sunday practice'],
+  })
+  const keywords = rows.map((row) => row.keyword)
+
+  assert.ok(keywords.some((keyword) => keyword.includes('bell ringing')))
+  assert.ok(keywords.some((keyword) => keyword.includes('sunday practice')))
+})
+
+test('applies the same risk and structure gates as the event generator', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'lord of the rings fan\nschool librarian',
+    categoryId: 'shirt',
+  })
+
+  // An IP identity must not come back as ready to research.
+  const ipRows = rows.filter((row) => row.keyword.includes('lord of the rings'))
+  assert.ok(ipRows.every((row) => row.status === 'review' && row.riskTerms.length > 0))
+  assert.ok(rows.some((row) => row.keyword.includes('school librarian') && row.status === 'ready'))
+})
+
+test('returns nothing when no identity is given rather than inventing one', () => {
+  assert.deepEqual(generateBuyerIntentCandidates({ categoryId: 'shirt' }), [])
+  assert.deepEqual(generateBuyerIntentCandidates({ identitySeeds: '   ', categoryId: 'shirt' }), [])
 })
 
 test('reports whether a new shop can compete with the reviews already on the page', () => {

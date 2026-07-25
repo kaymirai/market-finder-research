@@ -7,6 +7,7 @@ import {
   buildMarketplaceInsightPlan,
   generateBroadMarketQueries,
   generateBroadEventCandidates,
+  generateBuyerIntentCandidates,
   generateKeywordCandidates,
   parseBroadMarketListings,
   everbeeResultsToBroadListings,
@@ -29,7 +30,7 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260725-1'
+} from '../../shared/market-keyword-engine/index.js?v=20260726-1'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
@@ -239,6 +240,8 @@ const elements = {
   limitInput: document.querySelector('#limitInput'),
   targetChips: document.querySelector('#targetChips'),
   seedInput: document.querySelector('#seedInput'),
+  buyerIdentityInput: document.querySelector('#buyerIdentityInput'),
+  buyerActionInput: document.querySelector('#buyerActionInput'),
   trendScoutInput: document.querySelector('#trendScoutInput'),
   trendSampleBtn: document.querySelector('#trendSampleBtn'),
   trendAutoBtn: document.querySelector('#trendAutoBtn'),
@@ -541,6 +544,8 @@ function persistMarketFinderState() {
       year: elements.yearInput.value,
       limit: elements.limitInput.value,
       seedKeywords: elements.seedInput.value,
+      buyerIdentitySeeds: elements.buyerIdentityInput?.value ?? '',
+      buyerActionSeeds: elements.buyerActionInput?.value ?? '',
       trendScoutKeywords: elements.trendScoutInput.value,
       customRiskTerms: elements.riskInput.value,
       targets: selectedTargets(),
@@ -600,6 +605,8 @@ function restorePersistedState() {
   setInputValue(elements.yearInput, form.year)
   setInputValue(elements.limitInput, form.limit)
   setInputValue(elements.seedInput, form.seedKeywords)
+  setInputValue(elements.buyerIdentityInput, form.buyerIdentitySeeds)
+  setInputValue(elements.buyerActionInput, form.buyerActionSeeds)
   setInputValue(elements.trendScoutInput, form.trendScoutKeywords)
   setInputValue(elements.riskInput, form.customRiskTerms)
   setInputValue(elements.broadQueryInput, form.broadQueries)
@@ -877,6 +884,15 @@ function parseTrendScoutEntries(value) {
 
 function trendScoutTerms() {
   return parseTrendScoutEntries(elements.trendScoutInput?.value).map((entry) => entry.keyword)
+}
+
+function buyerIntentCandidates() {
+  if (!elements.buyerIdentityInput) return []
+  return generateBuyerIntentCandidates({
+    ...currentOptions(),
+    identitySeeds: elements.buyerIdentityInput.value,
+    actions: (elements.buyerActionInput?.value ?? '').split(/\r?\n|,/),
+  })
 }
 
 function combinedSeedKeywords() {
@@ -4432,9 +4448,12 @@ function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Ma
 function generateCandidates({ preserveMarketplacePlan = false } = {}) {
   const options = currentOptions()
   const broadEventMode = isBroadEventDiscovery()
-  const generated = broadEventMode
+  const baseGenerated = broadEventMode
     ? generateBroadEventCandidates({ ...options, limit: 40 })
     : generateKeywordCandidates(options)
+  // Buyer-intent phrases lead: naming the person produces long-tail terms that event
+  // templates cannot reach, and every competing tool generates the event templates.
+  const generated = [...buyerIntentCandidates(), ...baseGenerated]
   const generatedMap = new Map(generated.map((candidate) => [normalizePhrase(candidate.keyword), candidate]))
   const trendEntries = trendCandidateEntries()
   const trendKeywords = cleanKeywordList(trendEntries.map((entry) => entry.keyword)).slice(0, 50)
@@ -6523,6 +6542,8 @@ function bindEvents() {
   elements.yearInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.limitInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.seedInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.buyerIdentityInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.buyerActionInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.trendScoutInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.riskInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.targetChips.addEventListener('change', () => resetCandidatesForInputChange())

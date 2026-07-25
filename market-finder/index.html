@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260725-14">
+    <link rel="stylesheet" href="./styles.css?v=20260726-1">
   </head>
   <body>
     <main class="app-shell">
@@ -191,6 +191,18 @@
             <div id="targetChips" class="chip-grid"></div>
             <small>例: new dad は新米パパ向け、dog dad は犬好きパパ向け。不要な相手はOFFにします。</small>
           </div>
+
+          <label class="field">
+            <span>買い手は誰ですか（8軸の入口）</span>
+            <textarea id="buyerIdentityInput" rows="4" placeholder="例: school librarian&#10;trail crew volunteer&#10;handbell choir member"></textarea>
+            <small>その人たちが自分をどう呼ぶかを1行ずつ書きます。ここに入れると、節目・贈答・名入れ・様式を掛け合わせた語句を作ります。イベント名より、こちらの方が競合と被りません。</small>
+          </label>
+
+          <label class="field advanced-only">
+            <span>その人たちの行動・場面（任意）</span>
+            <textarea id="buyerActionInput" rows="3" placeholder="例: bell ringing&#10;sunday practice&#10;trail building"></textarea>
+            <small>買い手が実際にしていることを足すと、内輪の言い回しに近づきます。</small>
+          </label>
 
           <label class="field advanced-only">
             <span>追加したいニッチ語句</span>
@@ -749,6 +761,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260725-14"></script>
+    <script type="module" src="./src/app.js?v=20260726-1"></script>
   </body>
 </html>

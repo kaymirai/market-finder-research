@@ -697,6 +697,15 @@ test('uses one exact label for automatic candidate discovery', () => {
   assert.doesNotMatch(app, /おすすめ自動探索をはじめる/)
 })
 
+test('asks who the buyer is before generating candidates and feeds it into generation', () => {
+  assert.match(html, /id="buyerIdentityInput"/)
+  assert.match(html, /id="buyerActionInput"/)
+  assert.ok(position('buyerIdentityInput') < position('trendAutoBtn'))
+  assert.match(app, /generateBuyerIntentCandidates/)
+  assert.match(app, /buyerIdentitySeeds/)
+  assert.match(app, /\.\.\.buyerIntentCandidates\(\)/)
+})
+
 test('puts every next action after the result or inputs it uses', () => {
   assert.ok(position('yearInput') < position('trendAutoBtn'))
   assert.ok(position('candidateList') < position('candidateErankBtn'))
@@ -1141,5 +1150,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260725-14')
+  assert.equal(stylesheetVersion, '20260726-1')
 })

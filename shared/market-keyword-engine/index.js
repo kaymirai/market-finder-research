@@ -1805,6 +1805,88 @@ export function generateKeywordCandidates(options = {}) {
     .slice(0, limit)
 }
 
+// The eight-axis formula describes a person in a situation rather than a topic. Event
+// templates produce the same head terms every competitor's tool produces; naming who the
+// buyer is and what they are doing produces phrases only someone inside that world writes.
+export const BUYER_INTENT_AXES = Object.freeze({
+  transition: ['retirement', 'first year', 'first season', 'new', 'graduation', 'promotion', 'anniversary'],
+  relationship: ['gift for', 'for my', 'from the team', 'from the crew'],
+  personalization: ['personalized', 'custom name', 'with name'],
+  style: ['retro', 'vintage', 'minimalist', 'typographic', 'hand drawn'],
+})
+
+function buyerIntentPhrases(identity, product, options = {}) {
+  const axes = { ...BUYER_INTENT_AXES, ...(options.axes ?? {}) }
+  const actions = (options.actions ?? []).map(normalizePhrase).filter(Boolean)
+  const phrases = [`${identity} ${product}`]
+
+  for (const action of actions) {
+    phrases.push(`${identity} ${action} ${product}`)
+  }
+  for (const transition of axes.transition ?? []) {
+    phrases.push(`${transition} ${identity} ${product}`)
+  }
+  for (const relationship of axes.relationship ?? []) {
+    phrases.push(`${relationship} ${identity} ${product}`)
+  }
+  for (const personalization of axes.personalization ?? []) {
+    phrases.push(`${personalization} ${identity} ${product}`)
+  }
+  for (const style of axes.style ?? []) {
+    phrases.push(`${style} ${identity} ${product}`)
+  }
+
+  return phrases
+}
+
+// Identity comes from the user because only they know how that group names itself. The
+// engine supplies the combination patterns, not the vocabulary of the niche.
+export function generateBuyerIntentCandidates(options = {}) {
+  const category = getCategory(options.categoryId)
+  const product = normalizePhrase(category.searchTerm)
+  const identities = splitSeedText(options.identitySeeds)
+    .map((value) => normalizePhrase(value))
+    .filter(Boolean)
+  if (identities.length === 0) return []
+
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const perIdentity = Math.max(1, Math.min(Number(options.perIdentity) || 25, 60))
+  const limit = Math.max(1, Math.min(Number(options.limit) || 200, 400))
+
+  const keywords = unique(
+    identities.flatMap((identity) => buyerIntentPhrases(identity, product, options)
+      .slice(0, perIdentity))
+      .map((keyword) => normalizePhrase(keyword))
+      .filter((keyword) => countWords(keyword) >= 2)
+      .filter((keyword) => !hasRepeatedAdjacentPhrase(keyword))
+      .filter((keyword) => !hasDuplicateGarmentProductTerms(keyword))
+      .filter((keyword) => !hasConflictingRecipientRoles(keyword))
+      .filter((keyword) => classifyCandidateKeyword(keyword, options).action === 'candidate')
+  )
+
+  return keywords
+    .map((keyword) => {
+      const riskTerms = detectRiskTerms(keyword, customRiskTerms)
+      const identity = identities.find((value) => keyword.includes(value)) ?? ''
+      return {
+        keyword,
+        eventId: '',
+        eventLabel: '買い手意図',
+        categoryId: category.id,
+        categoryLabel: category.label,
+        score: scoreCandidateKeyword(keyword, customRiskTerms),
+        wordCount: countWords(keyword),
+        riskTerms,
+        status: riskTerms.length > 0 ? 'review' : 'ready',
+        discoveryLane: 'audience',
+        queryStrategy: 'buyer-intent',
+        buyerIntentIdentity: identity,
+      }
+    })
+    .sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, 'en'))
+    .slice(0, limit)
+}
+
 const BROAD_EVENT_LANE_ORDER = ['motif', 'moment', 'audience', 'aesthetic', 'adjacent']
 
 function broadEventCoreTerm(lane, term, index, profile) {
