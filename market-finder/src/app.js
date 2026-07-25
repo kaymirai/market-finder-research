@@ -329,6 +329,9 @@ const elements = {
   finalEvidenceFilters: document.querySelector('#finalEvidenceFilters'),
   finalEvidenceScopeStatus: document.querySelector('#finalEvidenceScopeStatus'),
   verifyPendingEvidenceBtn: document.querySelector('#verifyPendingEvidenceBtn'),
+  verifyPendingEvidenceReason: document.querySelector('#verifyPendingEvidenceReason'),
+  researchNextAction: document.querySelector('#researchNextAction'),
+  researchNextActionText: document.querySelector('#researchNextActionText'),
   finalEvidenceScrollProxy: document.querySelector('#finalEvidenceScrollProxy'),
   finalEvidenceScrollProxyTrack: document.querySelector('#finalEvidenceScrollProxyTrack'),
   finalEvidenceTable: document.querySelector('#finalEvidenceTable'),
@@ -3655,14 +3658,84 @@ function pendingEvidenceRows(rows = finalEvidenceRows(), allowedKeywords = []) {
   ))
 }
 
+// Every stall in this app has looked the same from the outside: a button that does nothing
+// and no statement of why. The next action is therefore derived from state and shown
+// permanently, rather than only as a reply to a press.
+function nextResearchAction() {
+  if (!state.extensionVersion) {
+    return { text: 'Chrome拡張の接続を確認しています。数秒お待ちください。', blocking: true }
+  }
+  if (state.extensionVersion !== REQUIRED_EXTENSION_VERSION) {
+    return {
+      text: `Chrome拡張を${REQUIRED_EXTENSION_VERSION}へReloadしてください（現在 ${state.extensionVersion}）。chrome://extensions を開いてReloadします。`,
+      blocking: true,
+    }
+  }
+  if (state.extensionState?.active) {
+    return { text: `調査中です。${state.extensionState.currentKeyword || ''}を確認しています。`, blocking: true }
+  }
+  if (state.pendingEvidenceAutomation?.active) {
+    return { text: '自動検証を実行中です。ブラウザを開いたままにしてください。', blocking: true }
+  }
+  if (restoredResultsAwaitingConfirmation()) {
+    return { text: '前回の保存結果を表示しています。「この前回結果から続ける」を押すと続きから使えます。', blocking: false }
+  }
+  if (state.crossNicheProposal) {
+    return { text: `追加探索の候補が${state.crossNicheProposal.candidates.length}件見つかりました。「この${state.crossNicheProposal.candidates.length}件を調査する」か「今回は見送る」を選んでください。`, blocking: false }
+  }
+
+  const pending = pendingEvidenceRows().length
+  if (pending > 0) {
+    return { text: `検証待ちが${pending}件あります。5「最終結果」の「選抜済みを自動検証」を押してください。`, blocking: false }
+  }
+  if (readyKeywords().length === 0) {
+    return { text: '1「条件」で商品とイベントを選び、「候補を自動で探す」を押してください。', blocking: false }
+  }
+  if (erankResultRows().length === 0) {
+    return { text: '2「候補」を確認し、「eRankで検索数を見る」を押してください。', blocking: false }
+  }
+  if (marketplaceCompletedKeywords(state.marketplaceInsightPlan).length === 0) {
+    return { text: '4「Etsy公式」で「Etsy公式確認を自動実行」を押してください。', blocking: false }
+  }
+  if (everbeeResultRows().length === 0) {
+    return { text: '4「Etsy公式」の下にある「EverBeeで売上を確認する」を押してください。', blocking: false }
+  }
+  return { text: '5「最終結果」で今日作るテーマを選び、CSVを未来デザイナーへ渡してください。', blocking: false }
+}
+
+function renderNextResearchAction() {
+  if (!elements.researchNextActionText) return
+  const next = nextResearchAction()
+  elements.researchNextActionText.textContent = next.text
+  elements.researchNextAction?.classList.toggle('is-blocking', next.blocking)
+}
+
 function renderPendingEvidenceAutomationButton(pendingCount = pendingEvidenceRows().length) {
   const automationActive = Boolean(state.pendingEvidenceAutomation?.active)
-  elements.verifyPendingEvidenceBtn.disabled = pendingCount === 0 && !automationActive
+  const blocked = automationActive ? '' : extensionBlockReason()
+  elements.verifyPendingEvidenceBtn.disabled = Boolean(blocked) || (pendingCount === 0 && !automationActive)
   elements.verifyPendingEvidenceBtn.textContent = automationActive
     ? `自動検証を停止 (${pendingCount}件残り)`
     : pendingCount > 0
       ? `選抜済みを自動検証 (${pendingCount})`
       : '未検証なし'
+
+  // The reason belongs next to the control, not in a status line the user cannot see from
+  // the bottom of the page.
+  if (elements.verifyPendingEvidenceReason) {
+    elements.verifyPendingEvidenceReason.textContent = blocked
+      || (pendingCount === 0 && !automationActive ? '検証待ちの候補はありません。' : '')
+  }
+}
+
+// A press can only fail for a reason the page already knows, so state it up front.
+function extensionBlockReason() {
+  if (!state.extensionVersion) return 'Chrome拡張の接続を確認しています。数秒お待ちください。'
+  if (state.extensionVersion !== REQUIRED_EXTENSION_VERSION) {
+    return `Chrome拡張を${REQUIRED_EXTENSION_VERSION}へReloadしてください（現在 ${state.extensionVersion}）。`
+  }
+  if (state.extensionState?.active) return '別の調査を実行中です。終了するまで待つか、上の停止を押してください。'
+  return ''
 }
 
 function stopPendingEvidenceAutomation(message = '') {
@@ -4251,6 +4324,7 @@ function renderActiveResearchStage(options = {}) {
 
 function renderAll() {
   renderGlobalResearchStatus()
+  renderNextResearchAction()
   renderResearchStageTabs()
   renderActiveResearchStage()
   persistMarketFinderState()
@@ -4753,6 +4827,8 @@ function importExtensionResults(extensionState) {
 function renderExtensionStateUpdate() {
   renderExtensionState()
   renderGlobalResearchStatus()
+  // Connecting changes what the user should do next, so the guidance has to move with it.
+  renderNextResearchAction()
   renderResearchStageTabs()
   renderActiveResearchStage({ skipUnchangedWorkspace: true })
 }
@@ -5807,13 +5883,22 @@ function requestExtension(action, payload = {}, timeoutMs = 15000) {
 }
 
 async function confirmExtensionConnection() {
-  if (state.extensionVersion !== REQUIRED_EXTENSION_VERSION) {
+  if (state.extensionConnected && state.extensionVersion === REQUIRED_EXTENSION_VERSION) return true
+
+  // The bridge announces itself a moment after load, so a version checked before it has
+  // spoken is simply unknown, not wrong. Give it that moment before refusing to start.
+  if (!state.extensionVersion) {
+    for (let attempt = 0; attempt < 6 && !state.extensionVersion; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500))
+    }
+  }
+
+  if (state.extensionVersion && state.extensionVersion !== REQUIRED_EXTENSION_VERSION) {
     state.extensionConnected = false
     renderExtensionStateUpdate()
     setSimpleStatus(`Chrome拡張${REQUIRED_EXTENSION_VERSION}をReloadしてから開始してください。接続表示が「接続済み v${REQUIRED_EXTENSION_VERSION}」になれば準備完了です。`)
     return false
   }
-  if (state.extensionConnected && state.extensionVersion === REQUIRED_EXTENSION_VERSION) return true
   try {
     const response = await requestExtension('GET_MARKET_STATE', {}, 5000)
     state.extensionConnected = true

@@ -210,7 +210,21 @@ test('renders only the active research stage details', () => {
   assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
   assert.match(app, /case 'results':[\s\S]{0,300}renderResultsTable\(\)[\s\S]{0,300}renderCrossNicheDrilldown\(\)[\s\S]{0,300}renderSeoPlan\(\)/)
   assert.match(app, /function renderActiveResearchStage\(options = \{\}\)[\s\S]{0,2200}renderResearchQueue\(\)[\s\S]{0,300}renderResearchInspector\(\)/)
-  assert.match(app, /function renderAll\(\) \{\s*renderGlobalResearchStatus\(\)\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
+  assert.match(app, /function renderAll\(\) \{\s*renderGlobalResearchStatus\(\)\s*renderNextResearchAction\(\)\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
+})
+
+test('always states the next action and why a control cannot be pressed', () => {
+  assert.match(html, /id="researchNextAction"/)
+  assert.match(html, /id="researchNextActionText"/)
+  assert.match(html, /id="verifyPendingEvidenceReason"/)
+  assert.ok(position('researchNextAction') < position('researchStageTabs'))
+  assert.match(app, /function nextResearchAction\(\)/)
+  assert.match(app, /function extensionBlockReason\(\)/)
+  // The reason must reach the control, not only the status line at the top of the page.
+  assert.match(app, /elements\.verifyPendingEvidenceReason\.textContent = blocked/)
+  // A version checked before the bridge has spoken is unknown, not wrong.
+  assert.match(app, /if \(!state\.extensionVersion\) \{[\s\S]{0,240}await new Promise/)
+  assert.match(styles, /\.action-block-reason/)
 })
 
 test('dispatches only the selected stage detail renderers', () => {
@@ -430,6 +444,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
   const createRefresh = new Function(
     'renderExtensionState',
     'renderGlobalResearchStatus',
+    'renderNextResearchAction',
     'renderResearchStageTabs',
     'renderActiveResearchStage',
     `return function renderExtensionStateUpdate() {${refreshBody}\n}`,
@@ -509,6 +524,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
   const renderExtensionStateUpdate = createRefresh(
     () => chromeRenders.push('extension'),
     () => chromeRenders.push('header'),
+    () => chromeRenders.push('next'),
     () => chromeRenders.push('tabs'),
     renderActiveResearchStage,
   )
@@ -580,7 +596,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     0,
     'the next semantically identical pending response must not write the Workspace',
   )
-  assert.deepEqual(chromeRenders, ['extension', 'header', 'tabs', 'extension', 'header', 'tabs'])
+  assert.deepEqual(chromeRenders, ['extension', 'header', 'next', 'tabs', 'extension', 'header', 'next', 'tabs'])
 })
 
 test('refreshes the active stage once for every extension import outcome', () => {
@@ -617,6 +633,7 @@ test('refreshes the active stage once for every extension import outcome', () =>
   const createRefresh = new Function(
     'renderExtensionState',
     'renderGlobalResearchStatus',
+    'renderNextResearchAction',
     'renderResearchStageTabs',
     'renderActiveResearchStage',
     `return function renderExtensionStateUpdate() {${refreshBody}\n}`,
@@ -656,6 +673,7 @@ test('refreshes the active stage once for every extension import outcome', () =>
     const refresh = createRefresh(
       () => rendered.push('extension'),
       () => rendered.push('header'),
+      () => rendered.push('next'),
       () => rendered.push('tabs'),
       () => rendered.push('active'),
     )
@@ -663,7 +681,7 @@ test('refreshes the active stage once for every extension import outcome', () =>
     assert.equal(importResults(scenario.state), scenario.expectedImport, scenario.label)
     refresh()
     assert.equal(persistCount, scenario.expectedPersists, scenario.label)
-    assert.deepEqual(rendered, ['extension', 'header', 'tabs', 'active'], scenario.label)
+    assert.deepEqual(rendered, ['extension', 'header', 'next', 'tabs', 'active'], scenario.label)
   }
 })
 
@@ -1123,5 +1141,5 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260725-12')
+  assert.equal(stylesheetVersion, '20260725-14')
 })

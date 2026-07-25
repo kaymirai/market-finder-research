@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260725-12">
+    <link rel="stylesheet" href="./styles.css?v=20260725-14">
   </head>
   <body>
     <main class="app-shell">
@@ -37,6 +37,10 @@
             <small id="researchGlobalStopReason">停止できる調査はありません</small>
           </div>
         </section>
+        <div id="researchNextAction" class="research-next-action" aria-live="polite">
+          <span class="research-next-action-label">次にやること</span>
+          <strong id="researchNextActionText">読み込み中です</strong>
+        </div>
         <div class="top-actions advanced-only">
           <button id="copyKeywordsBtn" type="button" class="ghost-btn" data-optional="予備">候補リストをコピー</button>
           <button id="downloadJobBtn" type="button" class="dark-btn" data-optional="予備">接続できない時のJSON</button>
@@ -584,6 +588,7 @@
           </div>
           <p id="finalEvidenceScopeStatus" class="final-evidence-scope-status">選抜した候補だけを検証対象にします。</p>
           <button id="verifyPendingEvidenceBtn" type="button" class="primary-btn">選抜済みを自動検証</button>
+          <small id="verifyPendingEvidenceReason" class="action-block-reason"></small>
         </div>
         <div id="researchRoundProgress" class="research-round-progress" hidden></div>
         <div id="researchRoundTabs" class="research-round-tabs" role="tablist" aria-label="調査ラウンド"></div>
@@ -744,6 +749,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260725-12"></script>
+    <script type="module" src="./src/app.js?v=20260725-14"></script>
   </body>
 </html>

@@ -3956,3 +3956,45 @@ button.research-table-row {
   font-size: 12px;
   font-weight: 700;
 }
+
+.research-next-action {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 10px;
+  border-left: 4px solid var(--teal);
+  padding: 10px 14px;
+  background: #ecfdf5;
+  color: #115e59;
+}
+
+.research-next-action.is-blocking {
+  border-left-color: var(--amber);
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.research-next-action-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  opacity: .75;
+}
+
+.research-next-action strong {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.action-block-reason {
+  display: block;
+  margin-top: 6px;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.action-block-reason:empty {
+  display: none;
+}
