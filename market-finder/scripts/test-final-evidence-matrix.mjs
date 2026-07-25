@@ -13,21 +13,29 @@ import {
   selectedResearchRoundKeywords,
 } from '../src/final-evidence-matrix.js'
 
-test('keeps empty generated rows out of evidence while retaining attempted and measured rows', () => {
+test('keeps empty and attempt-only rows out of evidence while retaining measured and failed rows', () => {
   const emptyRows = Array.from({ length: 1000 }, (_, index) => ({
     keyword: `generated idea ${index + 1}`,
   }))
   const evidenceRows = [
     { keyword: 'measured phrase', erankCompetition: 4639 },
-    { keyword: 'attempted phrase', erankAttemptedAt: '2026-07-24T00:00:00.000Z' },
+    {
+      keyword: 'failed phrase',
+      erankAttemptedAt: '2026-07-24T00:00:00.000Z',
+      erankCaptureStatus: 'failed',
+    },
     { keyword: 'failed phrase', error: '取得失敗' },
     { keyword: 'sales phrase', productRows: [{ title: 'Listing' }] },
   ]
 
   assert.equal(emptyRows.filter(hasCollectedEvidence).length, 0)
+  assert.equal(hasCollectedEvidence({
+    keyword: 'attempted phrase',
+    erankAttemptedAt: '2026-07-24T00:00:00.000Z',
+  }), false)
   assert.deepEqual(
     evidenceRows.filter(hasCollectedEvidence).map((row) => row.keyword),
-    ['measured phrase', 'attempted phrase', 'failed phrase', 'sales phrase'],
+    ['measured phrase', 'failed phrase', 'failed phrase', 'sales phrase'],
   )
 })
 

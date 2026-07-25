@@ -52,7 +52,6 @@ export function hasCollectedEvidence(row = {}) {
     row.medianMonthlyRevenue,
     row.totalVisibleMonthlySales,
     row.topSalesShare,
-    row.erankAttemptedAt,
     row.erankCheckedAt,
     row.etsyCheckedAt,
     row.everbeeCheckedAt,

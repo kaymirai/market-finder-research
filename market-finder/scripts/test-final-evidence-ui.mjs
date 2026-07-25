@@ -63,6 +63,12 @@ test('reschedules automatic verification while another external task is still ac
   )
 })
 
+test('freezes the selected verification scope when automation starts', () => {
+  assert.match(app, /targetKeywords:\s*initialPendingRows\.map\(\(row\) => row\.keyword\)/)
+  assert.match(app, /allowedKeywords:\s*state\.pendingEvidenceAutomation\.targetKeywords/)
+  assert.match(app, /const allowedKeywordSet = new Set/)
+})
+
 test('checks the extension background before starting selected verification', () => {
   const confirmBody = app.match(/async function confirmExtensionConnection\(\) \{([\s\S]*?)\n\}\n\nfunction handleExtensionMessage/)?.[1] ?? ''
 

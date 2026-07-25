@@ -91,7 +91,7 @@ import {
   hasCollectedEvidence,
   pendingEvidenceBatch,
   selectedResearchRoundKeywords,
-} from './final-evidence-matrix.js?v=20260724-1'
+} from './final-evidence-matrix.js?v=20260725-1'
 
 const PAGE_SOURCE = 'market-finder-page'
 const EXTENSION_SOURCE = 'market-finder-extension'
@@ -186,6 +186,7 @@ const state = {
     initialCount: 0,
     completedBatches: 0,
     currentStage: '',
+    targetKeywords: [],
   },
   recentTrendKeywords: new Set(),
   lastTrendRunStartedAt: '',
@@ -3100,7 +3101,10 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
   elements.finalEvidenceScopeStatus.textContent = deferredIdeaCount > 0
     ? `検証対象 ${rows.length}件。候補アイデア ${deferredIdeaCount}件は選抜外のため、eRank枠を使わず保留しています。`
     : `検証対象 ${rows.length}件。選抜した候補と取得済みデータだけを表示しています。`
-  renderPendingEvidenceAutomationButton(pendingRows.length)
+  const buttonPendingCount = state.pendingEvidenceAutomation?.active
+    ? pendingEvidenceRows(rows, state.pendingEvidenceAutomation.targetKeywords).length
+    : pendingRows.length
+  renderPendingEvidenceAutomationButton(buttonPendingCount)
 
   if (visibleRows.length === 0) {
     renderHtmlIfChanged(elements.finalEvidenceTable, '<div class="empty-state">この条件に一致する結果はありません。</div>')
@@ -3398,8 +3402,16 @@ async function copySelectedNounBrief(button) {
   }, 1400)
 }
 
-function pendingEvidenceRows(rows = finalEvidenceRows()) {
-  return rows.filter((row) => row.evidenceState.status === 'pending')
+function pendingEvidenceRows(rows = finalEvidenceRows(), allowedKeywords = []) {
+  const allowedKeywordSet = new Set(
+    (Array.isArray(allowedKeywords) ? allowedKeywords : [])
+      .map(normalizePhrase)
+      .filter(Boolean),
+  )
+  return rows.filter((row) => (
+    row.evidenceState.status === 'pending'
+    && (allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword)))
+  ))
 }
 
 function renderPendingEvidenceAutomationButton(pendingCount = pendingEvidenceRows().length) {
@@ -3417,6 +3429,7 @@ function stopPendingEvidenceAutomation(message = '') {
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
   state.pendingEvidenceAutomation.currentStage = ''
+  state.pendingEvidenceAutomation.targetKeywords = []
   if (message) setSimpleStatus(message)
   renderPendingEvidenceAutomationButton()
 }
@@ -3432,13 +3445,17 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
       return
     }
 
-    const remainingRows = pendingEvidenceRows()
+    const remainingRows = pendingEvidenceRows(
+      finalEvidenceRows(),
+      state.pendingEvidenceAutomation.targetKeywords,
+    )
     if (remainingRows.length === 0) {
       const checked = Math.max(0, state.pendingEvidenceAutomation.initialCount)
       state.pendingEvidenceAutomation.active = false
       state.pendingEvidenceAutomation.currentStage = ''
+      state.pendingEvidenceAutomation.targetKeywords = []
       setSimpleStatus(`未検証の自動検証が完了しました。開始時の${checked}件を順番に確認しました。`)
-      renderResultsTable()
+      renderPendingEvidenceAutomationButton()
       return
     }
 
@@ -3446,6 +3463,7 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
       const started = await verifyPendingEvidence('', '', {
         automated: true,
         batchLimit: FINAL_EVIDENCE_BATCH_SIZE,
+        allowedKeywords: state.pendingEvidenceAutomation.targetKeywords,
       })
       if (!started && state.pendingEvidenceAutomation.active) {
         stopPendingEvidenceAutomation('次に開始できる検証がないため、自動検証を停止しました。')
@@ -3467,7 +3485,8 @@ async function togglePendingEvidenceAutomation() {
     return
   }
 
-  const pendingCount = pendingEvidenceRows().length
+  const initialPendingRows = pendingEvidenceRows()
+  const pendingCount = initialPendingRows.length
   if (pendingCount === 0) {
     setSimpleStatus('検証待ちの候補はありません。')
     return
@@ -3480,6 +3499,7 @@ async function togglePendingEvidenceAutomation() {
     initialCount: pendingCount,
     completedBatches: 0,
     currentStage: '',
+    targetKeywords: initialPendingRows.map((row) => row.keyword),
   }
   state.finalEvidenceFilter = 'pending'
   setSimpleStatus(`${pendingCount}件を50件ずつ自動検証します。ブラウザを開いたままにしてください。`)
@@ -3488,7 +3508,14 @@ async function togglePendingEvidenceAutomation() {
 }
 
 async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '', options = {}) {
-  const rows = finalEvidenceRows()
+  const allowedKeywordSet = new Set(
+    (Array.isArray(options.allowedKeywords) ? options.allowedKeywords : [])
+      .map(normalizePhrase)
+      .filter(Boolean),
+  )
+  const rows = finalEvidenceRows().filter((row) => (
+    allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword))
+  ))
   const requested = normalizePhrase(requestedKeyword)
   const stageOrder = ['pending-erank', 'pending-etsy', 'pending-everbee']
   const batchLimit = Math.max(1, Math.min(
