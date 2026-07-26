@@ -33,6 +33,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-market-finder.ps1 -N
 http://127.0.0.1:ポート番号/market-finder/
 ```
 
+## 調査結果の保管
+
+取得したEtsy公式の検索数とEverBeeの販売データは、2「候補」の「調査結果を保管する」から `market-finder/archive/` へJSONで残せます。ブラウザのlocalStorageだけに置くと、サイトデータの消去や別PCへの移動で、消費したeRankの検索枠ごと失われるためです。
+
+保管したファイルは次回以降の「修飾語の実測」に合算されます。調査したニッチが増えるほど、組み込みの想定語ではなく、この市場で実際に使われている語で候補を作れるようになります。詳細は `market-finder/archive/README.md` を参照してください。
+
+保管には静的サーバ経由でのアクセスが必要です。`file://` で直接開いた場合はボタンが無効になります。
+
 ## Chrome拡張連携
 
 1. `etsy-chrome-extension` をChromeでLoad unpackedする

@@ -34,7 +34,7 @@ import {
   mergeMarketplaceInsightRelatedMetrics,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260726-6'
+} from '../../shared/market-keyword-engine/index.js?v=20260726-8'
 import {
   createMemoizedAnalysis,
   mergeRowsByKey,
@@ -164,6 +164,8 @@ const state = {
   erankQueryPlan: [],
   designClusterOffset: 0,
   buyerIdentitySuggestOffset: 0,
+  evidenceArchives: [],
+  evidenceArchiveAvailable: null,
   researchRounds: createResearchRoundsState(),
   candidateCatalog: [],
   researchRows: [],
@@ -255,6 +257,8 @@ const elements = {
   modifierEvidenceTotals: document.querySelector('#modifierEvidenceTotals'),
   modifierEvidenceTable: document.querySelector('#modifierEvidenceTable'),
   modifierEvidenceNote: document.querySelector('#modifierEvidenceNote'),
+  evidenceArchiveBtn: document.querySelector('#evidenceArchiveBtn'),
+  evidenceArchiveStatus: document.querySelector('#evidenceArchiveStatus'),
   trendScoutInput: document.querySelector('#trendScoutInput'),
   trendSampleBtn: document.querySelector('#trendSampleBtn'),
   trendAutoBtn: document.querySelector('#trendAutoBtn'),
@@ -1133,11 +1137,137 @@ function modifierEvidenceInput() {
   return { demandKeywords, supplyListings }
 }
 
+// Archived runs are merged into the live evidence rather than replacing it. A modifier seen
+// once in one niche is a coincidence; the same modifier across several is the vocabulary of
+// the marketplace, and only the accumulated file set can tell those apart.
+function combinedModifierEvidence() {
+  const live = modifierEvidenceInput()
+  const archived = state.evidenceArchives.reduce((merged, record) => ({
+    demandKeywords: [...merged.demandKeywords, ...(record.demandKeywords ?? [])],
+    supplyListings: [...merged.supplyListings, ...(record.supplyListings ?? [])],
+  }), { demandKeywords: [], supplyListings: [] })
+
+  // An archive is a snapshot of the same run still loaded in memory, so merging naively
+  // counts every saved observation twice and lets one repeatedly-saved niche outweigh the
+  // rest. Two rows carrying the same phrase and the same number are the same measurement.
+  const dedupe = (rows, key) => {
+    const seen = new Set()
+    return rows.filter((row) => {
+      const identity = key(row)
+      if (!identity || seen.has(identity)) return false
+      seen.add(identity)
+      return true
+    })
+  }
+
+  return {
+    demandKeywords: dedupe(
+      [...archived.demandKeywords, ...live.demandKeywords],
+      (row) => `${normalizePhrase(row.keyword)}|${row.etsySearches30d ?? ''}`,
+    ),
+    supplyListings: dedupe(
+      [...archived.supplyListings, ...live.supplyListings],
+      (row) => `${normalizePhrase(row.title)}|${row.monthlySales ?? ''}`,
+    ),
+  }
+}
+
 function currentModifierAnalysis() {
-  return analyzeModifierUsage(modifierEvidenceInput(), {
+  return analyzeModifierUsage(combinedModifierEvidence(), {
     ...currentOptions(),
     identitySeeds: elements.buyerIdentityInput?.value ?? '',
   })
+}
+
+function evidenceArchiveRecord() {
+  const evidence = modifierEvidenceInput()
+  return {
+    version: 1,
+    capturedAt: new Date().toISOString(),
+    categoryId: selectedCategory().id,
+    eventId: selectedEvent().id,
+    identitySeeds: buyerIdentityLines(),
+    demandKeywords: evidence.demandKeywords.map((row) => ({
+      keyword: normalizePhrase(row.keyword),
+      etsySearches30d: parseOptionalNumber(row.etsySearches30d),
+      etsyListings: parseOptionalNumber(row.etsyListings),
+    })),
+    supplyListings: evidence.supplyListings.map((row) => ({
+      title: String(row.title ?? '').trim(),
+      monthlySales: parseOptionalNumber(row.monthlySales),
+    })),
+  }
+}
+
+function parseOptionalNumber(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function evidenceArchiveBlockReason() {
+  if (!window.location.origin.startsWith('http')) {
+    return 'file:// で開いています。保存にはローカルサーバが必要です: node market-finder/scripts/static-server.mjs . 4174'
+  }
+  if (state.evidenceArchiveAvailable === false) {
+    return 'このサーバは保管庫に対応していません。node market-finder/scripts/static-server.mjs . 4174 で起動してください。'
+  }
+  const evidence = modifierEvidenceInput()
+  if (evidence.demandKeywords.length === 0 && evidence.supplyListings.length === 0) {
+    return '保管できる実測データがまだありません。3「Etsy公式」かEverBee確認を実行してください。'
+  }
+  return ''
+}
+
+async function loadEvidenceArchives() {
+  if (!window.location.origin.startsWith('http')) {
+    state.evidenceArchiveAvailable = false
+    return
+  }
+  try {
+    const listResponse = await fetch('/market-finder/archive', { cache: 'no-store' })
+    if (!listResponse.ok) throw new Error(String(listResponse.status))
+    const { files } = await listResponse.json()
+    state.evidenceArchiveAvailable = true
+    const records = await Promise.all((files ?? []).map(async (name) => {
+      try {
+        const response = await fetch(`/market-finder/archive/${encodeURIComponent(name)}`, { cache: 'no-store' })
+        return response.ok ? await response.json() : null
+      } catch {
+        return null
+      }
+    }))
+    state.evidenceArchives = records.filter((record) => record && typeof record === 'object')
+  } catch {
+    state.evidenceArchiveAvailable = false
+    state.evidenceArchives = []
+  }
+  renderModifierEvidence()
+}
+
+async function saveEvidenceArchive() {
+  const blocked = evidenceArchiveBlockReason()
+  if (blocked) {
+    elements.evidenceArchiveStatus.textContent = blocked
+    return
+  }
+  elements.evidenceArchiveBtn.disabled = true
+  try {
+    const record = evidenceArchiveRecord()
+    const response = await fetch('/market-finder/archive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    })
+    if (!response.ok) throw new Error(await response.text())
+    const { name } = await response.json()
+    state.evidenceArchives = [...state.evidenceArchives, record]
+    elements.evidenceArchiveStatus.textContent = `${name} に保管しました。検索語${record.demandKeywords.length}件、商品${record.supplyListings.length}件。`
+    renderModifierEvidence()
+  } catch (error) {
+    elements.evidenceArchiveStatus.textContent = `保管に失敗しました: ${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    elements.evidenceArchiveBtn.disabled = false
+  }
 }
 
 // The built-in modifier lists are somebody's guess until this table contradicts them, so the
@@ -1150,9 +1280,15 @@ function renderModifierEvidence() {
   const analysis = currentModifierAnalysis()
   const { totals } = analysis
 
+  const archiveCount = state.evidenceArchives.length
+  const archiveNote = archiveCount > 0 ? `（過去${archiveCount}回分を含む）` : ''
   elements.modifierEvidenceTotals.textContent = totals.demandKeywords === 0 && totals.supplyListings === 0
     ? 'まだ実測データがありません'
-    : `Etsy検索語${totals.demandKeywords}件 / 売れている商品${totals.supplyListings}件から集計`
+    : `Etsy検索語${totals.demandKeywords}件 / 売れている商品${totals.supplyListings}件から集計${archiveNote}`
+
+  const blocked = evidenceArchiveBlockReason()
+  elements.evidenceArchiveBtn.disabled = Boolean(blocked)
+  if (blocked) elements.evidenceArchiveStatus.textContent = blocked
 
   if (analysis.rows.length === 0) {
     elements.modifierEvidenceTable.innerHTML = '<div class="empty-state">3「Etsy公式」と5「最終結果」のEverBee確認を行うと、この市場で実際に使われている語を数えます。それまでは組み込みの想定語で候補を作ります。</div>'
@@ -6713,6 +6849,7 @@ function bindEvents() {
     resetCandidatesForInputChange()
   })
   elements.buyerActionInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.evidenceArchiveBtn?.addEventListener('click', saveEvidenceArchive)
   elements.buyerIdentityShuffleBtn?.addEventListener('click', () => {
     state.buyerIdentitySuggestOffset += 1
     renderBuyerIdentitySuggestions()
@@ -6927,6 +7064,7 @@ function init() {
   renderTargets({ selectedTargets: persisted?.form?.targets })
   renderBuyerIdentitySuggestions()
   renderBuyerContextSuggestions()
+  loadEvidenceArchives()
   bindEvents()
   setFlowMode(persisted?.flowMode ?? 'auto', { persist: false })
   syncResearchMarketHistory()

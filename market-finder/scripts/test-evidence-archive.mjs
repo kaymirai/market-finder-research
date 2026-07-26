@@ -1,0 +1,137 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import test from 'node:test'
+
+const root = new URL('../', import.meta.url)
+const [app, html] = await Promise.all([
+  readFile(new URL('src/app.js', root), 'utf8'),
+  readFile(new URL('index.html', root), 'utf8'),
+])
+
+const serverScript = new URL('static-server.mjs', import.meta.url).pathname.replace(/^\//, '')
+const port = 4399
+
+function startServer(dir) {
+  const child = spawn(process.execPath, [serverScript, dir, String(port)], { stdio: 'ignore' })
+  return child
+}
+
+async function waitForServer() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/market-finder/archive`)
+      if (response.ok) return
+    } catch {
+      // not listening yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error('static server did not start')
+}
+
+test('stores research evidence on disk and lists it back', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'market-finder-archive-'))
+  mkdirSync(join(dir, 'market-finder'), { recursive: true })
+  writeFileSync(join(dir, 'market-finder', 'index.html'), '<p>ok</p>', 'utf8')
+  const child = startServer(dir)
+  t.after(() => {
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  await waitForServer()
+
+  const listed = await (await fetch(`http://127.0.0.1:${port}/market-finder/archive`)).json()
+  assert.deepEqual(listed.files, [])
+
+  const record = {
+    version: 1,
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    demandKeywords: [{ keyword: 'halloween nurse shirt', etsySearches30d: 1300 }],
+    supplyListings: [{ title: 'NICU Nurse Halloween Sweatshirt', monthlySales: 4 }],
+  }
+  const saved = await fetch(`http://127.0.0.1:${port}/market-finder/archive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  })
+  assert.equal(saved.status, 200)
+  const { name } = await saved.json()
+  assert.match(name, /shirt-halloween\.json$/)
+
+  // The stored file has to be readable back through the same static route the app fetches.
+  const fetched = await (await fetch(`http://127.0.0.1:${port}/market-finder/archive/${name}`)).json()
+  assert.deepEqual(fetched.demandKeywords, record.demandKeywords)
+
+  const relisted = await (await fetch(`http://127.0.0.1:${port}/market-finder/archive`)).json()
+  assert.deepEqual(relisted.files, [name])
+
+  // Appending must never disturb what is already there, because a lost archive is a lookup
+  // quota that cannot be bought back.
+  await fetch(`http://127.0.0.1:${port}/market-finder/archive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...record, categoryId: 'mug' }),
+  })
+  assert.equal(readdirSync(join(dir, 'market-finder', 'archive')).length, 2)
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(dir, 'market-finder', 'archive', name), 'utf8')).demandKeywords,
+    record.demandKeywords,
+  )
+})
+
+test('refuses archives that are not a JSON object and never takes a path from the client', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'market-finder-archive-'))
+  mkdirSync(join(dir, 'market-finder'), { recursive: true })
+  const child = startServer(dir)
+  t.after(() => {
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  await waitForServer()
+
+  for (const body of ['not json', '"a string"', '[1,2,3]']) {
+    const response = await fetch(`http://127.0.0.1:${port}/market-finder/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    })
+    assert.equal(response.status, 400, `${body} must be rejected`)
+  }
+
+  // A traversal attempt in the payload must land in the archive directory like any other
+  // record, because the filename is derived here and never read from the request.
+  const escaped = await fetch(`http://127.0.0.1:${port}/market-finder/archive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ categoryId: '../../../etc/passwd', eventId: '../..' }),
+  })
+  assert.equal(escaped.status, 200)
+  const files = readdirSync(join(dir, 'market-finder', 'archive'))
+  assert.equal(files.length, 1)
+  assert.doesNotMatch(files[0], /\.\./)
+
+  const put = await fetch(`http://127.0.0.1:${port}/market-finder/archive`, { method: 'PUT' })
+  assert.equal(put.status, 405)
+})
+
+test('merges archived runs into the measurement and blocks saving when it cannot reach disk', () => {
+  assert.match(app, /function combinedModifierEvidence\(\)/)
+  assert.match(app, /analyzeModifierUsage\(combinedModifierEvidence\(\)/)
+  assert.match(app, /state\.evidenceArchives\.reduce/)
+  // Saving a run leaves the same observations in memory and on disk, so the merge has to
+  // drop the duplicate or one saved niche silently outweighs every other.
+  assert.match(app, /const dedupe = \(rows, key\) =>/)
+  assert.match(app, /normalizePhrase\(row\.keyword\)\}\|\$\{row\.etsySearches30d/)
+  assert.match(app, /normalizePhrase\(row\.title\)\}\|\$\{row\.monthlySales/)
+  assert.match(app, /function evidenceArchiveBlockReason\(\)/)
+  assert.match(app, /file:\/\/ で開いています/)
+  assert.match(app, /elements\.evidenceArchiveBtn\.disabled = Boolean\(blocked\)/)
+  assert.match(app, /loadEvidenceArchives\(\)/)
+  assert.match(html, /id="evidenceArchiveBtn"/)
+  assert.match(html, /id="evidenceArchiveStatus"/)
+})

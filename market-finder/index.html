@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260726-6">
+    <link rel="stylesheet" href="./styles.css?v=20260726-8">
   </head>
   <body>
     <main class="app-shell">
@@ -303,6 +303,10 @@
             <p class="panel-help">この市場で実際に使われている語だけを数えています。需要はEtsy公式の検索語、供給はEverBeeで売れている商品タイトルです。「需要あり・供給なし」が狙い目、両方0の語は誰も使っていません。</p>
             <div id="modifierEvidenceTable" class="modifier-evidence-table"></div>
             <small id="modifierEvidenceNote"></small>
+            <div class="evidence-archive-action">
+              <button id="evidenceArchiveBtn" type="button" class="ghost-btn">調査結果を保管する</button>
+              <small id="evidenceArchiveStatus">取得した数値をファイルに残します。次回以降の実測はここに貯めた分も合算します。</small>
+            </div>
           </section>
 
           <div class="button-row candidate-actions advanced-only">
@@ -781,6 +785,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260726-6"></script>
+    <script type="module" src="./src/app.js?v=20260726-8"></script>
   </body>
 </html>

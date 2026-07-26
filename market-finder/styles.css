@@ -1562,6 +1562,14 @@ button[data-optional]::before {
   margin-left: 6px;
 }
 
+.evidence-archive-action {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
 .score-chip {
   display: grid;
   gap: 2px;
