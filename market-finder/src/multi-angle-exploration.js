@@ -376,6 +376,28 @@ export function resolveMultiAngleImportedResearchContext(
   }
 }
 
+export function resolveMultiAngleExportResearchContext(
+  state = {},
+  {
+    row = {},
+    selected = {},
+  } = {},
+) {
+  const context = resolveMultiAngleResearchContext(state, selected)
+  return {
+    eventId: String(
+      context.fixed
+        ? context.eventId
+        : row?.researchEventId || context.eventId || '',
+    ),
+    categoryId: String(
+      context.fixed
+        ? context.categoryId
+        : row?.researchCategoryId || context.categoryId || '',
+    ),
+  }
+}
+
 export function backfillMultiAngleResearchSnapshots(state = {}, context = {}) {
   const current = createMultiAngleExplorationState(state)
   const suppliedEvent = normalizedEventSnapshot(

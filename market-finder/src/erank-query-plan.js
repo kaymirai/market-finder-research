@@ -65,6 +65,38 @@ function excludedQuerySet(values) {
     .filter(Boolean))
 }
 
+export function extractErankSpecificTokens(
+  keyword,
+  {
+    event = {},
+    category = {},
+  } = {},
+) {
+  const eventTokens = String(event?.searchTerm ?? '').split(/\s+/)
+  const categoryTokens = [
+    category?.searchTerm,
+    ...(Array.isArray(category?.tags) ? category.tags : []),
+  ].flatMap((value) => normalizeQuery(value).split(/\s+/))
+  const stopWords = new Set([
+    ...eventTokens,
+    ...categoryTokens,
+    'for',
+    'and',
+    'the',
+    'with',
+    'from',
+    'to',
+    'by',
+    'of',
+    'a',
+    'an',
+  ].map(normalizeQuery).filter(Boolean))
+
+  return normalizeQuery(keyword)
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !stopWords.has(token))
+}
+
 // eRank charges one daily lookup per query, so base phrases stay off by default and are
 // only spent later on candidates whose full phrase came back without demand.
 export function buildErankQueryPlan(candidates, options = {}) {

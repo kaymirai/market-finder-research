@@ -57,8 +57,9 @@ import {
   attachErankQueryProvenance,
   buildErankBaseFollowUpPlan,
   buildErankQueryPlan,
+  extractErankSpecificTokens,
   summarizeErankQueryPlan,
-} from './erank-query-plan.js?v=20260725-4'
+} from './erank-query-plan.js?v=20260730-1'
 import {
   DESIGN_CLUSTER_COUNT,
   DESIGN_PER_CLUSTER_MAX,
@@ -155,13 +156,14 @@ import {
   recordMultiAngleBatch,
   recordMultiAngleFailure,
   resolveMultiAngleCandidateResearchContext,
+  resolveMultiAngleExportResearchContext,
   resolveMultiAngleImportedResearchContext,
   resolveMultiAngleResearchContext,
   resolveMultiAngleResearchOptions,
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-4'
+} from './multi-angle-exploration.js?v=20260730-5'
 import {
   calculateMonthlyProfitTarget,
 } from './monthly-profit-target.js?v=20260726-1'
@@ -2008,8 +2010,9 @@ function removePhraseFromTokens(tokens, phrase) {
 }
 
 function erankProbeKeyword(keyword) {
-  const category = selectedCategory()
-  const eventTerm = normalizePhrase(selectedEvent().searchTerm)
+  const { event, category } = activeResearchContext()
+  const eventTerm = normalizePhrase(event.searchTerm)
+  const researchOptions = activeResearchOptions()
   let tokens = normalizePhrase(keyword).split(' ').filter(Boolean)
   if (eventTerm) tokens = removePhraseFromTokens(tokens, eventTerm)
   tokens = tokens.filter((token) => !/^(?:20\d{2}|\d{2})$/.test(token) || /\b(?:est|class|senior|grad)\b/.test(keyword))
@@ -2020,7 +2023,7 @@ function erankProbeKeyword(keyword) {
     probe = normalizePhrase(`${probe} ${category.searchTerm}`)
   }
   if (detectRiskTerms(probe, elements.riskInput.value.split(/\r?\n|,/)).length > 0) return ''
-  if (keywordClass(probe).action !== 'candidate') return ''
+  if (classifyCandidateKeyword(probe, researchOptions).action !== 'candidate') return ''
 
   return probe
 }
@@ -2072,29 +2075,8 @@ function restoredResultsAwaitingConfirmation() {
 }
 
 function erankSpecificTokens(keyword) {
-  const eventTokens = selectedEvent().searchTerm.split(/\s+/)
-  const categoryTokens = [
-    selectedCategory().searchTerm,
-    ...(selectedCategory().tags ?? []),
-  ].flatMap((value) => normalizePhrase(value).split(/\s+/))
-  const stopWords = new Set([
-    ...eventTokens,
-    ...categoryTokens,
-    'for',
-    'and',
-    'the',
-    'with',
-    'from',
-    'to',
-    'by',
-    'of',
-    'a',
-    'an',
-  ].map((value) => normalizePhrase(value)).filter(Boolean))
-
-  return normalizePhrase(keyword)
-    .split(/\s+/)
-    .filter((token) => token.length >= 3 && !stopWords.has(token))
+  const { event, category } = activeResearchContext()
+  return extractErankSpecificTokens(keyword, { event, category })
 }
 
 function narrowEverbeeKeywordsFromErank() {
@@ -2184,12 +2166,13 @@ function salesCheckKeywords() {
 }
 
 function buildCurrentErankQueryPlan(candidates = state.candidates, options = {}) {
+  const { event } = activeResearchContext()
   const candidateLimit = Math.max(1, Math.min(
     FINAL_EVIDENCE_BATCH_SIZE,
     Number(options.candidateLimit) || ERANK_RESEARCH_LIMIT,
   ))
   return buildErankQueryPlan(candidates, {
-    eventTerm: selectedEvent().searchTerm,
+    eventTerm: event.searchTerm,
     candidateLimit,
     baseQueryFor: (keyword, candidate) => candidate.queryStrategy === 'cross-niche'
       ? keyword
@@ -2214,8 +2197,9 @@ function erankRowHasDemand(keyword) {
 // Second stage of the daily-lookup budget: only candidates whose full phrase came back
 // without demand are worth spending another lookup on their base phrase.
 function buildErankFollowUpQueryPlan() {
+  const { event } = activeResearchContext()
   return buildErankBaseFollowUpPlan(state.candidates, {
-    eventTerm: selectedEvent().searchTerm,
+    eventTerm: event.searchTerm,
     candidateLimit: ERANK_RESEARCH_LIMIT,
     baseQueryFor: (keyword, candidate) => candidate.queryStrategy === 'cross-niche'
       ? keyword
@@ -7357,6 +7341,22 @@ function researchMetadataCsvValues(row) {
   ]
 }
 
+function researchExportContextForRow(row = {}) {
+  const context = activeResearchContext()
+  return resolveMultiAngleExportResearchContext(
+    state.multiAngleExploration,
+    {
+      row,
+      selected: {
+        eventId: context.eventId,
+        categoryId: context.categoryId,
+        eventSnapshot: context.event,
+        categorySnapshot: context.category,
+      },
+    },
+  )
+}
+
 function evidenceCsvValue(value, checked = false) {
   const metric = formatEvidenceMetric(value, { checked })
   return metric.kind === 'pending' ? '' : metric.text
@@ -7411,7 +7411,12 @@ function exportErankCsv() {
   const lines = rows.map((row) => {
     const normalized = row.erankOpportunity.normalized
     const sourceKeyword = erankSourceKeyword(row)
-    const track = marketTrackMetadataForRow(row)
+    const exportContext = researchExportContextForRow(row)
+    const track = marketTrackMetadataForRow({
+      ...row,
+      researchEventId: exportContext.eventId,
+      researchCategoryId: exportContext.categoryId,
+    })
     return [
       row.queryKind === 'base'
         ? 'eRank base query'
@@ -7421,8 +7426,8 @@ function exportErankCsv() {
       sourceKeyword,
       normalized.keyword,
       track.intentTrack,
-      track.researchEventId,
-      row.researchCategoryId || elements.categorySelect.value,
+      exportContext.eventId,
+      exportContext.categoryId,
       track.historyClusterKey,
       row.erankOpportunity.label,
       row.erankOpportunity.score,
@@ -7440,15 +7445,20 @@ function exportErankCsv() {
     ].map(csvCell).join(',')
   })
   const stateLines = captureStates.map((row) => {
-    const track = marketTrackMetadataForRow(row)
+    const exportContext = researchExportContextForRow(row)
+    const track = marketTrackMetadataForRow({
+      ...row,
+      researchEventId: exportContext.eventId,
+      researchCategoryId: exportContext.categoryId,
+    })
     const unknownMetric = row.status === 'no-data' ? 'Unknown' : ''
     return [
       'eRank planned query',
       row.sourceKeyword,
       row.query,
       track.intentTrack,
-      track.researchEventId,
-      elements.categorySelect.value,
+      exportContext.eventId,
+      exportContext.categoryId,
       track.historyClusterKey,
       row.status === 'failed' ? '検索済み・数値取得失敗' : row.status === 'no-data' ? 'Unknown' : '未検索',
       '',
@@ -7561,14 +7571,19 @@ function exportResultRowsCsv(rows, fileBaseName) {
     const brief = row.idea.nounBrief ?? {}
     const route = row.productRoute ?? {}
     const blockedForProduct = route.decision === 'Do not use'
-    const track = marketTrackMetadataForRow(row)
+    const exportContext = researchExportContextForRow(row)
+    const track = marketTrackMetadataForRow({
+      ...row,
+      researchEventId: exportContext.eventId,
+      researchCategoryId: exportContext.categoryId,
+    })
     return [
       index + 1,
       normalized.keyword,
       erankSourceKeyword(row),
       track.intentTrack,
-      track.researchEventId,
-      row.researchCategoryId || elements.categorySelect.value,
+      exportContext.eventId,
+      exportContext.categoryId,
       track.historyClusterKey,
       row.score.score,
       row.score.label,

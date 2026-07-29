@@ -12,6 +12,7 @@ import {
   stopMultiAngleExploration,
 } from '../src/multi-angle-exploration.js'
 import * as multiAngleApi from '../src/multi-angle-exploration.js'
+import * as erankQueryApi from '../src/erank-query-plan.js'
 import { candidateEvidenceKey } from '../src/multi-angle-candidates.js'
 
 const context = {
@@ -566,6 +567,87 @@ test('custom event candidate and imported row keep the frozen Alpha metadata aft
     categoryId: 'shirt',
     categoryLabel: 'Shirt',
     categorySearchTerm: 'shirt',
+  })
+})
+
+test('eRank narrowing and CSV metadata keep Alpha Shirt after selectors move to Beta Mug', () => {
+  assert.equal(typeof erankQueryApi.extractErankSpecificTokens, 'function')
+  assert.equal(typeof multiAngleApi.resolveMultiAngleExportResearchContext, 'function')
+
+  const alphaEvent = {
+    id: 'custom-event',
+    label: 'Alpha Launch',
+    jpLabel: 'Alpha Launch',
+    searchTerm: 'alpha launch',
+    displayTerm: 'Alpha Launch',
+    month: 0,
+  }
+  const shirt = {
+    id: 'shirt',
+    label: 'Shirt',
+    searchTerm: 'shirt',
+    tags: ['shirt', 'graphic tee'],
+  }
+  const started = startMultiAngleExploration({}, {
+    activeEventId: alphaEvent.id,
+    categoryId: shirt.id,
+    eventSnapshot: alphaEvent,
+    categorySnapshot: shirt,
+  })
+  const betaMugSelection = {
+    eventId: 'custom-event',
+    categoryId: 'mug',
+    eventSnapshot: {
+      ...alphaEvent,
+      label: 'Beta Launch',
+      jpLabel: 'Beta Launch',
+      searchTerm: 'beta launch',
+      displayTerm: 'Beta Launch',
+    },
+    categorySnapshot: {
+      id: 'mug',
+      label: 'Mug',
+      searchTerm: 'mug',
+      tags: ['mug'],
+    },
+  }
+  const frozen = multiAngleApi.resolveMultiAngleResearchContext(
+    started,
+    betaMugSelection,
+  )
+  const specificTokens = erankQueryApi.extractErankSpecificTokens(
+    'alpha launch special education graphic tee',
+    {
+      event: frozen.eventSnapshot,
+      category: frozen.categorySnapshot,
+    },
+  )
+  const csvContext = multiAngleApi.resolveMultiAngleExportResearchContext(
+    started,
+    {
+      row: {
+        researchEventId: 'custom-event-beta',
+        researchCategoryId: 'mug',
+      },
+      selected: betaMugSelection,
+    },
+  )
+  const idleCsvContext = multiAngleApi.resolveMultiAngleExportResearchContext(
+    {},
+    {
+      row: {},
+      selected: betaMugSelection,
+    },
+  )
+
+  assert.deepEqual(specificTokens, ['special', 'education'])
+  assert.deepEqual(csvContext, {
+    eventId: 'custom-event',
+    categoryId: 'shirt',
+  })
+  assert.deepEqual(idleCsvContext, {
+    eventId: 'custom-event',
+    categoryId: 'mug',
   })
 })
 

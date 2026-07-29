@@ -208,6 +208,39 @@ test('uses frozen options for round summaries drilldown archives and next-batch 
   assert.doesNotMatch(completion, /currentOptions\(\)/)
 })
 
+test('keeps eRank narrowing query plans and the EverBee handoff on the active research context', () => {
+  for (const functionName of [
+    'erankProbeKeyword',
+    'erankSpecificTokens',
+    'buildCurrentErankQueryPlan',
+    'buildErankFollowUpQueryPlan',
+    'buildEverbeeKeywordsFromErankRows',
+  ]) {
+    const body = app.match(new RegExp(`function ${functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+    assert.match(
+      body,
+      /activeResearchContext\(\)|activeResearchOptions\(\)/,
+      `${functionName} must use the active research context`,
+    )
+    assert.doesNotMatch(
+      body,
+      /selectedEvent\(\)|selectedCategory\(\)|keywordClass\(/,
+      `${functionName} must not narrow the active run from live selectors`,
+    )
+  }
+})
+
+test('exports frozen event and category metadata instead of live selector fallbacks', () => {
+  const erankExport = app.match(/function exportErankCsv\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const resultsExport = app.match(/function exportResultRowsCsv\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(app, /function researchExportContextForRow\(/)
+  assert.match(erankExport, /researchExportContextForRow\(/)
+  assert.match(resultsExport, /researchExportContextForRow\(/)
+  assert.doesNotMatch(erankExport, /elements\.categorySelect\.value/)
+  assert.doesNotMatch(resultsExport, /elements\.categorySelect\.value/)
+})
+
 test('routes marketplace extension and global stop controls through multi-angle orchestration', () => {
   const hasWork = app.match(/function multiAngleWorkHasCurrentBatch\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   const marketplaceStop = app.match(/function stopMarketplaceInsightAutomation\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
