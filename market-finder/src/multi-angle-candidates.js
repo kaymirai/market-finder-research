@@ -42,8 +42,101 @@ function hasEverbeeTitleSource(candidate = {}) {
 }
 
 function optionalNumber(value) {
+  if (value === null || value === undefined || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function candidateContext(candidate = {}) {
+  return {
+    eventId: String(
+      candidate.eventId
+      ?? candidate.researchEventId
+      ?? candidate.raw?.researchEventId
+      ?? '',
+    ).trim(),
+    categoryId: String(
+      candidate.categoryId
+      ?? candidate.researchCategoryId
+      ?? candidate.raw?.researchCategoryId
+      ?? '',
+    ).trim(),
+  }
+}
+
+export function candidateMatchesResearchContext(candidate = {}, context = {}, {
+  allowEventless = false,
+  requireContext = false,
+} = {}) {
+  const candidateContextValue = candidateContext(candidate)
+  const activeEventId = String(context.eventId ?? context.activeEventId ?? '').trim()
+  const activeCategoryId = String(context.categoryId ?? '').trim()
+  const hasContext = Boolean(
+    candidateContextValue.eventId
+    || candidateContextValue.categoryId
+    || Object.hasOwn(candidate, 'eventId')
+    || Object.hasOwn(candidate, 'categoryId')
+    || Object.hasOwn(candidate, 'researchEventId')
+    || Object.hasOwn(candidate, 'researchCategoryId')
+    || Object.hasOwn(candidate.raw ?? {}, 'researchEventId')
+    || Object.hasOwn(candidate.raw ?? {}, 'researchCategoryId')
+  )
+  if (!hasContext) return !requireContext
+  if (candidateContextValue.categoryId !== activeCategoryId) return false
+  return allowEventless
+    ? !candidateContextValue.eventId
+    : candidateContextValue.eventId === activeEventId
+}
+
+export function marketplaceRelatedTermCandidates(plan = {}, context = {}) {
+  const planContext = candidateContext(plan)
+  const activeEventId = String(context.eventId ?? context.activeEventId ?? '').trim()
+  const activeCategoryId = String(context.categoryId ?? '').trim()
+  if (
+    !planContext.eventId
+    || !planContext.categoryId
+    || planContext.eventId !== activeEventId
+    || planContext.categoryId !== activeCategoryId
+  ) return []
+  const keywords = normalizedList([
+    ...(plan?.relatedKeywordMetrics ?? []).map((row) => row?.keyword),
+    ...(plan?.items ?? [])
+      .filter((item) => item?.status === 'completed')
+      .flatMap((item) => [
+        ...(item?.result?.etsyRelatedTerms ?? []),
+        ...(item?.result?.etsyRelatedKeywordMetrics ?? []).map((row) => row?.keyword),
+      ]),
+  ])
+  return keywords.map((keyword) => ({
+    keyword,
+    eventId: activeEventId,
+    categoryId: activeCategoryId,
+    source: 'marketplace-insights',
+  }))
+}
+
+export function normalizeArchivedSupplyListings(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      title: String(row?.title ?? '').trim(),
+      monthlySales: optionalNumber(row?.monthlySales ?? row?.sales),
+      listingAgeMonths: optionalNumber(row?.listingAgeMonths),
+    }))
+    .filter((row) => normalizePhrase(row.title))
+}
+
+export function adjacentProductListingsFromLearningRecords(records = [], context = {}) {
+  const activeCategoryId = String(context.categoryId ?? '').trim()
+  return (Array.isArray(records) ? records : []).flatMap((record) => {
+    const categoryId = String(record?.categoryId ?? record?.context?.categoryId ?? '').trim()
+    if (!categoryId || categoryId === activeCategoryId) return []
+    return normalizeArchivedSupplyListings(record?.supplyListings).map((listing) => ({
+      ...listing,
+      categoryId,
+      eventId: String(record?.eventId ?? record?.context?.eventId ?? '').trim(),
+      sales: listing.monthlySales,
+    }))
+  })
 }
 
 function resultLaneFor(candidate, activeEventId) {
@@ -171,7 +264,9 @@ function addCandidates(byEvidence, rawCandidates, defaults) {
 }
 
 function listingCandidate(listing, category) {
-  if (!listing || optionalNumber(listing.sales) < 1 || optionalNumber(listing.listingAgeMonths) > 12) return null
+  const sales = optionalNumber(listing?.sales)
+  const listingAgeMonths = optionalNumber(listing?.listingAgeMonths)
+  if (!listing || sales === null || sales < 1 || listingAgeMonths === null || listingAgeMonths > 12) return null
   if (String(listing.categoryId ?? '').trim() === String(category.id ?? '').trim()) return null
   const title = normalizePhrase(listing.title)
   const sourceCategory = normalizePhrase(listing.categorySearchTerm ?? listing.categoryId)
@@ -249,17 +344,22 @@ export function buildMultiAngleCandidatePools(input = {}) {
     ...common,
     angleId: 'demand-neighborhood',
   })
-  addCandidates(byEvidence, normalizedList(input.relatedTerms)
-    .filter((keyword) => matchesCategory(keyword, category))
-    .map((keyword) => ({ keyword, source: 'marketplace-insights' })), {
+  addCandidates(byEvidence, (Array.isArray(input.relatedTerms) ? input.relatedTerms : [input.relatedTerms])
+    .map((candidate) => typeof candidate === 'string' ? { keyword: candidate } : candidate)
+    .filter(Boolean)
+    .filter((candidate) => candidateMatchesResearchContext(candidate, common))
+    .filter((candidate) => matchesCategory(candidate.keyword, category))
+    .map((candidate) => ({ source: 'marketplace-insights', ...candidate })), {
     ...common,
     angleId: 'demand-neighborhood',
   })
-  addCandidates(byEvidence, input.taxonomyCandidates ?? [], {
+  addCandidates(byEvidence, (input.taxonomyCandidates ?? [])
+    .filter((candidate) => candidateMatchesResearchContext(candidate, common)), {
     ...common,
     angleId: 'attribute-combination',
   })
   addCandidates(byEvidence, (input.drilldownCandidates ?? [])
+    .filter((candidate) => candidateMatchesResearchContext(candidate, common))
     .filter(hasEverbeeTitleSource), {
     ...common,
     angleId: 'recent-sales',
@@ -288,7 +388,10 @@ export function buildMultiAngleCandidatePools(input = {}) {
     ...common,
     angleId: 'market-gap',
   })
-  addCandidates(byEvidence, input.evergreenCandidates ?? [], {
+  addCandidates(byEvidence, (input.evergreenCandidates ?? [])
+    .filter((candidate) => candidateMatchesResearchContext(candidate, common, {
+      allowEventless: true,
+    })), {
     ...common,
     eventId: '',
     angleId: 'evergreen',

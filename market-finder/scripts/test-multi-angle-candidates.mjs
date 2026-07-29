@@ -73,6 +73,131 @@ test('keeps singular everbee-title compatibility and excludes unmatched drilldow
   )
 })
 
+test('keeps live candidate sources inside the active event and category', () => {
+  assert.equal(candidateApi.candidateMatchesResearchContext(
+    { keyword: 'legacy contextless drilldown' },
+    { eventId: 'christmas', categoryId: 'shirt' },
+    { requireContext: true },
+  ), false)
+  const pools = buildMultiAngleCandidatePools({
+    event: { id: 'christmas', searchTerm: 'christmas' },
+    category: { id: 'shirt', searchTerm: 'shirt', tags: ['tee'] },
+    timingStatus: 'timely',
+    relatedTerms: [
+      {
+        keyword: 'halloween nurse mug',
+        eventId: 'halloween',
+        categoryId: 'mug',
+      },
+      {
+        keyword: 'christmas nurse shirt',
+        eventId: 'christmas',
+        categoryId: 'shirt',
+      },
+    ],
+    taxonomyCandidates: [
+      {
+        keyword: 'halloween gardener mug',
+        eventId: 'halloween',
+        categoryId: 'mug',
+      },
+      {
+        keyword: 'christmas gardener shirt',
+        eventId: 'christmas',
+        categoryId: 'shirt',
+      },
+    ],
+    drilldownCandidates: [
+      {
+        keyword: 'halloween librarian mug',
+        eventId: 'halloween',
+        categoryId: 'mug',
+        source: 'everbee-title',
+      },
+      {
+        keyword: 'christmas librarian shirt',
+        eventId: 'christmas',
+        categoryId: 'shirt',
+        source: 'everbee-title',
+      },
+    ],
+    evergreenCandidates: [
+      {
+        keyword: 'evergreen librarian mug',
+        eventId: '',
+        categoryId: 'mug',
+      },
+      {
+        keyword: 'evergreen librarian shirt',
+        eventId: '',
+        categoryId: 'shirt',
+      },
+    ],
+  })
+  const keywords = Object.values(pools).flat().map((candidate) => candidate.keyword)
+
+  assert.equal(keywords.some((keyword) => keyword.includes('halloween')), false)
+  assert.equal(keywords.includes('evergreen librarian mug'), false)
+  assert.equal(keywords.includes('christmas nurse shirt'), true)
+  assert.equal(keywords.includes('christmas gardener shirt'), true)
+  assert.equal(keywords.includes('christmas librarian shirt'), true)
+  assert.equal(keywords.includes('evergreen librarian shirt'), true)
+})
+
+test('uses Marketplace related terms only when the saved plan matches the active context', () => {
+  assert.equal(typeof candidateApi.marketplaceRelatedTermCandidates, 'function')
+  const oldPlan = {
+    eventId: 'halloween',
+    categoryId: 'mug',
+    relatedKeywordMetrics: [{ keyword: 'halloween nurse mug' }],
+    items: [],
+  }
+  const matchingPlan = {
+    eventId: 'christmas',
+    categoryId: 'shirt',
+    relatedKeywordMetrics: [{ keyword: 'christmas nurse shirt' }],
+    items: [{
+      query: 'christmas teacher shirt',
+      status: 'completed',
+      result: {
+        etsyRelatedTerms: ['christmas librarian shirt'],
+      },
+    }],
+  }
+  const context = {
+    eventId: 'christmas',
+    categoryId: 'shirt',
+  }
+
+  assert.deepEqual(
+    candidateApi.marketplaceRelatedTermCandidates(oldPlan, context),
+    [],
+  )
+  assert.deepEqual(
+    candidateApi.marketplaceRelatedTermCandidates({
+      relatedKeywordMetrics: [{ keyword: 'christmas legacy shirt' }],
+    }, context),
+    [],
+  )
+  assert.deepEqual(
+    candidateApi.marketplaceRelatedTermCandidates(matchingPlan, context),
+    [
+      {
+        keyword: 'christmas nurse shirt',
+        eventId: 'christmas',
+        categoryId: 'shirt',
+        source: 'marketplace-insights',
+      },
+      {
+        keyword: 'christmas librarian shirt',
+        eventId: 'christmas',
+        categoryId: 'shirt',
+        source: 'marketplace-insights',
+      },
+    ],
+  )
+})
+
 test('keeps provenance separate while deduping external evidence lookups', () => {
   const demand = {
     keyword: 'spooky nurse shirt',
@@ -181,6 +306,63 @@ test('uses only measured market gaps from the active event and category', () => 
   assert.deepEqual(
     pools['market-gap'].map((candidate) => candidate.keyword),
     ['christmas librarian mug'],
+  )
+})
+
+test('round-trips listing age through archives and excludes unknown or stale adjacent products', () => {
+  assert.equal(typeof candidateApi.normalizeArchivedSupplyListings, 'function')
+  assert.equal(typeof candidateApi.adjacentProductListingsFromLearningRecords, 'function')
+
+  const archived = candidateApi.normalizeArchivedSupplyListings([
+    {
+      title: 'Fresh Witchy Gardener Mug',
+      monthlySales: 9,
+      listingAgeMonths: 12,
+    },
+    {
+      title: 'Unknown Age Gardener Mug',
+      monthlySales: 8,
+    },
+    {
+      title: 'Old Gardener Mug',
+      monthlySales: 7,
+      listingAgeMonths: 13,
+    },
+  ])
+  const persisted = JSON.parse(JSON.stringify([{
+    eventId: 'halloween',
+    categoryId: 'mug',
+    supplyListings: archived,
+  }]))
+  const adjacent = candidateApi.adjacentProductListingsFromLearningRecords(
+    persisted,
+    { categoryId: 'shirt' },
+  )
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    adjacentProductListings: adjacent,
+  })
+
+  assert.deepEqual(archived, [
+    {
+      title: 'Fresh Witchy Gardener Mug',
+      monthlySales: 9,
+      listingAgeMonths: 12,
+    },
+    {
+      title: 'Unknown Age Gardener Mug',
+      monthlySales: 8,
+      listingAgeMonths: null,
+    },
+    {
+      title: 'Old Gardener Mug',
+      monthlySales: 7,
+      listingAgeMonths: 13,
+    },
+  ])
+  assert.deepEqual(
+    pools['adjacent-product'].map((candidate) => candidate.keyword),
+    ['fresh witchy gardener shirt'],
   )
 })
 

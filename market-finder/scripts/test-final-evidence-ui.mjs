@@ -7,6 +7,7 @@ import {
   nextMultiAngleBatch,
   recordMultiAngleBatch,
 } from '../src/multi-angle-exploration.js'
+import * as multiAngleApi from '../src/multi-angle-exploration.js'
 
 const [rawHtml, rawApp, rawCss] = await Promise.all([
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
@@ -200,6 +201,90 @@ test('persists multi-angle progress and reconstructs legacy pending targets', ()
   assert.match(app, /const legacyRestoreAutomation = savedState\.multiAngleExploration/)
   assert.match(app, /queuedKeywords:\s*state\.winningNicheAutomation\.queuedKeywords/)
   assert.match(app, /winningNicheAutomation:\s*legacyRestoreAutomation/)
+})
+
+test('reload waits through extension connection and explicit resume dispatches once', async () => {
+  assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
+  const restored = multiAngleApi.pauseMultiAngleWorkAfterReload({
+    exploration: createMultiAngleExplorationState({
+      status: 'running',
+      activeEventId: 'halloween',
+      categoryId: 'shirt',
+      currentBatchCandidates: [{
+        keyword: 'spooky nurse shirt',
+        eventId: 'halloween',
+        categoryId: 'shirt',
+      }],
+    }),
+    pendingEvidenceAutomation: {
+      active: true,
+      scheduled: true,
+      initialCount: 1,
+      completedBatches: 0,
+      currentStage: 'pending-etsy',
+      targetKeywords: ['spooky nurse shirt'],
+    },
+  })
+  const appState = {
+    multiAngleExploration: restored.exploration,
+    pendingEvidenceAutomation: restored.pendingEvidenceAutomation,
+    restoredAutomationPending: false,
+    extensionConnected: true,
+    timingOverrideConfirmed: true,
+  }
+  let dispatchCount = 0
+  const resumePersistedBody = app.slice(
+    app.indexOf('function resumePersistedEvidenceAutomationIfReady()'),
+    app.indexOf('\nasync function ', app.indexOf('function resumePersistedEvidenceAutomationIfReady()') + 1),
+  )
+  const resumePersisted = new Function(
+    'state',
+    `${resumePersistedBody}; return resumePersistedEvidenceAutomationIfReady`,
+  )(appState)
+
+  assert.equal(resumePersisted(), false)
+  assert.equal(dispatchCount, 0)
+
+  const resumeBody = app.slice(
+    app.indexOf('async function resumeMultiAngleSearch()'),
+    app.indexOf('\nfunction ', app.indexOf('async function resumeMultiAngleSearch()') + 1),
+  )
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const resume = await new AsyncFunction(
+    'state',
+    'activeResearchContext',
+    'classifyProductionWindow',
+    'confirmExtensionConnection',
+    'resumeMultiAngleExploration',
+    'setSimpleStatus',
+    'renderAll',
+    'persistMarketFinderState',
+    'schedulePendingEvidenceAutomation',
+    'queueNextMultiAngleBatch',
+    `${resumeBody}; return resumeMultiAngleSearch`,
+  )(
+    appState,
+    () => ({
+      event: { id: 'halloween' },
+      category: { id: 'shirt' },
+    }),
+    () => ({ status: 'timely' }),
+    async () => true,
+    multiAngleApi.resumeMultiAngleExploration,
+    () => {},
+    () => {},
+    () => {},
+    () => {
+      dispatchCount += 1
+    },
+    () => {
+      dispatchCount += 1
+      return true
+    },
+  )
+
+  assert.equal(await resume(), true)
+  assert.equal(dispatchCount, 1)
 })
 
 test('completes a restored batch from persisted multi-angle candidates', () => {

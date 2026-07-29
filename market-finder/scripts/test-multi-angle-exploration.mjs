@@ -375,6 +375,15 @@ test('prepares an exhausted cycle as fresh idle work while preserving saved refe
     savedSeasonalReferenceKeys: ['saved|shirt|thanksgiving'],
     savedSeasonalReferences,
     evidenceArchives,
+    marketplaceInsightPlan: {
+      eventId: 'halloween',
+      categoryId: 'shirt',
+      items: [{ query: 'old halloween shirt', status: 'planned' }],
+    },
+    marketplaceInsightMessage: 'old plan',
+    candidates: [{ keyword: 'old halloween shirt' }],
+    candidateCatalog: [{ keyword: 'old halloween shirt' }],
+    crossNicheProposal: { candidates: [{ keyword: 'old cross niche shirt' }] },
   }, {
     activeEventId: 'christmas',
     categoryId: 'mug',
@@ -428,6 +437,79 @@ test('prepares an exhausted cycle as fresh idle work while preserving saved refe
   assert.deepEqual(prepared.savedSeasonalReferenceKeys, ['saved|shirt|thanksgiving'])
   assert.deepEqual(prepared.savedSeasonalReferences, savedSeasonalReferences)
   assert.deepEqual(prepared.evidenceArchives, evidenceArchives)
+  assert.equal(prepared.marketplaceInsightPlan, null)
+  assert.equal(prepared.marketplaceInsightMessage, '')
+  assert.deepEqual(prepared.candidates, [])
+  assert.deepEqual(prepared.candidateCatalog, [])
+  assert.equal(prepared.crossNicheProposal, null)
+})
+
+test('reload pauses active multi-angle work without losing its batch retry or targets', () => {
+  assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
+
+  const snapshot = {
+    exploration: createMultiAngleExplorationState({
+      status: 'running',
+      activeEventId: 'halloween',
+      categoryId: 'shirt',
+      currentBatchCandidates: [{
+        keyword: 'spooky nurse shirt',
+        eventId: 'halloween',
+        categoryId: 'shirt',
+      }],
+      retryQueue: [{
+        evidenceKey: 'ghost nurse shirt|shirt|halloween',
+        candidate: {
+          keyword: 'ghost nurse shirt',
+          eventId: 'halloween',
+          categoryId: 'shirt',
+        },
+        attempts: 1,
+        retryAt: '2026-08-01T00:00:00.000Z',
+      }],
+    }),
+    pendingEvidenceAutomation: {
+      active: true,
+      scheduled: true,
+      initialCount: 1,
+      completedBatches: 0,
+      currentStage: 'pending-etsy',
+      targetKeywords: ['spooky nurse shirt'],
+    },
+  }
+  const restored = multiAngleApi.pauseMultiAngleWorkAfterReload(snapshot)
+
+  assert.equal(restored.exploration.status, 'paused')
+  assert.equal(restored.exploration.pauseReason, 'reload-required')
+  assert.deepEqual(
+    restored.exploration.currentBatchCandidates,
+    snapshot.exploration.currentBatchCandidates,
+  )
+  assert.deepEqual(restored.exploration.retryQueue, snapshot.exploration.retryQueue)
+  assert.equal(restored.pendingEvidenceAutomation.active, false)
+  assert.equal(restored.pendingEvidenceAutomation.scheduled, false)
+  assert.deepEqual(
+    restored.pendingEvidenceAutomation.targetKeywords,
+    ['spooky nurse shirt'],
+  )
+})
+
+test('reload leaves idle and terminal multi-angle states terminal', () => {
+  assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
+
+  for (const status of ['idle', 'winner-found', 'exhausted']) {
+    const restored = multiAngleApi.pauseMultiAngleWorkAfterReload({
+      exploration: createMultiAngleExplorationState({ status }),
+      pendingEvidenceAutomation: {
+        active: true,
+        scheduled: true,
+        targetKeywords: [],
+      },
+    })
+    assert.equal(restored.exploration.status, status)
+    assert.equal(restored.pendingEvidenceAutomation.active, false)
+    assert.equal(restored.pendingEvidenceAutomation.scheduled, false)
+  }
 })
 
 test('starting prepared idle work replaces its old context with the current cycle context', () => {

@@ -146,10 +146,14 @@ import {
 } from './winning-niche-automation.js?v=20260730-1'
 import {
   EXPLORATION_ANGLE_ORDER,
+  adjacentProductListingsFromLearningRecords,
   buildMultiAngleCandidatePools,
+  candidateMatchesResearchContext,
   candidateEvidenceKey,
+  marketplaceRelatedTermCandidates,
+  normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260730-4'
+} from './multi-angle-candidates.js?v=20260730-5'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
@@ -157,6 +161,7 @@ import {
   nextMultiAngleBatch,
   pauseMultiAngleForContextChange,
   pauseMultiAngleExploration,
+  pauseMultiAngleWorkAfterReload,
   prepareNewMultiAngleCycle,
   recordMultiAngleBatch,
   recordMultiAngleFailure,
@@ -168,7 +173,7 @@ import {
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-7'
+} from './multi-angle-exploration.js?v=20260730-8'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -190,7 +195,6 @@ import {
   normalizePendingEvidenceAutomation,
   restoreInterruptedMarketplaceInsightPlan,
   restorePendingEvidenceAutomation,
-  shouldAutoResumeEvidenceAutomation,
 } from './persistent-evidence-automation.js?v=20260728-1'
 
 const PAGE_SOURCE = 'market-finder-page'
@@ -949,23 +953,13 @@ function restorePersistedState() {
     marketplaceInsightPlan: state.marketplaceInsightPlan,
   })
   state.marketplaceRetryState = normalizeMarketplaceRetryState(savedState.marketplaceRetryState)
-  if (
-    state.multiAngleExploration.status === 'winner-found'
-    && state.multiAngleExploration.winnerKeywords.length < restoredWinnerTarget
-  ) {
-    state.multiAngleExploration = pauseMultiAngleExploration({
-      ...state.multiAngleExploration,
-      status: 'running',
-      completedAt: '',
-    }, `保存済みA/B候補は${state.multiAngleExploration.winnerKeywords.length}/${restoredWinnerTarget}件です。目標まで探索を再開できます。`)
-  }
-  state.restoredAutomationPending = shouldAutoResumeEvidenceAutomation({
-    winningNicheAutomation: state.multiAngleExploration,
+  const reloadTransition = pauseMultiAngleWorkAfterReload({
+    exploration: state.multiAngleExploration,
     pendingEvidenceAutomation: state.pendingEvidenceAutomation,
-  }) || (
-    state.multiAngleExploration.status === 'running'
-    && state.multiAngleExploration.retryQueue.length > 0
-  )
+  })
+  state.multiAngleExploration = reloadTransition.exploration
+  state.pendingEvidenceAutomation = reloadTransition.pendingEvidenceAutomation
+  state.restoredAutomationPending = false
   state.seoPlan = savedState.seoPlan ?? null
   state.consoleUi = restoreResearchConsoleUiFromPayload(savedState)
 
@@ -1480,6 +1474,7 @@ function modifierEvidenceInput() {
   )).map((product) => ({
     title: product?.title ?? product?.label,
     monthlySales: product?.monthlySales,
+    listingAgeMonths: product?.listingAgeMonths,
   })).filter((row) => normalizePhrase(row.title))
 
   return { demandKeywords, supplyListings }
@@ -1552,10 +1547,7 @@ function evidenceArchiveRecord() {
       etsySearches30d: parseOptionalNumber(row.etsySearches30d),
       etsyListings: parseOptionalNumber(row.etsyListings),
     })),
-    supplyListings: evidence.supplyListings.map((row) => ({
-      title: String(row.title ?? '').trim(),
-      monthlySales: parseOptionalNumber(row.monthlySales),
-    })),
+    supplyListings: normalizeArchivedSupplyListings(evidence.supplyListings),
     multiAngleExploration: createMultiAngleExplorationState(state.multiAngleExploration),
     explorationProvenance: state.multiAngleExploration.provenance,
     drilldownNodes: mergeNicheDrilldownNodes(previousNodes, buildNicheDrilldownGraph({
@@ -1582,6 +1574,9 @@ function evidenceRecordFingerprint(record = {}) {
   const supplyListings = (record.supplyListings ?? []).map((row) => [
     normalizePhrase(row.title),
     parseOptionalNumber(row.monthlySales),
+    row.listingAgeMonths === null || row.listingAgeMonths === undefined
+      ? null
+      : parseOptionalNumber(row.listingAgeMonths),
   ]).sort((left, right) => left[0].localeCompare(right[0], 'en'))
   const drilldownNodes = (record.drilldownNodes ?? []).map((node) => [
     normalizePhrase(node.keyword),
@@ -4886,7 +4881,15 @@ function crossNicheSourceLabel(source) {
 }
 
 function currentCrossNicheDrilldown() {
-  return buildCrossNicheDrilldown(state.researchRows, activeResearchOptions())
+  const researchContext = activeResearchContext()
+  return buildCrossNicheDrilldown(
+    state.researchRows.filter((row) => candidateMatchesResearchContext(
+      row,
+      researchContext,
+      { requireContext: true },
+    )),
+    activeResearchOptions(),
+  )
 }
 
 function currentNicheDrilldownNodes() {
@@ -5309,16 +5312,10 @@ function currentMultiAngleBatchCandidates() {
 }
 
 function marketplaceRelatedTerms() {
-  const plan = state.marketplaceInsightPlan
-  return cleanKeywordList([
-    ...(plan?.relatedKeywordMetrics ?? []).map((row) => row.keyword),
-    ...(plan?.items ?? [])
-      .filter((item) => item.status === 'completed')
-      .flatMap((item) => [
-        ...(item.result?.etsyRelatedTerms ?? []),
-        ...(item.result?.etsyRelatedKeywordMetrics ?? []).map((row) => row.keyword),
-      ]),
-  ])
+  return marketplaceRelatedTermCandidates(
+    state.marketplaceInsightPlan,
+    activeResearchContext(),
+  )
 }
 
 function evidenceLearningRecords() {
@@ -5378,11 +5375,18 @@ function nextTaxonomyCandidates() {
 }
 
 function measuredEventlessCandidates() {
+  const { category } = activeResearchContext()
   return finalEvidenceRows()
     .filter((row) => row.evidenceState.status === 'verified')
     .filter((row) => !String(row.raw?.researchEventId ?? '').trim() || row.raw?.intentTrack === 'evergreen')
+    .filter((row) => (
+      String(row.raw?.researchCategoryId ?? row.researchCategoryId ?? '').trim()
+      === category.id
+    ))
     .map((row) => ({
       keyword: row.keyword,
+      eventId: '',
+      categoryId: category.id,
       source: 'measured-evergreen',
       priorityScore: row.scoreState.score,
     }))
@@ -5415,13 +5419,10 @@ function currentMultiAnglePools() {
     relatedTerms: marketplaceRelatedTerms(),
     taxonomyCandidates: nextTaxonomyCandidates(),
     drilldownCandidates: currentCrossNicheDrilldown().candidates,
-    adjacentProductListings: evidenceLearningRecords()
-      .flatMap((record) => (record.supplyListings ?? []).map((listing) => ({
-        ...listing,
-        categoryId: listing.categoryId ?? record.categoryId,
-        sales: listing.sales ?? listing.monthlySales,
-      })))
-      .filter((listing) => listing.categoryId !== category.id),
+    adjacentProductListings: adjacentProductListingsFromLearningRecords(
+      evidenceLearningRecords(),
+      { categoryId: category.id },
+    ),
     measuredRows,
     evergreenCandidates: measuredEventlessCandidates(),
     seasonalReferenceCandidates: currentSeasonalReferenceCandidates(),
@@ -5622,9 +5623,21 @@ async function startNewMultiAngleCycle() {
     savedSeasonalReferenceKeys: state.savedSeasonalReferenceKeys,
     savedSeasonalReferences: state.savedSeasonalReferences,
     evidenceArchives: state.evidenceArchives,
+    marketplaceInsightPlan: state.marketplaceInsightPlan,
+    marketplaceInsightMessage: state.marketplaceInsightMessage,
+    candidates: state.candidates,
+    candidateCatalog: state.candidateCatalog,
+    crossNicheProposal: state.crossNicheProposal,
   }, cycleContext)
   state.multiAngleExploration = prepared.exploration
   state.pendingEvidenceAutomation = prepared.pendingEvidenceAutomation
+  state.marketplaceInsightPlan = prepared.marketplaceInsightPlan
+  state.marketplaceInsightMessage = prepared.marketplaceInsightMessage
+  state.candidates = prepared.candidates
+  state.candidateCatalog = prepared.candidateCatalog
+  state.crossNicheProposal = prepared.crossNicheProposal
+  state.crossNicheWorkflow = createCrossNicheWorkflowState()
+  state.erankQueryPlan = []
   renderAll()
   persistMarketFinderState()
 

@@ -297,6 +297,11 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
   })
   return {
     ...snapshot,
+    marketplaceInsightPlan: null,
+    marketplaceInsightMessage: '',
+    candidates: [],
+    candidateCatalog: [],
+    crossNicheProposal: null,
     exploration,
     pendingEvidenceAutomation: {
       ...pending,
@@ -306,6 +311,33 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
       completedBatches: 0,
       currentStage: '',
       targetKeywords: [],
+    },
+  }
+}
+
+export function pauseMultiAngleWorkAfterReload(snapshot = {}, now = '') {
+  const exploration = createMultiAngleExplorationState(snapshot?.exploration)
+  const pending = snapshot?.pendingEvidenceAutomation ?? {}
+  if (exploration.status !== 'running') {
+    return {
+      ...snapshot,
+      exploration,
+      pendingEvidenceAutomation: {
+        ...pending,
+        active: false,
+        scheduled: false,
+        targetKeywords: uniqueStrings(pending?.targetKeywords),
+      },
+    }
+  }
+  return {
+    ...snapshot,
+    exploration: pauseMultiAngleExploration(exploration, 'reload-required', now),
+    pendingEvidenceAutomation: {
+      ...pending,
+      active: false,
+      scheduled: false,
+      targetKeywords: uniqueStrings(pending?.targetKeywords),
     },
   }
 }
