@@ -13,9 +13,9 @@ const PENDING_STATUSES = new Set([
 ])
 
 const STATUS_PRIORITY = [
-  'pending-erank',
   'pending-etsy',
   'pending-everbee',
+  'pending-erank',
 ]
 
 function normalizeKeyword(value) {
@@ -45,7 +45,7 @@ function normalizeCandidate(candidate = {}) {
     keyword,
     parentKeyword: normalizeKeyword(candidate.parentKeyword),
     modifier: normalizeKeyword(candidate.modifier),
-    depth: Math.max(1, Math.min(2, Math.floor(Number(candidate.depth) || 1))),
+    depth: Math.max(1, Math.min(3, Math.floor(Number(candidate.depth) || 1))),
     priorityScore: Math.max(0, Math.min(100, Math.round(Number(candidate.priorityScore) || 0))),
   }
 }
@@ -65,7 +65,7 @@ export function createCrossNicheWorkflowState(savedState = {}) {
   const status = VALID_STATUSES.has(savedState?.status) ? savedState.status : 'idle'
   return {
     status,
-    round: Math.max(0, Math.min(2, Math.floor(Number(savedState?.round) || 0))),
+    round: Math.max(0, Math.min(3, Math.floor(Number(savedState?.round) || 0))),
     batch: normalizeCandidates(Array.isArray(savedState?.batch) ? savedState.batch : []),
     consideredKeywords: uniqueKeywords(savedState?.consideredKeywords),
     queuedKeywords: uniqueKeywords(savedState?.queuedKeywords),
@@ -86,9 +86,9 @@ function pendingBatchStatus(batch, stageForKeyword) {
 export function advanceCrossNicheWorkflow({
   workflow,
   candidates = [],
-  stageForKeyword = () => 'pending-erank',
+  stageForKeyword = () => 'pending-etsy',
   hasParents = false,
-  limit = 12,
+  limit = 8,
   now = new Date().toISOString(),
 } = {}) {
   const current = createCrossNicheWorkflowState(workflow)
@@ -112,9 +112,9 @@ export function advanceCrossNicheWorkflow({
   const eligible = unseenPool
     .filter((candidate) => candidate.depth === current.round + 1)
     .filter((candidate) => stageForKeyword(candidate.keyword, candidate) !== 'done')
-  const maxBatch = Math.max(1, Math.min(30, Math.floor(Number(limit) || 12)))
+  const maxBatch = Math.max(1, Math.min(30, Math.floor(Number(limit) || 8)))
 
-  if (eligible.length > 0 && current.round < 2) {
+  if (eligible.length > 0 && current.round < 3) {
     const queuedCandidates = eligible.slice(0, maxBatch)
     const consideredKeywords = uniqueKeywords([
       ...current.consideredKeywords,
@@ -127,7 +127,7 @@ export function advanceCrossNicheWorkflow({
     return {
       workflow: {
         ...current,
-        status: pendingBatchStatus(queuedCandidates, stageForKeyword) ?? 'pending-erank',
+        status: pendingBatchStatus(queuedCandidates, stageForKeyword) ?? 'pending-etsy',
         round: current.round + 1,
         batch: queuedCandidates,
         consideredKeywords,

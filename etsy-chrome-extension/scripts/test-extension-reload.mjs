@@ -25,14 +25,22 @@ test('records eRank attempts even when metric capture fails', () => {
   assert.match(backgroundTypeScriptSource, /erankAttemptedAt: marketMode === 'erank' \? attemptedAt : ''/)
 })
 
+test('fails a stalled EverBee keyword before Chrome can terminate the worker', () => {
+  const everbeeKeywordWait = Number(backgroundTypeScriptSource.match(/MARKET_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
+
+  // Manifest V3 terminates a single service-worker request after five minutes.
+  // The queue must fail forward before that boundary or it can freeze forever.
+  assert.ok(
+    everbeeKeywordWait > 30000 && everbeeKeywordWait < 300000,
+    `expected EverBee timeout between 30s and Chrome's 5-minute limit, received ${everbeeKeywordWait}`,
+  )
+})
+
 test('waits for slow eRank metric columns before timing out the keyword', () => {
   const metricWait = Number(erankContentTypeScriptSource.match(/ERANK_METRICS_READY_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
-  const keywordWait = Number(backgroundTypeScriptSource.match(/MARKET_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
-
   const erankKeywordWait = Number(backgroundTypeScriptSource.match(/ERANK_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
 
   assert.ok(metricWait >= 180000, `expected metric wait >= 180000ms, received ${metricWait}`)
-  assert.ok(keywordWait >= metricWait + 30000, `expected outer timeout to exceed metric wait, received ${keywordWait}`)
   // A keyword whose metrics never render must not hold the queue for the full inner wait,
   // but the outer bound still has to outlast the inner one or the two overlap on the tab.
   assert.ok(
@@ -98,10 +106,10 @@ test('selects the visual keyword row that covers the Competition and KD columns'
 
 test('wakes on eRank DOM changes and retains a finite safety timeout', () => {
   const metricWait = Number(erankContentTypeScriptSource.match(/ERANK_METRICS_READY_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
-  const keywordWait = Number(backgroundTypeScriptSource.match(/MARKET_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
+  const erankKeywordWait = Number(backgroundTypeScriptSource.match(/ERANK_KEYWORD_TIMEOUT_MS\s*=\s*(\d+)/)?.[1])
 
   assert.ok(metricWait >= 300000, `expected metric wait >= 300000ms, received ${metricWait}`)
-  assert.ok(keywordWait >= metricWait + 30000, `expected outer timeout to exceed metric wait, received ${keywordWait}`)
+  assert.ok(erankKeywordWait >= metricWait + 30000, `expected eRank outer timeout to exceed metric wait, received ${erankKeywordWait}`)
   assert.match(erankContentTypeScriptSource, /function waitForMetricDomChange\(/)
   assert.match(erankContentTypeScriptSource, /new MutationObserver\(/)
   assert.match(erankContentTypeScriptSource, /await waitForMetricDomChange\(\)/)
@@ -564,6 +572,97 @@ test('retries a transient Etsy capture exception before stopping automation', as
   assert.equal(result.ok, true)
 })
 
+test('stops Etsy Marketplace Insights retries immediately on rate limiting', async () => {
+  const hooks = {}
+  runInNewContext(backgroundSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    fetch,
+    setTimeout,
+    URL,
+  })
+
+  let attempts = 0
+  await assert.rejects(
+    hooks.waitForEtsyMarketplaceInsightResult(
+      async () => {
+        attempts += 1
+        return { ok: false, error: 'ETSY_MARKETPLACE_RATE_LIMITED: Slow down, buddy.' }
+      },
+      async () => {},
+      { attempts: 4, initialDelayMs: 0, retryDelayMs: 0 },
+    ),
+    /ETSY_MARKETPLACE_RATE_LIMITED/,
+  )
+  assert.equal(attempts, 1)
+})
+
+test('detects the Etsy Slow down page as a rate limit', () => {
+  const fixture = {
+    query: 'halloween singing shirt',
+    heading: '',
+    summary: 'Uh oh! Slow down, buddy.',
+    remaining: '',
+    related: [],
+  }
+  const hooks = {}
+  const document = marketplaceDocument(fixture)
+  const window = {
+    getComputedStyle() {
+      return { display: 'block', visibility: 'visible' }
+    },
+  }
+  runInNewContext(backgroundSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    document,
+    fetch,
+    setTimeout,
+    URL,
+    window,
+  })
+
+  const result = hooks.extractEtsyMarketplaceInsightInPage(fixture.query)
+  assert.equal(result.ok, false)
+  assert.match(result.error, /ETSY_MARKETPLACE_RATE_LIMITED/)
+})
+
+test('detects the Japanese Etsy Slow down page as a rate limit', () => {
+  const fixture = {
+    query: 'halloween typography shirt',
+    heading: 'あらら！',
+    summary: 'まあまあ、そう焦らずに。',
+    remaining: '',
+    related: [],
+  }
+  const hooks = {}
+  const document = marketplaceDocument(fixture)
+  const window = {
+    getComputedStyle() {
+      return { display: 'block', visibility: 'visible' }
+    },
+  }
+  runInNewContext(backgroundSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    document,
+    fetch,
+    setTimeout,
+    URL,
+    window,
+  })
+
+  const result = hooks.extractEtsyMarketplaceInsightInPage(fixture.query)
+  assert.equal(result.ok, false)
+  assert.match(result.error, /ETSY_MARKETPLACE_RATE_LIMITED/)
+})
+
 test('forwards the automatic Etsy search and capture request through the page bridge', () => {
   assert.match(bridgeSource, /RUN_AND_CAPTURE_ETSY_MARKETPLACE_INSIGHT/)
 })
@@ -634,6 +733,88 @@ test('extracts related keyword metrics from Japanese and English Marketplace Ins
     )
     assert.equal(result.remainingSearches, 14)
   }
+})
+
+test('does not mistake the Last 30 days period label for search or listing metrics', () => {
+  const fixture = {
+    query: 'halloween sewing shirt',
+    heading: 'Similar search terms',
+    summary: 'Your search\nhalloween sewing shirt\nSearches\nLast 30 days\nListings\nLast 30 days',
+    remaining: '',
+    related: [],
+  }
+  const hooks = {}
+  const document = marketplaceDocument(fixture)
+  const window = {
+    getComputedStyle() {
+      return { display: 'block', visibility: 'visible' }
+    },
+  }
+  runInNewContext(backgroundSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    document,
+    fetch,
+    setTimeout,
+    URL,
+    window,
+  })
+
+  const result = hooks.extractEtsyMarketplaceInsightInPage(fixture.query)
+  assert.equal(result.etsySearches30d, null)
+  assert.equal(result.etsyListings, null)
+  assert.equal(result.ok, false)
+})
+
+test('reads zero metrics from the current Japanese result row instead of the 30-day period label', () => {
+  const fixture = {
+    query: 'custom name book lover shirt',
+    heading: '似たような検索ワード',
+    summary: [
+      'custom name book lover shirt',
+      '検索数',
+      '—',
+      '検索結果',
+      '—',
+      '期間',
+      '過去 30 日間',
+      '過去 30 日間 の間の検索数',
+    ].join('\n'),
+    remaining: '',
+    related: [
+      {
+        keyword: 'custom name book lover shirt',
+        searches: '0 0.0%',
+        listings: '0',
+        conversion: 'エラー',
+      },
+    ],
+  }
+  const hooks = {}
+  const document = marketplaceDocument(fixture)
+  const window = {
+    getComputedStyle() {
+      return { display: 'block', visibility: 'visible' }
+    },
+  }
+  runInNewContext(backgroundSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    document,
+    fetch,
+    setTimeout,
+    URL,
+    window,
+  })
+
+  const result = hooks.extractEtsyMarketplaceInsightInPage(fixture.query)
+  assert.equal(result.etsySearches30d, 0)
+  assert.equal(result.etsyListings, 0)
+  assert.equal(result.ok, true)
 })
 
 test('keeps more than 20 visible related rows in Japanese and English', () => {

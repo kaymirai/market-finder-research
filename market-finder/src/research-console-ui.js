@@ -2,7 +2,7 @@ export const RESEARCH_STAGE_IDS = Object.freeze([
   'conditions',
   'candidates',
   'etsy',
-  'erank',
+  'everbee',
   'results',
 ])
 
@@ -117,8 +117,9 @@ export function deriveResearchHeaderState(input = {}) {
 }
 
 export function createResearchConsoleUi(saved = {}) {
+  const savedStage = saved.activeStage === 'erank' ? 'results' : saved.activeStage
   return {
-    activeStage: RESEARCH_STAGE_IDS.includes(saved.activeStage) ? saved.activeStage : 'conditions',
+    activeStage: RESEARCH_STAGE_IDS.includes(savedStage) ? savedStage : 'conditions',
     queueFilter: QUEUE_FILTERS.has(saved.queueFilter) ? saved.queueFilter : 'all',
     selectedKeyword: String(saved.selectedKeyword ?? ''),
   }
@@ -209,7 +210,7 @@ export function deriveResearchStageStates(metrics = {}) {
     stage('conditions', '条件', candidateCount > 0 ? 'complete' : 'available', candidateCount, candidateCount > 0 ? '候補作成済み' : '条件を入力'),
     stage('candidates', '候補', readyCandidateCount > 0 ? 'complete' : candidateCount > 0 ? 'review' : 'locked', readyCandidateCount, readyCandidateCount > 0 ? 'Etsy公式へ送信可能' : '候補を確認'),
     stage('etsy', 'Etsy公式', activeService === 'etsy' ? 'progress' : etsyCompletedCount > 0 && etsyPendingCount === 0 ? 'complete' : etsyCompletedCount > 0 ? 'review' : etsyEligibleCount > 0 ? 'available' : 'locked', etsyCompletedCount, etsyPendingCount > 0 ? `${etsyPendingCount}件が未完了` : etsyEligibleCount > 0 ? `${etsyEligibleCount}件を確認可能` : '候補待ち'),
-    stage('erank', 'eRank', activeService === 'erank' ? 'progress' : erankFailureCount > 0 || erankPendingCount > 0 ? 'review' : erankResultCount > 0 ? 'complete' : readyCandidateCount > 0 ? 'available' : 'locked', erankResultCount, erankFailureCount > 0 ? `${erankFailureCount}件の数値を要確認` : erankPendingCount > 0 ? `${erankPendingCount}件が未検索` : '関連語で広げる'),
-    stage('results', '最終結果', activeService === 'everbee' ? 'progress' : everbeeResultCount > 0 ? 'complete' : ['erank', 'etsy'].includes(activeService) ? 'locked' : etsyCompletedCount > 0 || erankResultCount > 0 ? 'available' : 'locked', finalEvidenceCount, finalEvidenceCount > 0 ? '全評価結果を確認' : '売上確認待ち'),
+    stage('everbee', 'EverBee', activeService === 'everbee' ? 'progress' : everbeeResultCount > 0 ? 'complete' : etsyCompletedCount > 0 ? 'available' : 'locked', everbeeResultCount, everbeeResultCount > 0 ? '売上確認済み' : etsyCompletedCount > 0 ? 'Etsy公式確認済みを送信' : 'Etsy公式確認待ち'),
+    stage('results', '最終結果', finalEvidenceCount > 0 ? 'complete' : ['etsy', 'everbee'].includes(activeService) ? 'locked' : etsyCompletedCount > 0 || erankResultCount > 0 ? 'available' : 'locked', finalEvidenceCount, finalEvidenceCount > 0 ? '全評価結果を確認' : '売上確認待ち'),
   ]
 }

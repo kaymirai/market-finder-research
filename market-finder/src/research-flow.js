@@ -20,6 +20,11 @@ function uniqueKeywords(values) {
   })
 }
 
+function hasRankNumberPrefix(value) {
+  const [firstToken = ''] = normalizeKeyword(value).split(' ')
+  return /^\d{1,3}$/.test(firstToken)
+}
+
 function finiteMetric(value, { positive = false } = {}) {
   if (value === null || value === undefined || value === '') return null
   const number = Number(value)
@@ -70,7 +75,7 @@ export function buildEtsyCandidatesFromErank(erankRows = [], candidates = []) {
     const riskTerms = Array.isArray(row.score?.riskTerms) ? row.score.riskTerms : []
     const metrics = cohortMetrics(row)
     const officialProbe = action === 'hold' && ((metrics.search ?? 0) > 0 || (metrics.clicks ?? 0) > 0)
-    if (!keyword || (!['everbee', 'expand'].includes(action) && !officialProbe) || riskTerms.length > 0) return
+    if (!keyword || hasRankNumberPrefix(keyword) || (!['everbee', 'expand'].includes(action) && !officialProbe) || riskTerms.length > 0) return
 
     const opportunityIndex = Number(row.erankOpportunity?.score) || 0
     const previous = qualifiedByKeyword.get(keyword)
@@ -139,7 +144,7 @@ export function buildEtsyCandidatesFromPool(candidates = []) {
   candidates.forEach((source) => {
     const keyword = normalizeKeyword(source?.keyword ?? source?.query)
     const riskTerms = Array.isArray(source?.score?.riskTerms) ? source.score.riskTerms : []
-    if (!keyword || byKeyword.has(keyword) || riskTerms.length > 0) return
+    if (!keyword || hasRankNumberPrefix(keyword) || byKeyword.has(keyword) || riskTerms.length > 0) return
     if (source.status && source.status !== 'ready') return
 
     const candidate = {

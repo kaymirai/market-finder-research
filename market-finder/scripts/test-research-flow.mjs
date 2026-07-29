@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildEtsyCandidatesFromPool,
   buildEtsyCandidatesFromErank,
   extensionResultsImportMode,
   marketplaceCompletedKeywords,
@@ -275,6 +276,24 @@ test('does not send rejected or risky hold candidates to Etsy official verificat
   ]
 
   assert.deepEqual(buildEtsyCandidatesFromErank(rows, []), [])
+})
+
+test('does not send rank-number artifacts to Etsy official verification', () => {
+  const candidates = [
+    { keyword: '1 4 nicu nurse shirt', status: 'ready' },
+    { keyword: '4th grade teacher shirt', status: 'ready' },
+    { keyword: '2026 halloween shirt', status: 'ready' },
+    { keyword: 'nicu nurse halloween shirt', status: 'ready' },
+  ]
+
+  assert.deepEqual(
+    buildEtsyCandidatesFromPool(candidates).map((candidate) => candidate.keyword),
+    [
+      '2026 halloween shirt',
+      '4th grade teacher shirt',
+      'nicu nurse halloween shirt',
+    ],
+  )
 })
 
 test('does not reuse final sales-stage freshness exclusions for Etsy verification candidates', () => {

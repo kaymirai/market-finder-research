@@ -1,2 +1,2 @@
-researchedAt,keyword,clusterKey,opportunityLabel,confidenceLabel,sourceSnapshot,launchedAt,listingId,impressions30d,visits30d,favorites30d,orders30d,revenue30d,notes
-,,,,,,,,,,,,,
+snapshotAt,listingId,clusterId,keyword,productType,listedAt,opportunityLabel,confidenceLabel,sourceSnapshot,visits,orders,revenue,netProfit,impressions,clicks,favorites,trafficSource,notes
+,,,,,,,,,,,,,,,,,

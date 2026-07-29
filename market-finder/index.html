@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260726-8">
+    <link rel="stylesheet" href="./styles.css?v=20260729-1">
   </head>
   <body>
     <main class="app-shell">
@@ -40,6 +40,11 @@
         <div id="researchNextAction" class="research-next-action" aria-live="polite">
           <span class="research-next-action-label">次にやること</span>
           <strong id="researchNextActionText">読み込み中です</strong>
+          <div id="researchNextActionButtons" class="research-next-action-buttons" hidden>
+            <button id="acceptRestoredResultsBtn" type="button" class="ghost-btn" hidden>この前回結果から続ける</button>
+            <button id="crossNicheNextApplyBtn" type="button" class="primary-btn" hidden>この0件を調査する</button>
+            <button id="crossNicheNextDismissBtn" type="button" class="ghost-btn" hidden>今回は見送る</button>
+          </div>
         </div>
         <div class="top-actions advanced-only">
           <button id="copyKeywordsBtn" type="button" class="ghost-btn" data-optional="予備">候補リストをコピー</button>
@@ -81,6 +86,46 @@
         <button id="openAdvancedModalBtn" class="text-btn advanced-link" type="button">上級者向け</button>
       </section>
 
+      <section id="winningNicheAutomationPanel" class="winning-niche-automation-panel is-idle flow-auto-only" aria-live="polite">
+        <div class="winning-niche-automation-heading">
+          <div>
+            <p class="section-kicker">勝ち候補の連続探索</p>
+            <h3>未調査の切り口を順番に検証する</h3>
+            <p id="winningNicheAutomationStatus">イベントを固定し、職業・趣味・贈る相手・ペット・スタイル・買う場面を順番に調べます。</p>
+          </div>
+          <button id="winningNicheAutomationToggle" type="button" class="primary-btn" data-winning-niche-action="start">勝ち候補を探す</button>
+        </div>
+        <div class="listing-research-target-planner">
+          <div class="listing-research-target-heading">
+            <div>
+              <p class="section-kicker">出品目標から逆算</p>
+              <h4>1回のリサーチで必要なA/B候補を計算する</h4>
+            </div>
+            <button id="listingResearchTargetSaveBtn" type="button" class="ghost-btn">設定を保存して再計算</button>
+          </div>
+          <div class="listing-research-target-fields">
+            <label class="field">
+              <span>月の出品目標</span>
+              <input id="monthlyListingTargetInput" type="number" min="1" max="1000" step="1" value="100">
+            </label>
+            <label class="field">
+              <span>月のリサーチ回数</span>
+              <input id="researchRunsPerMonthInput" type="number" min="1" max="31" step="1" value="4">
+            </label>
+            <label class="field">
+              <span>A/B候補1件から作る商品数</span>
+              <input id="listingsPerWinnerInput" type="number" min="1" max="50" step="1" value="5">
+            </label>
+          </div>
+          <p id="listingResearchTargetErrors" class="listing-research-target-errors" role="alert" hidden></p>
+          <div class="listing-research-target-result" aria-live="polite">
+            <p id="listingResearchTargetSummary">月100商品 ÷ 4回 ÷ 5商品 = 今回A/Bを5件確保</p>
+            <strong id="listingResearchTargetProgress">A/B候補 0 / 5件・残り5件</strong>
+          </div>
+        </div>
+        <div id="winningNicheAutomationRail" class="winning-niche-rail" aria-label="連続探索カテゴリ"></div>
+      </section>
+
       <section class="simple-runner">
         <div class="simple-step flow-csv-only">
           <span>1</span>
@@ -109,7 +154,7 @@
         <button type="button" data-research-stage="conditions" aria-selected="true"><span>1</span><strong>条件</strong><small id="researchStageConditionsStatus">未着手</small></button>
         <button type="button" data-research-stage="candidates" aria-selected="false"><span>2</span><strong>候補</strong><small id="researchStageCandidatesStatus">未着手</small></button>
         <button type="button" data-research-stage="etsy" aria-selected="false"><span>3</span><strong>Etsy公式</strong><small id="researchStageEtsyStatus">未着手</small></button>
-        <button type="button" data-research-stage="erank" aria-selected="false"><span>4</span><strong>eRank</strong><small id="researchStageErankStatus">未着手</small></button>
+        <button type="button" data-research-stage="everbee" aria-selected="false"><span>4</span><strong>EverBee</strong><small id="researchStageEverbeeStatus">未着手</small></button>
         <button type="button" data-research-stage="results" aria-selected="false"><span>5</span><strong>最終結果</strong><small id="researchStageResultsStatus">未着手</small></button>
       </nav>
 
@@ -138,6 +183,131 @@
               <small>通常は「イベントなし」でOKです。</small>
             </label>
           </div>
+
+          <fieldset id="explorationModeControl" class="exploration-mode-control">
+            <legend>今月の探索モード</legend>
+            <p>1人で迷わず配分を決めるための手動設定です。選ぶとこの端末に保存します。</p>
+            <div class="exploration-mode-options">
+              <label>
+                <input type="radio" name="explorationMode" value="M1" data-exploration-mode checked>
+                <span><strong>市場分散</strong><small>新しい市場を100%探索</small></span>
+              </label>
+              <label>
+                <input type="radio" name="explorationMode" value="M3" data-exploration-mode>
+                <span><strong>併用</strong><small>探索60%・勝ち筋40%</small></span>
+              </label>
+              <label>
+                <input type="radio" name="explorationMode" value="M5" data-exploration-mode>
+                <span><strong>勝ち市場深掘り</strong><small>探索30%・勝ち筋70%</small></span>
+              </label>
+            </div>
+            <div id="explorationModeStatus" class="inline-status">市場分散: 新しい市場を広く探します。</div>
+          </fieldset>
+
+          <details id="researchFunnelProgress" class="research-funnel-progress">
+            <summary>
+              <span>月次の調査漏斗</span>
+              <strong id="researchFunnelSummary">0 / 6段階が目標内</strong>
+            </summary>
+            <p>広く作り、実測ごとに絞ります。eRankは任意で、Etsyの数字が不明・境界・矛盾の時だけ追加確認します。</p>
+            <div class="research-funnel-list">
+              <div data-funnel-stage="generatedFromAxes"><span>8軸から候補生成</span><strong><b>0</b> / 200</strong></div>
+              <div data-funnel-stage="marketplaceInsights"><span>Etsy公式で確認</span><strong><b>0</b> / 最大200</strong></div>
+              <div data-funnel-stage="erankRelated"><span>関連候補へ絞る</span><strong><b>0</b> / 50〜100</strong></div>
+              <div data-funnel-stage="everbeeVisual"><span>EverBee目視確認</span><strong><b>0</b> / 15〜20</strong></div>
+              <div data-funnel-stage="clusters"><span>商品シリーズ</span><strong><b>0</b> / 4〜6</strong></div>
+              <div data-funnel-stage="listings"><span>月の商品化</span><strong><b>0</b> / 25〜40</strong></div>
+            </div>
+            <small>eRankは任意: Etsy中核値が不明、季節・国比較、A/B・B/C境界、関連語不足、EtsyとEverBeeの矛盾がある時だけ使います。</small>
+          </details>
+
+          <section id="listingOutcomesPanel" class="listing-outcomes-panel" aria-labelledby="listingOutcomesTitle">
+            <div class="listing-outcomes-heading">
+              <div>
+                <p class="section-kicker">実績から学習</p>
+                <h3 id="listingOutcomesTitle">Etsy Stats</h3>
+                <p>同じlistingIdを日付ごとに追加します。判定は最新値、推移は全スナップショットを使います。</p>
+              </div>
+              <span id="listingOutcomesCount" class="soft-pill">0商品 / 0記録</span>
+            </div>
+
+            <div class="listing-outcomes-status-band" aria-label="最新スナップショットの判定">
+              <div data-outcome-band="watch">
+                <span>観察</span>
+                <strong>Watch</strong>
+                <small><b>0</b>商品</small>
+              </div>
+              <div data-outcome-band="early-go">
+                <span>初動確認</span>
+                <strong>Early Go</strong>
+                <small><b>0</b>商品</small>
+              </div>
+              <div data-outcome-band="stop">
+                <span>見直し</span>
+                <strong>停止候補</strong>
+                <small><b>0</b>商品・停止・大幅修正</small>
+              </div>
+            </div>
+
+            <div class="listing-outcomes-import">
+              <label class="field">
+                <span>Etsy Stats CSV</span>
+                <textarea id="listingOutcomesCsvInput" rows="5" placeholder="snapshotAt,listingId,clusterId,visits,orders,revenue,netProfit"></textarea>
+              </label>
+              <div class="listing-outcomes-file-row">
+                <label class="listing-outcomes-file">
+                  <span>CSVファイルを選ぶ</span>
+                  <input id="listingOutcomesFileInput" type="file" accept=".csv,text/csv">
+                </label>
+                <button id="listingOutcomesPreviewBtn" type="button" class="ghost-btn">内容を確認</button>
+                <button id="listingOutcomesSaveBtn" type="button" class="primary-btn" disabled>確認した記録を保存</button>
+                <button id="listingOutcomesRetryBtn" type="button" class="ghost-btn" hidden>未保存データを再送</button>
+              </div>
+              <div id="listingOutcomesImportStatus" class="inline-status" aria-live="polite">CSVを貼り付けるか、ファイルを選んでください。</div>
+              <div id="listingOutcomesPreview" class="listing-outcomes-preview"></div>
+            </div>
+
+            <div class="listing-outcomes-learning">
+              <article>
+                <strong>M3</strong>
+                <b id="listingOutcomesM3Value">勝ち商品 0</b>
+                <small id="listingOutcomesM3Note">まず実績を取り込みます。</small>
+              </article>
+              <article>
+                <strong>M6</strong>
+                <b id="listingOutcomesM6Value">勝率 0%</b>
+                <small id="listingOutcomesM6Note">CVR・利益を実測で更新します。</small>
+              </article>
+            </div>
+
+            <div id="listingOutcomesRecommendation" class="listing-outcomes-recommendation">
+              <span>次回の推奨</span>
+              <strong>市場分散</strong>
+              <small>推奨表示のみ。手動の探索モードは変更しません。</small>
+            </div>
+
+            <details class="listing-outcomes-trend">
+              <summary>全スナップショットの推移</summary>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>取得日</th>
+                      <th>listingId</th>
+                      <th>訪問</th>
+                      <th>注文</th>
+                      <th>売上</th>
+                      <th>純利益</th>
+                      <th>判定</th>
+                    </tr>
+                  </thead>
+                  <tbody id="listingOutcomesTrendBody">
+                    <tr><td colspan="7">保存済みスナップショットはまだありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </section>
 
           <label class="field advanced-only">
             <span>イベントを手入力する時だけ</span>
@@ -196,7 +366,8 @@
             <span class="field-label">買い手は誰ですか（8軸の入口）</span>
             <div class="buyer-identity-suggest">
               <div class="buyer-identity-suggest-head">
-                <strong>思いつかない時はここから選びます</strong>
+                <strong>購入者候補</strong>
+                <span id="buyerIdentityAutoStatus" class="soft-pill">自動選択待ち</span>
                 <button id="buyerIdentityShuffleBtn" type="button" class="text-btn">別の候補を見る</button>
               </div>
               <div id="buyerIdentitySuggestions" class="chip-grid buyer-identity-chips"></div>
@@ -297,15 +468,15 @@
 
           <section id="modifierEvidencePanel" class="modifier-evidence">
             <div class="mini-heading">
-              <span>修飾語の実測</span>
+              <span>購入者語彙の学習</span>
               <small id="modifierEvidenceTotals">まだ実測データがありません</small>
             </div>
-            <p class="panel-help">この市場で実際に使われている語だけを数えています。需要はEtsy公式の検索語、供給はEverBeeで売れている商品タイトルです。「需要あり・供給なし」が狙い目、両方0の語は誰も使っていません。</p>
+            <p class="panel-help">Etsy公式の検索語とEverBeeの商品タイトルを、人・理由・場面・修飾に分けて蓄積します。同じ人やイベントの実測を優先し、次回の候補生成に自動で使います。</p>
             <div id="modifierEvidenceTable" class="modifier-evidence-table"></div>
             <small id="modifierEvidenceNote"></small>
             <div class="evidence-archive-action">
               <button id="evidenceArchiveBtn" type="button" class="ghost-btn">調査結果を保管する</button>
-              <small id="evidenceArchiveStatus">取得した数値をファイルに残します。次回以降の実測はここに貯めた分も合算します。</small>
+              <small id="evidenceArchiveStatus">取得した語句と数値を市場文脈つきで残します。次回は近い市場の実測語を優先します。</small>
             </div>
           </section>
 
@@ -524,47 +695,29 @@
         <ol id="marketplaceQueue" class="marketplace-queue"></ol>
         <div id="marketplaceStatus" class="inline-status">候補を作ると、Etsy公式で調べる候補が準備されます。</div>
         <div id="marketplaceResultsList" class="marketplace-results-list"></div>
-        <div class="step-primary-action">
-          <div class="mini-guide">Etsy公式で数字が取れたら、eRankで関連語を広げます。eRankは1日の検索回数に上限があるので、絞り込みではなく広げる用途に使います。</div>
-          <div id="erankQueryPlanSummary" class="inline-status">候補を作ると、eRankで消費する検索数が表示されます。</div>
-          <button id="candidateErankBtn" type="button" class="primary-btn full-width">eRankで関連語を広げる</button>
+        <div class="service-note">
+          <strong>次はEverBeeです。</strong>
+          <span>Etsy公式で確認した候補を、実際の売上データで確かめます。</span>
         </div>
       </section>
 
-      <section class="erank-section" data-research-panel="erank" hidden>
+      <section class="everbee-section" data-research-panel="everbee" hidden>
         <div class="results-heading">
           <div>
             <p class="section-kicker">4 / 5</p>
-            <h2>eRankの需要結果を確認する</h2>
-            <p class="panel-help">検索数やクリックがある語句と、その関連語を見ます。ここは候補を広げるための材料で、合否はEtsy公式とEverBeeの数字で決めます。</p>
-          </div>
-          <div class="heading-actions">
-            <span class="count-badge"><strong id="erankCount">0</strong><small>eRank結果</small></span>
+            <h2>EverBee優先候補</h2>
+            <p class="panel-help">Etsy公式確認済みの20件をEverBeeへ送ります。実際の販売数と売上を見て、商品化する候補を絞ります。</p>
           </div>
         </div>
         <div class="service-note">
-          <strong>次はEverBeeです。</strong>
-          <span>Etsy公式とeRankで残った候補を、実際に売れているかどうかで確かめます。</span>
+          <strong>Etsy公式の確認結果を優先します。</strong>
+          <span>eRankを追加で使いたい場合は、最終結果の「eRankで追加確認」から実行できます。</span>
         </div>
-        <div class="metric-glossary">
-          <span><strong>Search</strong> 検索されている量</span>
-          <span><strong>Clicks</strong> 実際にクリックされた量</span>
-          <span><strong>Competition</strong> eRank上の競合数</span>
-          <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
-        </div>
-        <div class="score-guide" aria-label="需要スコアの見方">
-          <span class="guide-chip weak"><strong>0-39</strong> 弱い</span>
-          <span class="guide-chip review"><strong>40-61</strong> 追加確認</span>
-          <span class="guide-chip promising"><strong>62-79</strong> 有望</span>
-          <span class="guide-chip strong"><strong>80-100</strong> 強い</span>
-          <span class="guide-chip danger"><strong>赤</strong> 除外・需要未確認</span>
-        </div>
-        <div id="erankSummary" class="research-summary"></div>
-        <div id="erankResultsList" class="erank-results-list"></div>
         <div class="step-primary-action">
           <button id="erankToEverbeeBtn" type="button" class="primary-btn full-width">EverBeeで売上を確認する</button>
-          <div id="everbeeQueueStatus" class="inline-status">Etsy公式結果を取り込むと、その候補を優先して売上確認します。</div>
+          <div id="everbeeQueueStatus" class="inline-status">Etsy公式確認済みの20件をEverBeeへ送ります。</div>
         </div>
+        <div id="resultsList" class="results-list"></div>
       </section>
 
       <section data-research-panel="results" hidden>
@@ -595,7 +748,56 @@
             <button id="downloadStep4CsvBtn" type="button" class="primary-btn" data-optional="保存" aria-describedby="finalResultFreshness">未来デザイナー用CSV</button>
           </div>
         </div>
+        <details class="erank-advanced-panel">
+          <summary>eRankで追加確認</summary>
+          <div class="erank-section">
+            <div class="results-heading">
+              <div>
+                <p class="section-kicker">任意の追加確認</p>
+                <h2>eRankの需要結果を確認する</h2>
+                <p class="panel-help">検索数、クリック、競合、関連語を追加で確認します。通常の5段階フローでは必須ではありません。</p>
+              </div>
+              <div class="heading-actions">
+                <span class="count-badge"><strong id="erankCount">0</strong><small>eRank結果</small></span>
+              </div>
+            </div>
+            <div class="metric-glossary">
+              <span><strong>Search</strong> 検索されている量</span>
+              <span><strong>Clicks</strong> 実際にクリックされた量</span>
+              <span><strong>Competition</strong> eRank上の競合数</span>
+              <span><strong>KD</strong> 低いほど検索数に対して競合が軽め</span>
+            </div>
+            <div class="score-guide" aria-label="需要スコアの見方">
+              <span class="guide-chip weak"><strong>0-39</strong> 弱い</span>
+              <span class="guide-chip review"><strong>40-61</strong> 追加確認</span>
+              <span class="guide-chip promising"><strong>62-79</strong> 有望</span>
+              <span class="guide-chip strong"><strong>80-100</strong> 強い</span>
+              <span class="guide-chip danger"><strong>赤</strong> 除外・需要未確認</span>
+            </div>
+            <div class="step-primary-action">
+              <div id="erankQueryPlanSummary" class="inline-status">候補を作ると、eRankで消費する検索数が表示されます。</div>
+              <button id="candidateErankBtn" type="button" class="ghost-btn full-width">eRankで関連語を広げる</button>
+            </div>
+            <div id="erankSummary" class="research-summary"></div>
+            <div id="erankResultsList" class="erank-results-list"></div>
+          </div>
+        </details>
         <section id="finalKeywordDecision" class="final-keyword-decision" aria-live="polite"></section>
+        <section id="profitStrategyPanel" class="profit-strategy-panel" aria-live="polite">
+          <div class="profit-score-pair">
+            <article class="profit-score-card is-market">
+              <span>市場機会スコア</span>
+              <strong>—</strong>
+              <small>Etsy・EverBeeの市場根拠</small>
+            </article>
+            <article class="profit-score-card is-profit">
+              <span>商品化・利益スコア</span>
+              <strong>—</strong>
+              <small>注文利益と人の判断</small>
+            </article>
+          </div>
+          <p class="panel-help">最終表から1語を選ぶと、商品化判断を編集できます。</p>
+        </section>
         <section id="designShortlistPanel" class="design-shortlist-panel">
           <div class="design-shortlist-heading">
             <div>
@@ -644,12 +846,16 @@
           <div id="finalEvidenceScrollProxyTrack" class="final-evidence-scroll-proxy-track"></div>
         </div>
         <div id="finalEvidenceTable" class="final-evidence-table-shell" aria-live="polite"></div>
+        <details id="nicheExplorationHistory" class="niche-exploration-history" hidden>
+          <summary>探索履歴 0語</summary>
+          <div id="nicheExplorationHistoryList" class="niche-exploration-history-list"></div>
+        </details>
         <section id="crossNicheSection" class="cross-niche-section" hidden>
           <div class="cross-niche-heading">
             <div>
               <p class="section-kicker">自動再探索</p>
               <h3>高競合の売れ筋を自動で掘り下げる</h3>
-              <p>複数商品が売れている高競合市場から交差キーワードを作り、通常のeRank・Etsy公式・EverBee確認へ自動で戻します。</p>
+              <p>複数商品が売れている高競合市場から交差キーワードを作り、通常のEtsy公式・EverBee確認へ自動で戻します。eRankは最終結果で任意の補助確認です。</p>
             </div>
             <span id="crossNicheCount" class="count-badge"><strong>0</strong><small>候補</small></span>
           </div>
@@ -662,7 +868,6 @@
           <div id="crossNicheStatus" class="inline-status cross-niche-status">候補が見つかると通常調査へ自動追加し、再検証後に最終順位を確定します。</div>
           <div id="crossNicheList" class="cross-niche-list"></div>
         </section>
-        <div id="resultsList" class="results-list"></div>
       </section>
 
       <section class="seo-section advanced-only">
@@ -785,6 +990,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260726-8"></script>
+    <script type="module" src="./src/app.js?v=20260729-1"></script>
   </body>
 </html>

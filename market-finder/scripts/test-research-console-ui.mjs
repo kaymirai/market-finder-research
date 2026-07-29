@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  RESEARCH_STAGE_IDS,
   bindResearchStageTabs,
   createRenderSignatureTracker,
   createResearchConsoleUi,
@@ -56,13 +57,17 @@ class FakeTabs {
 }
 
 function createResearchConsoleDom() {
-  const stages = ['conditions', 'candidates', 'erank', 'etsy', 'results']
+  const stages = ['conditions', 'candidates', 'etsy', 'everbee', 'results']
   return {
     consoleElement: { dataset: {} },
     tabContainer: new FakeTabs(stages),
     panels: stages.map((stage) => ({ dataset: { researchPanel: stage }, hidden: false })),
   }
 }
+
+test('normal flow exposes Etsy then EverBee and never makes eRank a required stage', () => {
+  assert.deepEqual(RESEARCH_STAGE_IDS, ['conditions', 'candidates', 'etsy', 'everbee', 'results'])
+})
 
 test('restores only known stage and queue values', () => {
   assert.deepEqual(createResearchConsoleUi({ activeStage: 'etsy', queueFilter: 'failed' }), {
@@ -71,11 +76,12 @@ test('restores only known stage and queue values', () => {
     selectedKeyword: '',
   })
   assert.equal(createResearchConsoleUi({ activeStage: 'unknown' }).activeStage, 'conditions')
+  assert.equal(createResearchConsoleUi({ activeStage: 'erank' }).activeStage, 'results')
   assert.equal(createResearchConsoleUi({ queueFilter: 'unknown' }).queueFilter, 'all')
 })
 
 test('ignores an invalid research stage selection', () => {
-  const initial = createResearchConsoleUi({ activeStage: 'erank', queueFilter: 'pending' })
+  const initial = createResearchConsoleUi({ activeStage: 'everbee', queueFilter: 'pending' })
   assert.deepEqual(selectResearchStage(initial, 'unknown'), initial)
 })
 
@@ -86,9 +92,9 @@ test('ignores an invalid queue filter selection', () => {
 
 test('selects stage and queue filter without mutating input', () => {
   const initial = createResearchConsoleUi()
-  const selected = selectResearchQueueFilter(selectResearchStage(initial, 'erank'), 'completed')
+  const selected = selectResearchQueueFilter(selectResearchStage(initial, 'everbee'), 'completed')
   assert.equal(initial.activeStage, 'conditions')
-  assert.deepEqual(selected, { activeStage: 'erank', queueFilter: 'completed', selectedKeyword: '' })
+  assert.deepEqual(selected, { activeStage: 'everbee', queueFilter: 'completed', selectedKeyword: '' })
 })
 
 test('filters queue rows by normalized status', () => {
@@ -238,7 +244,7 @@ test('clicking a research stage tab shows only its panel', () => {
   assert.equal(ui.activeStage, 'etsy')
   assert.equal(dom.consoleElement.dataset.activeStage, 'etsy')
   assert.equal(dom.tabContainer.buttons.find((button) => button.dataset.researchStage === 'etsy').attributes.get('aria-selected'), 'true')
-  assert.deepEqual(dom.panels.map((panel) => panel.hidden), [true, true, true, false, true])
+  assert.deepEqual(dom.panels.map((panel) => panel.hidden), [true, true, false, true, true])
 })
 
 test('content updates cannot reveal a non-active research panel', () => {
@@ -294,9 +300,20 @@ test('derives progress, review, complete, and available states', () => {
     activeService: 'etsy',
   })
   assert.equal(stages.find((item) => item.id === 'conditions').status, 'complete')
-  assert.equal(stages.find((item) => item.id === 'erank').status, 'review')
+  assert.equal(stages.find((item) => item.id === 'everbee').status, 'locked')
   assert.equal(stages.find((item) => item.id === 'etsy').status, 'progress')
   assert.equal(stages.find((item) => item.id === 'results').status, 'locked')
+})
+
+test('makes EverBee available after Etsy is checked without requiring eRank evidence', () => {
+  const stages = deriveResearchStageStates({
+    readyCandidateCount: 20,
+    etsyCompletedCount: 20,
+    everbeeResultCount: 0,
+  })
+
+  assert.equal(stages.find((item) => item.id === 'everbee').status, 'available')
+  assert.equal(stages.find((item) => item.id === 'results').status, 'available')
 })
 
 test('shows every final evidence row in the results stage count', () => {
