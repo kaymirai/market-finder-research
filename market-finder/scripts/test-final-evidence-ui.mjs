@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const [html, app, css] = await Promise.all([
+const [rawHtml, rawApp, rawCss] = await Promise.all([
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
 ])
+const html = rawHtml.replace(/\r\n/g, '\n')
+const app = rawApp.replace(/\r\n/g, '\n')
+const css = rawCss.replace(/\r\n/g, '\n')
 
 test('provides a single final evidence matrix with filters and bulk verification', () => {
   assert.match(html, /id="finalEvidenceFilters"/)
