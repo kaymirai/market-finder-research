@@ -5,12 +5,14 @@ import {
   buildNextWinningNicheBatch,
   createWinningNicheAutomation,
   evaluateWinningNicheRows,
+  migrateWinningNicheState,
   pauseWinningNicheAutomation,
   resetWinningNicheCycle,
   resumeWinningNicheAutomation,
   startWinningNicheAutomation,
   stopWinningNicheAutomation,
 } from '../src/winning-niche-automation.js'
+import { candidateEvidenceKey } from '../src/multi-angle-candidates.js'
 
 const HALLOWEEN_CONTEXT = {
   eventId: 'halloween',
@@ -236,4 +238,53 @@ test('normalizes malformed saved state to safe serializable defaults', () => {
   assert.deepEqual(restored.researchedKeywords, ['halloween teacher shirt'])
   assert.deepEqual(restored.excludedKeywords, [])
   assert.deepEqual(restored.winnerKeywords, [])
+})
+
+test('migrates a legacy saved search without changing its event or losing progress', () => {
+  const migrated = migrateWinningNicheState({
+    status: 'paused',
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    currentAxis: 'career',
+    researchedKeywords: ['halloween teacher shirt'],
+    queuedKeywords: ['halloween nurse shirt'],
+    winnerKeywords: ['halloween librarian shirt'],
+    targetWinnerCount: 5,
+    pauseReason: 'login-required',
+    startedAt: '2026-07-29T00:00:00Z',
+    updatedAt: '2026-07-29T01:00:00Z',
+  })
+
+  assert.equal(migrated.status, 'paused')
+  assert.equal(migrated.activeEventId, 'halloween')
+  assert.equal(migrated.categoryId, 'shirt')
+  assert.equal(migrated.currentAngleId, 'attribute-combination')
+  assert.deepEqual(migrated.evidenceKeys, [
+    candidateEvidenceKey({
+      keyword: 'halloween teacher shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+    }),
+  ])
+  assert.deepEqual(migrated.queuedEvidenceKeys, [
+    candidateEvidenceKey({
+      keyword: 'halloween nurse shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+    }),
+  ])
+  assert.deepEqual(migrated.winnerKeywords, ['halloween librarian shirt'])
+  assert.equal(migrated.targetWinnerCount, 5)
+  assert.equal(migrated.pauseReason, 'login-required')
+})
+
+test('migrates a legacy exhausted state as resumable running work', () => {
+  const migrated = migrateWinningNicheState({
+    status: 'exhausted',
+    eventId: 'halloween',
+    categoryId: 'shirt',
+  })
+
+  assert.equal(migrated.status, 'running')
+  assert.equal(migrated.activeEventId, 'halloween')
 })

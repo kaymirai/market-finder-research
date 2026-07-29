@@ -7,6 +7,8 @@ import {
   NICHE_TAXONOMY,
   taxonomyTerms,
 } from './niche-taxonomy.js'
+import { candidateEvidenceKey } from './multi-angle-candidates.js'
+import { createMultiAngleExplorationState } from './multi-angle-exploration.js'
 
 const VALID_STATUSES = new Set([
   'idle',
@@ -87,6 +89,37 @@ export function createWinningNicheAutomation(saved = {}) {
     startedAt: String(saved?.startedAt ?? '').trim(),
     updatedAt: String(saved?.updatedAt ?? '').trim(),
   }
+}
+
+export function migrateWinningNicheState(saved = {}) {
+  const context = {
+    categoryId: String(saved?.categoryId ?? ''),
+    eventId: String(saved?.eventId ?? ''),
+  }
+  return createMultiAngleExplorationState({
+    status: saved?.status === 'winner-found' ? 'winner-found'
+      : saved?.status === 'paused' ? 'paused'
+        : saved?.status === 'stopped' ? 'stopped'
+          : saved?.status === 'exhausted' ? 'running'
+            : saved?.status,
+    activeEventId: saved?.eventId,
+    categoryId: saved?.categoryId,
+    currentAngleId: saved?.currentAxis ? 'attribute-combination' : '',
+    evidenceKeys: (saved?.researchedKeywords ?? []).map((keyword) => (
+      candidateEvidenceKey({ ...context, keyword })
+    )),
+    queuedEvidenceKeys: (saved?.queuedKeywords ?? []).map((keyword) => (
+      candidateEvidenceKey({ ...context, keyword })
+    )),
+    retryQueue: [],
+    failedEvidenceKeys: [],
+    winnerKeywords: saved?.winnerKeywords,
+    targetWinnerCount: saved?.targetWinnerCount,
+    startedAt: saved?.startedAt,
+    updatedAt: saved?.updatedAt,
+    completedAt: saved?.completedAt,
+    pauseReason: saved?.pauseReason,
+  })
 }
 
 export function startWinningNicheAutomation(state = {}, context = {}, now = '') {
