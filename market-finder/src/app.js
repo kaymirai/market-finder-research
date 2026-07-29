@@ -854,12 +854,18 @@ function restorePersistedState() {
         ...migrateWinningNicheState(savedState.winningNicheAutomation),
         targetWinnerCount: restoredWinnerTarget,
       })
+  const legacyRestoreAutomation = savedState.multiAngleExploration
+    ? {
+        status: state.multiAngleExploration.status,
+        queuedKeywords: savedState.pendingEvidenceAutomation?.targetKeywords ?? [],
+      }
+    : {
+        status: state.multiAngleExploration.status,
+        queuedKeywords: state.winningNicheAutomation.queuedKeywords,
+      }
   state.pendingEvidenceAutomation = restorePendingEvidenceAutomation({
     saved: savedState.pendingEvidenceAutomation,
-    winningNicheAutomation: {
-      status: state.multiAngleExploration.status,
-      queuedKeywords: savedState.pendingEvidenceAutomation?.targetKeywords ?? [],
-    },
+    winningNicheAutomation: legacyRestoreAutomation,
     marketplaceInsightPlan: state.marketplaceInsightPlan,
   })
   state.marketplaceRetryState = normalizeMarketplaceRetryState(savedState.marketplaceRetryState)
@@ -5257,7 +5263,8 @@ async function resumeMultiAngleSearch() {
 
 function multiAngleFailureCode(value = '') {
   const message = String(value ?? '')
-  if (isExtensionResponseTimeout(message) || /timeout|time out|時間切れ/i.test(message)) return 'page-timeout'
+  if (isExtensionResponseTimeout(message)) return 'service-unavailable'
+  if (/EverBee.*(?:timeout|time out)|page(?: load)?[ -]?timeout|page-timeout|ページ.*(?:時間切れ|タイムアウト)/i.test(message)) return 'page-timeout'
   if (/rate.?limit|429|検索上限|アクセス制限/i.test(message)) return 'rate-limited'
   if (/login|sign.?in|ログイン/i.test(message)) return 'login-required'
   if (/unavailable|connection|接続|service/i.test(message)) return 'service-unavailable'
@@ -5296,7 +5303,9 @@ function continueAfterMultiAnglePageTimeout(message = '') {
 
 function completeMultiAngleBatch() {
   if (!multiAngleSearchIsRunning()) return false
-  const targetKeys = new Set(state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase))
+  const originalTargetKeywords = [...state.pendingEvidenceAutomation.targetKeywords]
+  const targetKeys = new Set(originalTargetKeywords.map(normalizePhrase))
+  const unresolvedTargetKeys = new Set(targetKeys)
   const rowsByKeyword = new Map(
     finalEvidenceRows()
       .filter((row) => targetKeys.has(normalizePhrase(row.keyword)))
@@ -5311,21 +5320,25 @@ function completeMultiAngleBatch() {
         candidate,
         { code: 'page-timeout', retryAfterMs: 60_000 },
       )
+      unresolvedTargetKeys.delete(normalizePhrase(candidate.keyword))
       continue
     }
     if (row.evidenceState.status === 'failed') {
+      const failureCode = multiAngleFailureCode(row.raw?.error)
       state.multiAngleExploration = recordMultiAngleFailure(
         state.multiAngleExploration,
         candidate,
         {
-          code: multiAngleFailureCode(row.raw?.error),
+          code: failureCode,
           retryAfterMs: 60_000,
         },
       )
       if (state.multiAngleExploration.status === 'paused') break
+      unresolvedTargetKeys.delete(normalizePhrase(candidate.keyword))
       continue
     }
     successfulRows.push({ ...candidate, ...row })
+    unresolvedTargetKeys.delete(normalizePhrase(candidate.keyword))
   }
   if (successfulRows.length > 0) {
     state.multiAngleExploration = recordMultiAngleBatch(
@@ -5336,14 +5349,17 @@ function completeMultiAngleBatch() {
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
   state.pendingEvidenceAutomation.currentStage = ''
-  state.pendingEvidenceAutomation.targetKeywords = []
+  const unresolvedTargetKeywords = originalTargetKeywords
+    .filter((keyword) => unresolvedTargetKeys.has(normalizePhrase(keyword)))
 
   if (state.multiAngleExploration.status === 'paused') {
+    state.pendingEvidenceAutomation.targetKeywords = unresolvedTargetKeywords
     setSimpleStatus(`探索を一時停止しました: ${state.multiAngleExploration.pauseReason}`)
     renderAll()
     persistMarketFinderState()
     return false
   }
+  state.pendingEvidenceAutomation.targetKeywords = []
   if (state.multiAngleExploration.status === 'winner-found') {
     setSimpleStatus(`A/B候補を${state.multiAngleExploration.winnerKeywords.length}/${state.multiAngleExploration.targetWinnerCount}件確保しました。今回の探索を停止します。`)
     renderAll()
@@ -5478,6 +5494,10 @@ function resumePersistedEvidenceAutomationIfReady() {
 
 async function togglePendingEvidenceAutomation() {
   if (state.pendingEvidenceAutomation.active) {
+    if (multiAngleSearchIsRunning()) {
+      await stopMultiAngleSearch()
+      return
+    }
     stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
     if (state.marketplaceInsightAutoRunning) {
       stopMarketplaceInsightAutomation()

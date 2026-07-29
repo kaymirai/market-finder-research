@@ -191,6 +191,33 @@ test('pauses the whole state on a service failure without dropping the current b
   assert.deepEqual(paused.queuedEvidenceKeys, batch.state.queuedEvidenceKeys)
 })
 
+test('recording completed rows cannot resume a batch paused by a global failure', () => {
+  const batch = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, context),
+    pools: {
+      'demand-neighborhood': [
+        { keyword: 'one', categoryId: 'shirt', eventId: 'halloween' },
+        { keyword: 'two', categoryId: 'shirt', eventId: 'halloween' },
+      ],
+    },
+  })
+  const paused = recordMultiAngleFailure(
+    batch.state,
+    batch.candidates[0],
+    { code: 'service-unavailable' },
+    '2026-07-30T00:00:00Z',
+  )
+  const recorded = recordMultiAngleBatch(paused, [{
+    ...batch.candidates[1],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  }], '2026-07-30T00:01:00Z')
+
+  assert.equal(recorded.status, 'paused')
+  assert.equal(recorded.pauseReason, 'service-unavailable')
+  assert.deepEqual(recorded.queuedEvidenceKeys, [candidateEvidenceKey(batch.candidates[0])])
+})
+
 test('keeps the active event fixed when start is called with another event', () => {
   const started = startMultiAngleExploration({}, context, '2026-07-30T00:00:00Z')
   const restarted = startMultiAngleExploration(started, {

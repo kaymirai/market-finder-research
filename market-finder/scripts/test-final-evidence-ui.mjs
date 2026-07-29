@@ -71,28 +71,31 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /自動検証を停止/)
 })
 
-test('continues with a new taxonomy batch after a completed no-winner verification', () => {
+test('continues with the next evidence angle after a completed no-winner verification', () => {
   assert.match(app, /from '\.\/winning-niche-automation\.js\?v=/)
   assert.match(app, /winningNicheAutomation:\s*createWinningNicheAutomation\(\)/)
-  assert.match(app, /function queueNextWinningNicheBatch\(/)
-  assert.match(app, /function startWinningNicheSearch\(/)
-  assert.match(app, /function pauseWinningNicheSearch\(/)
-  assert.match(app, /function stopWinningNicheSearch\(/)
-  assert.match(app, /function resumeWinningNicheSearch\(/)
-  assert.match(app, /evaluateWinningNicheRows\(/)
-  assert.match(app, /queueNextWinningNicheBatch\(\)/)
+  assert.match(app, /multiAngleExploration:\s*createMultiAngleExplorationState\(\)/)
+  assert.match(app, /function queueNextMultiAngleBatch\(/)
+  assert.match(app, /function startMultiAngleSearch\(/)
+  assert.match(app, /function pauseMultiAngleSearch\(/)
+  assert.match(app, /function stopMultiAngleSearch\(/)
+  assert.match(app, /function resumeMultiAngleSearch\(/)
+  assert.match(app, /recordMultiAngleBatch\(/)
+  assert.match(app, /return queueNextMultiAngleBatch\(\)/)
 })
 
-test('confirms saved EverBee sellers on Etsy before generating another taxonomy batch', () => {
-  const completeBody = app.match(/function completeWinningNicheBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
-  assert.match(completeBody, /pendingEvidenceBatch\(\s*finalEvidenceRows\(\),\s*'pending-etsy',\s*8,\s*\)/)
-  assert.match(completeBody, /targetKeywords:\s*etsyConfirmationRows\.map\(\(row\) => row\.keyword\)/)
+test('keeps unresolved targets when a global batch failure pauses exploration', () => {
+  const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
+  assert.match(completeBody, /const unresolvedTargetKeywords/)
+  assert.match(completeBody, /if \(state\.multiAngleExploration\.status === 'paused'\)/)
+  assert.match(completeBody, /targetKeywords = unresolvedTargetKeywords/)
   assert.ok(
-    completeBody.indexOf("pendingEvidenceBatch(\n    finalEvidenceRows(),\n    'pending-etsy',\n    8,") < completeBody.lastIndexOf('queueNextWinningNicheBatch()'),
+    completeBody.indexOf("if (state.multiAngleExploration.status === 'paused')")
+      < completeBody.indexOf('targetKeywords = []'),
   )
 })
 
-test('prefilters continuous taxonomy batches with EverBee before limited Etsy confirmation', () => {
+test('routes multi-angle batches through the existing evidence providers', () => {
   assert.match(app, /sanitizeLegacyMarketplaceInsightRow/)
   assert.match(app, /isEtsyEvidenceChecked/)
   assert.match(app, /selectEtsyConfirmationKeywords/)
@@ -100,7 +103,7 @@ test('prefilters continuous taxonomy batches with EverBee before limited Etsy co
   assert.match(app, /etsyMetricCaptureVersion:\s*2/)
   assert.match(
     app,
-    /type:\s*'continuous-niche'[\s\S]*status:\s*'pending-everbee'/,
+    /type:\s*'multi-angle'[\s\S]*status:\s*'pending-everbee'/,
   )
   assert.match(
     app,
@@ -108,17 +111,20 @@ test('prefilters continuous taxonomy batches with EverBee before limited Etsy co
   )
 })
 
-test('persists continuous-search progress and restores running work as paused', () => {
+test('persists multi-angle progress and reconstructs legacy pending targets', () => {
   assert.match(app, /winningNicheAutomation:\s*state\.winningNicheAutomation/)
+  assert.match(app, /multiAngleExploration:\s*state\.multiAngleExploration/)
   assert.match(
     app,
     /createWinningNicheAutomation\(\{[\s\S]*savedState\.winningNicheAutomation[\s\S]*targetWinnerCount:\s*restoredWinnerTarget/,
   )
-  assert.match(app, /前回の連続探索を復元しました/)
+  assert.match(app, /const legacyRestoreAutomation = savedState\.multiAngleExploration/)
+  assert.match(app, /queuedKeywords:\s*state\.winningNicheAutomation\.queuedKeywords/)
+  assert.match(app, /winningNicheAutomation:\s*legacyRestoreAutomation/)
 })
 
-test('keeps manual cross-niche confirmation but auto-applies it during continuous search', () => {
-  assert.match(app, /winningNicheSearchIsRunning\(\)[\s\S]*applyCrossNicheProposal\(\)/)
+test('keeps manual cross-niche confirmation while using drilldown evidence in multi-angle pools', () => {
+  assert.match(app, /drilldownCandidates:\s*currentCrossNicheDrilldown\(\)\.candidates/)
   assert.match(app, /data-cross-niche-apply/)
   assert.match(app, /data-cross-niche-dismiss/)
 })
@@ -130,10 +136,25 @@ test('shows a desktop exploration rail with one stop or resume control', () => {
   assert.match(html, /id="winningNicheAutomationToggle"/)
   assert.match(app, /function renderWinningNicheAutomation\(/)
   assert.match(app, /data-winning-niche-axis/)
-  assert.match(app, /stopWinningNicheSearch/)
-  assert.match(app, /resumeWinningNicheSearch/)
+  assert.match(app, /stopMultiAngleSearch/)
+  assert.match(app, /resumeMultiAngleSearch/)
   assert.match(css, /\.winning-niche-automation-panel/)
   assert.match(css, /\.winning-niche-rail/)
+})
+
+test('treats extension bridge silence as a global service failure, not a page timeout', () => {
+  const body = app.match(/function multiAngleFailureCode\(value = ''\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(body, /isExtensionResponseTimeout\(message\)[\s\S]*return 'service-unavailable'/)
+  assert.match(body, /EverBee|page/i)
+  assert.ok(body.indexOf("return 'service-unavailable'") < body.indexOf("return 'page-timeout'"))
+})
+
+test('stopping automatic verification stops multi-angle state without dropping current targets', () => {
+  const toggleBody = app.match(/async function togglePendingEvidenceAutomation\(\) \{([\s\S]*?)\n\}\n\nasync function verifyPendingEvidence/)?.[1] ?? ''
+  const stopBody = app.match(/async function stopMultiAngleSearch\(\) \{([\s\S]*?)\n\}\n\nasync function resumeMultiAngleSearch/)?.[1] ?? ''
+  assert.match(toggleBody, /multiAngleSearchIsRunning\(\)[\s\S]*stopMultiAngleSearch\(\)/)
+  assert.doesNotMatch(stopBody, /targetKeywords\s*=\s*\[\]/)
+  assert.match(stopBody, /stopMultiAngleExploration\(/)
 })
 
 test('keeps continuous exploration visible outside every stage-specific panel', () => {

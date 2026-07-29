@@ -326,10 +326,11 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
   const recorded = new Set(recordedKeys)
   const winnerKeywords = uniqueStrings([...current.winnerKeywords, ...winners])
   const targetReached = winnerKeywords.length >= current.targetWinnerCount
+  const wasPaused = current.status === 'paused'
   const updatedAt = timestamp(now)
   return {
     ...current,
-    status: targetReached ? 'winner-found' : 'running',
+    status: targetReached ? 'winner-found' : wasPaused ? 'paused' : 'running',
     evidenceKeys: uniqueStrings([...current.evidenceKeys, ...recordedKeys]),
     provenance,
     queuedEvidenceKeys: current.queuedEvidenceKeys.filter((key) => !recorded.has(key)),
@@ -337,7 +338,7 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
     winnerKeywords,
     resultLanes,
     completedAt: targetReached ? current.completedAt || updatedAt : '',
-    pauseReason: '',
+    pauseReason: wasPaused && !targetReached ? current.pauseReason : '',
     updatedAt,
   }
 }
