@@ -342,6 +342,25 @@ export function pauseMultiAngleWorkAfterReload(snapshot = {}, now = '') {
   }
 }
 
+export function restoredMultiAngleTargetKeywords(state = {}, savedTargets = []) {
+  const current = createMultiAngleExplorationState(state)
+  const workKeywords = uniqueStrings([
+    ...current.currentBatchCandidates.map((candidate) => candidate.keyword),
+    ...current.retryQueue.map((entry) => entry.candidate?.keyword),
+  ])
+  const workByNormalizedKeyword = new Map(workKeywords.map((keyword) => [
+    normalizeExplorationCandidate({ keyword })?.keyword,
+    keyword,
+  ]).filter(([keyword]) => keyword))
+  const matchingSavedTargets = uniqueStrings(savedTargets).flatMap((keyword) => {
+    const normalized = normalizeExplorationCandidate({ keyword })?.keyword
+    return workByNormalizedKeyword.has(normalized)
+      ? [workByNormalizedKeyword.get(normalized)]
+      : []
+  })
+  return matchingSavedTargets.length > 0 ? matchingSavedTargets : workKeywords
+}
+
 export function resolveMultiAngleResearchContext(state = {}, selected = {}) {
   const current = createMultiAngleExplorationState(state)
   const hasFixedContext = FIXED_CONTEXT_STATUSES.has(current.status)

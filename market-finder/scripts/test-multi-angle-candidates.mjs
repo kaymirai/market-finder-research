@@ -198,6 +198,43 @@ test('uses Marketplace related terms only when the saved plan matches the active
   )
 })
 
+test('requires the saved custom-event snapshot to match the fixed exploration snapshot', () => {
+  assert.equal(typeof candidateApi.marketplaceInsightPlanForContext, 'function')
+  const plan = {
+    eventId: 'custom-event',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'custom-event',
+      label: 'Alpha Launch',
+      searchTerm: 'alpha launch',
+    },
+    items: [],
+  }
+  const active = {
+    activeEventId: 'custom-event',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'custom-event',
+      label: 'Alpha Launch',
+      searchTerm: 'alpha launch',
+    },
+  }
+
+  assert.equal(candidateApi.marketplaceInsightPlanForContext(plan, active), plan)
+  assert.equal(candidateApi.marketplaceInsightPlanForContext({
+    ...plan,
+    eventSnapshot: {
+      id: 'custom-event',
+      label: 'Beta Launch',
+      searchTerm: 'beta launch',
+    },
+  }, active), null)
+  assert.equal(candidateApi.marketplaceInsightPlanForContext({
+    ...plan,
+    eventSnapshot: undefined,
+  }, active), null)
+})
+
 test('keeps provenance separate while deduping external evidence lookups', () => {
   const demand = {
     keyword: 'spooky nurse shirt',

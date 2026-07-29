@@ -494,6 +494,44 @@ test('reload pauses active multi-angle work without losing its batch retry or ta
   )
 })
 
+test('restores only saved targets that belong to the current batch or retry queue', () => {
+  assert.equal(typeof multiAngleApi.restoredMultiAngleTargetKeywords, 'function')
+  const exploration = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'christmas',
+    categoryId: 'shirt',
+    currentBatchCandidates: [{
+      keyword: 'christmas nurse shirt',
+      eventId: 'christmas',
+      categoryId: 'shirt',
+    }],
+    retryQueue: [{
+      candidate: {
+        keyword: 'christmas teacher shirt',
+        eventId: 'christmas',
+        categoryId: 'shirt',
+      },
+      attempts: 1,
+      retryAt: '2026-08-01T00:00:00.000Z',
+    }],
+  })
+
+  assert.deepEqual(
+    multiAngleApi.restoredMultiAngleTargetKeywords(
+      exploration,
+      ['halloween nurse mug'],
+    ),
+    ['christmas nurse shirt', 'christmas teacher shirt'],
+  )
+  assert.deepEqual(
+    multiAngleApi.restoredMultiAngleTargetKeywords(
+      exploration,
+      ['christmas teacher shirt'],
+    ),
+    ['christmas teacher shirt'],
+  )
+})
+
 test('reload leaves idle and terminal multi-angle states terminal', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 

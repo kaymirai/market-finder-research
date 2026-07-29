@@ -8,6 +8,10 @@ import {
   recordMultiAngleBatch,
 } from '../src/multi-angle-exploration.js'
 import * as multiAngleApi from '../src/multi-angle-exploration.js'
+import * as candidateApi from '../src/multi-angle-candidates.js'
+import {
+  restorePendingEvidenceAutomation,
+} from '../src/persistent-evidence-automation.js'
 
 const [rawHtml, rawApp, rawCss] = await Promise.all([
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
@@ -287,12 +291,156 @@ test('reload waits through extension connection and explicit resume dispatches o
   assert.equal(dispatchCount, 1)
 })
 
+test('reload ignores an old Marketplace plan before restoring and resumes the current context once', async () => {
+  assert.equal(typeof candidateApi.marketplaceInsightPlanForContext, 'function')
+  assert.equal(typeof multiAngleApi.restoredMultiAngleTargetKeywords, 'function')
+  const exploration = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'christmas',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'christmas',
+      label: 'Christmas',
+      searchTerm: 'christmas',
+    },
+    categorySnapshot: {
+      id: 'shirt',
+      label: 'Shirt',
+      searchTerm: 'shirt',
+    },
+    currentBatchCandidates: [{
+      keyword: 'christmas nurse shirt',
+      eventId: 'christmas',
+      categoryId: 'shirt',
+    }],
+  })
+  const oldPlan = {
+    eventId: 'halloween',
+    categoryId: 'mug',
+    items: [{
+      query: 'halloween nurse mug',
+      status: 'planned',
+    }],
+  }
+  const compatiblePlan = {
+    eventId: 'christmas',
+    categoryId: 'shirt',
+    items: [{
+      query: 'christmas teacher shirt',
+      status: 'planned',
+    }],
+  }
+  const oldSavedPending = {
+    active: false,
+    scheduled: true,
+    targetKeywords: ['halloween nurse mug'],
+  }
+  const queuedKeywords = multiAngleApi.restoredMultiAngleTargetKeywords(
+    exploration,
+    oldSavedPending.targetKeywords,
+  )
+  const gatedOldPlan = candidateApi.marketplaceInsightPlanForContext(
+    oldPlan,
+    exploration,
+  )
+  const restoredPending = restorePendingEvidenceAutomation({
+    saved: oldSavedPending,
+    winningNicheAutomation: {
+      status: exploration.status,
+      queuedKeywords,
+    },
+    marketplaceInsightPlan: gatedOldPlan,
+  })
+  const restored = multiAngleApi.pauseMultiAngleWorkAfterReload({
+    exploration,
+    pendingEvidenceAutomation: restoredPending,
+  })
+
+  assert.equal(gatedOldPlan, null)
+  assert.equal(restored.exploration.status, 'paused')
+  assert.equal(restored.exploration.pauseReason, 'reload-required')
+  assert.deepEqual(
+    restored.pendingEvidenceAutomation.targetKeywords,
+    ['christmas nurse shirt'],
+  )
+  assert.equal(restored.pendingEvidenceAutomation.active, false)
+  assert.equal(restored.pendingEvidenceAutomation.scheduled, false)
+
+  const compatiblePending = restorePendingEvidenceAutomation({
+    saved: { active: false, targetKeywords: [] },
+    winningNicheAutomation: {
+      status: exploration.status,
+      queuedKeywords,
+    },
+    marketplaceInsightPlan: candidateApi.marketplaceInsightPlanForContext(
+      compatiblePlan,
+      exploration,
+    ),
+  })
+  assert.deepEqual(compatiblePending.targetKeywords, ['christmas teacher shirt'])
+
+  const restoreBody = app.match(/function restorePersistedState\(\) \{([\s\S]*?)\n\}\n\nfunction migrateLegacyResearchRounds/)?.[1] ?? ''
+  assert.ok(
+    restoreBody.indexOf('marketplaceInsightPlanForContext(')
+      < restoreBody.indexOf('restorePendingEvidenceAutomation({'),
+  )
+
+  const appState = {
+    multiAngleExploration: restored.exploration,
+    pendingEvidenceAutomation: restored.pendingEvidenceAutomation,
+    extensionConnected: true,
+    timingOverrideConfirmed: true,
+  }
+  let dispatchCount = 0
+  const resumeBody = app.slice(
+    app.indexOf('async function resumeMultiAngleSearch()'),
+    app.indexOf('\nfunction ', app.indexOf('async function resumeMultiAngleSearch()') + 1),
+  )
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const resume = await new AsyncFunction(
+    'state',
+    'activeResearchContext',
+    'classifyProductionWindow',
+    'confirmExtensionConnection',
+    'resumeMultiAngleExploration',
+    'setSimpleStatus',
+    'renderAll',
+    'persistMarketFinderState',
+    'schedulePendingEvidenceAutomation',
+    'queueNextMultiAngleBatch',
+    `${resumeBody}; return resumeMultiAngleSearch`,
+  )(
+    appState,
+    () => ({
+      event: { id: 'christmas' },
+      category: { id: 'shirt' },
+    }),
+    () => ({ status: 'timely' }),
+    async () => true,
+    multiAngleApi.resumeMultiAngleExploration,
+    () => {},
+    () => {},
+    () => {},
+    () => {
+      dispatchCount += 1
+    },
+    () => {
+      dispatchCount += 1
+      return true
+    },
+  )
+
+  assert.equal(await resume(), true)
+  assert.equal(dispatchCount, 1)
+})
+
 test('completes a restored batch from persisted multi-angle candidates', () => {
   const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
   const timeoutBody = app.match(/function continueAfterMultiAnglePageTimeout\(message = ''\) \{([\s\S]*?)\n\}\n\nfunction completeMultiAngleBatch/)?.[1] ?? ''
   assert.match(app, /function currentMultiAngleBatchCandidates\(/)
   assert.match(app, /state\.multiAngleExploration\.currentBatchCandidates/)
-  assert.match(app, /queuedKeywords:[\s\S]*currentBatchCandidates\s*\.\s*map\(\(candidate\) => candidate\.keyword\)/)
+  assert.match(app, /const restoredMultiAngleTargets = restoredMultiAngleTargetKeywords\(/)
+  assert.match(app, /queuedKeywords:\s*restoredMultiAngleTargets/)
   assert.match(completeBody, /currentMultiAngleBatchCandidates\(\)/)
   assert.match(timeoutBody, /currentMultiAngleBatchCandidates\(\)/)
 })

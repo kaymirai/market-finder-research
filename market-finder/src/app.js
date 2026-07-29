@@ -150,10 +150,11 @@ import {
   buildMultiAngleCandidatePools,
   candidateMatchesResearchContext,
   candidateEvidenceKey,
+  marketplaceInsightPlanForContext,
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260730-5'
+} from './multi-angle-candidates.js?v=20260730-6'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
@@ -170,10 +171,11 @@ import {
   resolveMultiAngleImportedResearchContext,
   resolveMultiAngleResearchContext,
   resolveMultiAngleResearchOptions,
+  restoredMultiAngleTargetKeywords,
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-8'
+} from './multi-angle-exploration.js?v=20260730-9'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -923,6 +925,12 @@ function restorePersistedState() {
       categorySnapshot: restoredCategory,
     },
   )
+  const compatibleMarketplaceInsightPlan = marketplaceInsightPlanForContext(
+    state.marketplaceInsightPlan,
+    state.multiAngleExploration,
+  )
+  if (!compatibleMarketplaceInsightPlan) state.marketplaceInsightMessage = ''
+  state.marketplaceInsightPlan = compatibleMarketplaceInsightPlan
   state.savedSeasonalReferences = restoreSavedSeasonalReferences({
     saved: state.savedSeasonalReferences,
     legacyKeys: state.savedSeasonalReferenceKeys,
@@ -935,20 +943,29 @@ function restorePersistedState() {
   const savedPendingTargets = Array.isArray(savedState.pendingEvidenceAutomation?.targetKeywords)
     ? savedState.pendingEvidenceAutomation.targetKeywords
     : []
+  const restoredMultiAngleTargets = restoredMultiAngleTargetKeywords(
+    state.multiAngleExploration,
+    savedPendingTargets,
+  )
+  const savedPendingForContext = savedState.multiAngleExploration
+    ? {
+        ...savedState.pendingEvidenceAutomation,
+        active: savedState.pendingEvidenceAutomation?.active === true
+          && restoredMultiAngleTargets.length > 0,
+        targetKeywords: restoredMultiAngleTargets,
+      }
+    : savedState.pendingEvidenceAutomation
   const legacyRestoreAutomation = savedState.multiAngleExploration
     ? {
         status: state.multiAngleExploration.status,
-        queuedKeywords: savedPendingTargets.length > 0
-          ? savedPendingTargets
-          : state.multiAngleExploration.currentBatchCandidates
-            .map((candidate) => candidate.keyword),
+        queuedKeywords: restoredMultiAngleTargets,
       }
     : {
         status: state.multiAngleExploration.status,
         queuedKeywords: state.winningNicheAutomation.queuedKeywords,
       }
   state.pendingEvidenceAutomation = restorePendingEvidenceAutomation({
-    saved: savedState.pendingEvidenceAutomation,
+    saved: savedPendingForContext,
     winningNicheAutomation: legacyRestoreAutomation,
     marketplaceInsightPlan: state.marketplaceInsightPlan,
   })
@@ -2588,6 +2605,8 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = []
     counts,
     eventId: researchOptions.eventId,
     categoryId: researchOptions.categoryId,
+    eventSnapshot: researchOptions.eventSnapshot,
+    categorySnapshot: researchOptions.categorySnapshot,
     createdAt: new Date().toISOString(),
     officialRemaining: previous?.officialRemaining ?? null,
     relatedKeywordMetrics,

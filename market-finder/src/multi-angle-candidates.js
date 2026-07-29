@@ -64,6 +64,35 @@ function candidateContext(candidate = {}) {
   }
 }
 
+function eventSnapshotIdentity(snapshot = {}) {
+  return [
+    String(snapshot?.id ?? '').trim(),
+    normalizePhrase(snapshot?.searchTerm),
+    String(snapshot?.label ?? '').trim(),
+    String(snapshot?.displayTerm ?? '').trim(),
+  ].join('|')
+}
+
+export function marketplaceInsightPlanForContext(plan, context = {}) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return null
+  const planContext = candidateContext(plan)
+  const activeEventId = String(context.eventId ?? context.activeEventId ?? '').trim()
+  const activeCategoryId = String(context.categoryId ?? '').trim()
+  if (
+    !planContext.eventId
+    || !planContext.categoryId
+    || planContext.eventId !== activeEventId
+    || planContext.categoryId !== activeCategoryId
+  ) return null
+  if (activeEventId !== 'custom-event') return plan
+  const planSnapshotKey = eventSnapshotIdentity(plan.eventSnapshot)
+  const activeSnapshotKey = eventSnapshotIdentity(context.eventSnapshot)
+  return planSnapshotKey !== '|||'
+    && planSnapshotKey === activeSnapshotKey
+    ? plan
+    : null
+}
+
 export function candidateMatchesResearchContext(candidate = {}, context = {}, {
   allowEventless = false,
   requireContext = false,
@@ -89,18 +118,13 @@ export function candidateMatchesResearchContext(candidate = {}, context = {}, {
 }
 
 export function marketplaceRelatedTermCandidates(plan = {}, context = {}) {
-  const planContext = candidateContext(plan)
+  const compatiblePlan = marketplaceInsightPlanForContext(plan, context)
+  if (!compatiblePlan) return []
   const activeEventId = String(context.eventId ?? context.activeEventId ?? '').trim()
   const activeCategoryId = String(context.categoryId ?? '').trim()
-  if (
-    !planContext.eventId
-    || !planContext.categoryId
-    || planContext.eventId !== activeEventId
-    || planContext.categoryId !== activeCategoryId
-  ) return []
   const keywords = normalizedList([
-    ...(plan?.relatedKeywordMetrics ?? []).map((row) => row?.keyword),
-    ...(plan?.items ?? [])
+    ...(compatiblePlan.relatedKeywordMetrics ?? []).map((row) => row?.keyword),
+    ...(compatiblePlan.items ?? [])
       .filter((item) => item?.status === 'completed')
       .flatMap((item) => [
         ...(item?.result?.etsyRelatedTerms ?? []),
