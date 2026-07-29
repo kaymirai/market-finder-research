@@ -98,12 +98,28 @@ test('a blocked event change pauses scheduled verification without losing its ta
 })
 
 test('keeps Stop available while blocked work is still active', () => {
+  const automationBody = app.slice(
+    app.indexOf('function renderWinningNicheAutomation()'),
+    app.indexOf('\nfunction ', app.indexOf('function renderWinningNicheAutomation()') + 1),
+  )
   const timingBody = app.slice(
     app.indexOf('function renderMarketTimingGate()'),
     app.indexOf('\nfunction ', app.indexOf('function renderMarketTimingGate()') + 1),
   )
+  assert.match(automationBody, /state\.marketplaceInsightAutoRunning/)
+  assert.match(automationBody, /state\.marketplaceInsightBusy/)
   assert.match(timingBody, /const canStopActiveResearch/)
   assert.match(timingBody, /disabled = blocked && !canStopActiveResearch/)
+})
+
+test('a blocked event change stops the Marketplace Insights loop without clearing targets', () => {
+  const pauseBody = app.slice(
+    app.indexOf('function pauseMultiAngleForBlockedTimingChange()'),
+    app.indexOf('\nfunction ', app.indexOf('function pauseMultiAngleForBlockedTimingChange()') + 1),
+  )
+  assert.match(pauseBody, /const marketplaceWasActive/)
+  assert.match(pauseBody, /stopMarketplaceInsightAutomation\(\)/)
+  assert.doesNotMatch(pauseBody, /targetKeywords\s*=\s*\[\]/)
 })
 
 test('derives angle completion from the exploration cursor rather than shared provenance', () => {

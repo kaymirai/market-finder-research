@@ -3764,6 +3764,8 @@ function renderWinningNicheAutomation() {
   const automationWorkActive = status === 'running'
     || state.pendingEvidenceAutomation.active
     || state.pendingEvidenceAutomation.scheduled
+    || state.marketplaceInsightAutoRunning
+    || state.marketplaceInsightBusy
   const statusCopy = {
     idle: `未開始です。A/B候補${targetWinnerCount}件を目標に、最初の未調査カテゴリ「${nextAxisLabel}」から始めます。`,
     running: `勝ち候補を探索中（${winnerCount}/${targetWinnerCount}件）。「${axisLabel}」を検証し、残り${remainingWinnerCount}件へ向けて「${nextAxisLabel}」へ進みます。`,
@@ -5611,7 +5613,9 @@ function pauseMultiAngleForBlockedTimingChange() {
   const pendingWasActive = state.pendingEvidenceAutomation.active
     || state.pendingEvidenceAutomation.scheduled
   const explorationWasActive = multiAngleSearchIsRunning()
-  if (!pendingWasActive && !explorationWasActive) return false
+  const marketplaceWasActive = state.marketplaceInsightAutoRunning
+    || state.marketplaceInsightBusy
+  if (!pendingWasActive && !explorationWasActive && !marketplaceWasActive) return false
 
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
@@ -5623,11 +5627,12 @@ function pauseMultiAngleForBlockedTimingChange() {
       '制作時期が対象外へ変わったため、現在の候補を保持して一時停止しました。',
     )
   }
+  if (state.marketplaceInsightAutoRunning) stopMarketplaceInsightAutomation()
   setSimpleStatus('制作時期が対象外へ変わったため、自動調査を一時停止しました。候補は保持しています。')
   renderAll()
   persistMarketFinderState()
 
-  if (pendingWasActive && state.extensionState?.active) {
+  if ((pendingWasActive || marketplaceWasActive) && state.extensionState?.active) {
     stopExtensionResearch()
       .catch((error) => setSimpleStatus(friendlyExtensionError(error)))
   }
