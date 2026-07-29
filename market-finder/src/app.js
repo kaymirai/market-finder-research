@@ -3810,6 +3810,9 @@ function renderMarketTimingGate() {
   const event = selectedEvent()
   const timing = classifyProductionWindow(event)
   const blocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
+  const peakDetail = timing.peakDate
+    ? `需要ピーク: ${timing.peakDate.toLocaleDateString('ja-JP')}（あと${timing.daysUntil}日）`
+    : ''
   const statusCopy = {
     timely: `今作る時期です。需要ピークまで${timing.daysUntil}日`,
     early: state.timingOverrideConfirmed
@@ -3821,13 +3824,13 @@ function renderMarketTimingGate() {
     evergreen: '通年市場として調査できます',
   }
   const detailCopy = {
-    timely: `${event.jpLabel}を固定したまま、自動調査を開始できます。`,
+    timely: `${peakDetail}。${event.jpLabel}を固定したまま、自動調査を開始できます。`,
     early: blocked
-      ? '自動調査は開始しません。続ける場合だけ、右のボタンで明示してください。'
-      : '明示的な続行を受け付けました。イベントは変更しません。',
+      ? `${peakDetail}。自動調査は開始しません。続ける場合だけ、右のボタンで明示してください。`
+      : `${peakDetail}。明示的な続行を受け付けました。イベントは変更しません。`,
     late: blocked
-      ? '自動調査は開始しません。続ける場合だけ、右のボタンで明示してください。'
-      : '明示的な続行を受け付けました。イベントは変更しません。',
+      ? `${peakDetail}。自動調査は開始しません。続ける場合だけ、右のボタンで明示してください。`
+      : `${peakDetail}。明示的な続行を受け付けました。イベントは変更しません。`,
     evergreen: 'イベントなしのため、制作時期の制限はありません。',
   }
 

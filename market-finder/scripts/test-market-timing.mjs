@@ -19,11 +19,21 @@ test('resolves fixed and movable 2026 event dates', () => {
     resolveEventPeakDate({ id: 'mothers-day', month: 5 }, 2026).toISOString().slice(0, 10),
     '2026-05-10',
   )
+  assert.equal(
+    resolveEventPeakDate({ id: 'memorial-day', month: 5 }, 2026).toISOString().slice(0, 10),
+    '2026-05-25',
+  )
+  assert.equal(
+    resolveEventPeakDate({ id: 'black-friday', month: 11 }, 2026).toISOString().slice(0, 10),
+    '2026-11-27',
+  )
 })
 
-test('treats 45 through 75 days as the production window', () => {
+test('treats 45 through 75 days as the production window and 44 days as late', () => {
   const event = { id: 'halloween', month: 10 }
   assert.equal(classifyProductionWindow(event, new Date('2026-08-17T00:00:00Z')).status, 'timely')
+  assert.equal(classifyProductionWindow(event, new Date('2026-09-16T00:00:00Z')).status, 'timely')
+  assert.equal(classifyProductionWindow(event, new Date('2026-09-17T00:00:00Z')).status, 'late')
   assert.equal(classifyProductionWindow(event, new Date('2026-09-20T00:00:00Z')).status, 'late')
   assert.equal(classifyProductionWindow(event, new Date('2026-07-01T00:00:00Z')).status, 'early')
 })

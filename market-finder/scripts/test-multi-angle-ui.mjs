@@ -31,6 +31,16 @@ test('shows production timing and requires explicit override outside 45-75 days'
   }
 })
 
+test('shows the selected event peak date and remaining days in the timing gate', () => {
+  const timingBody = app.slice(
+    app.indexOf('function renderMarketTimingGate()'),
+    app.indexOf('\nfunction ', app.indexOf('function renderMarketTimingGate()') + 1),
+  )
+  assert.match(timingBody, /timing\.peakDate/)
+  assert.match(timingBody, /timing\.daysUntil/)
+  assert.match(timingBody, /需要ピーク/)
+})
+
 test('shows the six exploration angles as one horizontal research route', () => {
   assert.match(html, /id="multiAngleRail"/)
   assert.match(html, /id="explorationAngleStatus"/)
