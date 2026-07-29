@@ -21,7 +21,7 @@
     let marketDelayMs = 4500;
     let marketTimerId = null;
     let marketRunId = 0;
-    const MARKET_KEYWORD_TIMEOUT_MS = 360000;
+    const MARKET_KEYWORD_TIMEOUT_MS = 90000;
     const ERANK_KEYWORD_TIMEOUT_MS = 330000;
     const ERANK_DAILY_LOOKUP_LIMIT_ERROR = 'ERANK_DAILY_LOOKUP_LIMIT_REACHED: eRankの1日あたりの検索上限に達しました。翌日のリセット後に再開してください（Basic 100件/日、Pro 200件/日）。';
     const trendSourceConfigs = {
@@ -395,6 +395,9 @@
             catch (error) {
                 latestError = error instanceof Error ? error.message : String(error);
             }
+            if (/ETSY_MARKETPLACE_RATE_LIMITED/i.test(latestError)) {
+                throw new Error(latestError);
+            }
             if (attempt < attempts - 1 && retryDelayMs > 0)
                 await wait(retryDelayMs);
         }
@@ -624,7 +627,7 @@
         return { submitted: true };
     }
     function extractEtsyMarketplaceInsightInPage(expectedQuery) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
         function visible(element) {
             const rect = element.getBoundingClientRect();
             const style = window.getComputedStyle(element);
@@ -656,9 +659,23 @@
             return Number.isFinite(numeric) ? Math.round(numeric * multiplier) : null;
         }
         const root = (_a = document.querySelector('main, [role="main"]')) !== null && _a !== void 0 ? _a : document.body;
+        const fullPageText = (_c = (_b = document.body) === null || _b === void 0 ? void 0 : _b.innerText) !== null && _c !== void 0 ? _c : '';
+        if (/slow down,\s*buddy|uh oh!|あらら[！!]?|まあまあ[、,]?\s*そう焦らずに/i.test(fullPageText)) {
+            return {
+                ok: false,
+                keyword: expectedQuery,
+                etsySearches30d: null,
+                etsyListings: null,
+                etsyRelatedTerms: [],
+                etsyRelatedKeywordMetrics: [],
+                etsyCheckedAt: null,
+                remainingSearches: null,
+                error: 'ETSY_MARKETPLACE_RATE_LIMITED: Etsy側の連続検索制限に達しました。時間を空けて再開してください。',
+            };
+        }
         const input = Array.from(root.querySelectorAll('input[type="search"], input[name*="keyword" i], input[placeholder*="keyword" i]'))
             .find((candidate) => visible(candidate));
-        const actualQuery = String((_b = input === null || input === void 0 ? void 0 : input.value) !== null && _b !== void 0 ? _b : '').trim();
+        const actualQuery = String((_d = input === null || input === void 0 ? void 0 : input.value) !== null && _d !== void 0 ? _d : '').trim();
         if (expectedQuery && actualQuery && normalize(expectedQuery) !== normalize(actualQuery)) {
             return {
                 ok: false,
@@ -677,6 +694,33 @@
             .map((element) => { var _a, _b; return (_b = (_a = element.innerText) === null || _a === void 0 ? void 0 : _a.replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim()) !== null && _b !== void 0 ? _b : ''; })
             .filter((text, index, all) => text && text.length <= 500 && all.indexOf(text) === index)
             .sort((left, right) => left.length - right.length);
+        const normalizedQuery = normalize(actualQuery || expectedQuery);
+        function extractCurrentQueryRowMetrics() {
+            if (!normalizedQuery)
+                return null;
+            const rows = Array.from(root.querySelectorAll('tr, [role="row"]'))
+                .filter((row) => visible(row));
+            for (const row of rows) {
+                const cells = Array.from(row.querySelectorAll('th, td, [role="cell"], [role="rowheader"]'))
+                    .map((cell) => { var _a, _b; return (_b = (_a = cell.innerText) === null || _a === void 0 ? void 0 : _a.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()) !== null && _b !== void 0 ? _b : ''; })
+                    .filter(Boolean);
+                if (cells.length < 3)
+                    continue;
+                const termIndex = cells.findIndex((cell) => normalize(cell) === normalizedQuery);
+                if (termIndex < 0)
+                    continue;
+                const numericValues = cells.slice(termIndex + 1)
+                    .map((cell) => parseCompactNumber(cell))
+                    .filter((value) => value !== null);
+                if (numericValues.length >= 2) {
+                    return {
+                        searches: numericValues[0],
+                        listings: numericValues[1],
+                    };
+                }
+            }
+            return null;
+        }
         function extractMetric(labelPattern, excludePattern) {
             const numberPattern = '(\\d[\\d,]*(?:\\.\\d+)?\\s*(?:百万|千|万|億|[kmb])?)';
             const after = new RegExp(`${labelPattern}[^\\d]{0,45}${numberPattern}`, 'i');
@@ -684,10 +728,11 @@
             for (const text of texts) {
                 if (excludePattern === null || excludePattern === void 0 ? void 0 : excludePattern.test(text))
                     continue;
-                const match = text.match(after);
+                const metricText = text.replace(/\b(?:last|past)\s+30\s+days?\b/gi, ' period ');
+                const match = metricText.match(after);
                 if (match)
                     return parseCompactNumber(match[1]);
-                const reverseMatch = text.match(before);
+                const reverseMatch = metricText.match(before);
                 if (reverseMatch)
                     return parseCompactNumber(reverseMatch[1]);
             }
@@ -695,13 +740,13 @@
         }
         const searchLabel = '(?:searches?(?:\\s+in\\s+(?:the\\s+)?last\\s+30\\s+days)?|30[- ]day searches|search volume|buyer searches|検索(?:数)?(?!結果))';
         const listingLabel = '(?:listings|items available|available listings|competition|search results?|掲載数|出品数|検索結果(?:数)?)';
-        const etsySearches30d = extractMetric(searchLabel, /remaining|left|free searches|per week|残り|無料検索|週/i);
-        const etsyListings = extractMetric(listingLabel);
-        const normalizedQuery = normalize(actualQuery || expectedQuery);
-        const searchTrendPercent = (_d = (_c = Array.from(root.querySelectorAll('tr, [role="row"]'))
+        const currentQueryRowMetrics = extractCurrentQueryRowMetrics();
+        const etsySearches30d = (_e = currentQueryRowMetrics === null || currentQueryRowMetrics === void 0 ? void 0 : currentQueryRowMetrics.searches) !== null && _e !== void 0 ? _e : extractMetric(searchLabel, /remaining|left|free searches|per week|残り|無料検索|週/i);
+        const etsyListings = (_f = currentQueryRowMetrics === null || currentQueryRowMetrics === void 0 ? void 0 : currentQueryRowMetrics.listings) !== null && _f !== void 0 ? _f : extractMetric(listingLabel);
+        const searchTrendPercent = (_h = (_g = Array.from(root.querySelectorAll('tr, [role="row"]'))
             .filter((row) => visible(row))
             .map((row) => { var _a, _b; return (_b = (_a = row.innerText) === null || _a === void 0 ? void 0 : _a.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()) !== null && _b !== void 0 ? _b : ''; })
-            .find((rowText) => normalizedQuery && normalize(rowText).includes(normalizedQuery) && /[+-]?\d+(?:\.\d+)?\s*%/.test(rowText))) === null || _c === void 0 ? void 0 : _c.match(/([+-]?\d+(?:\.\d+)?)\s*%/)) === null || _d === void 0 ? void 0 : _d[1];
+            .find((rowText) => normalizedQuery && normalize(rowText).includes(normalizedQuery) && /[+-]?\d+(?:\.\d+)?\s*%/.test(rowText))) === null || _g === void 0 ? void 0 : _g.match(/([+-]?\d+(?:\.\d+)?)\s*%/)) === null || _h === void 0 ? void 0 : _h[1];
         const etsySearchTrendPercent = searchTrendPercent === undefined ? null : Number(searchTrendPercent);
         const relatedTerms = [];
         const relatedTermByKey = new Map();
@@ -740,7 +785,7 @@
         const relatedHeading = Array.from(root.querySelectorAll('h2, h3, h4, [role="heading"]'))
             .find((heading) => { var _a; return /related|similar search|exploration ideas?|explore ideas?|似たような検索ワード|探索のアイデア|関連(?:する)?検索|関連キーワード/i.test((_a = heading.innerText) !== null && _a !== void 0 ? _a : ''); });
         const relatedScopes = [
-            (_e = relatedHeading === null || relatedHeading === void 0 ? void 0 : relatedHeading.closest) === null || _e === void 0 ? void 0 : _e.call(relatedHeading, 'table, section, article, [role="region"]'),
+            (_j = relatedHeading === null || relatedHeading === void 0 ? void 0 : relatedHeading.closest) === null || _j === void 0 ? void 0 : _j.call(relatedHeading, 'table, section, article, [role="region"]'),
             relatedHeading === null || relatedHeading === void 0 ? void 0 : relatedHeading.parentElement,
             relatedHeading === null || relatedHeading === void 0 ? void 0 : relatedHeading.nextElementSibling,
         ].filter((scope, index, scopes) => Boolean(scope) && scopes.indexOf(scope) === index);
@@ -787,8 +832,8 @@
                     addRelatedTerm((_a = element.innerText) !== null && _a !== void 0 ? _a : '');
             });
         });
-        const pageText = (_g = (_f = root.innerText) === null || _f === void 0 ? void 0 : _f.replace(/\u00a0/g, ' ')) !== null && _g !== void 0 ? _g : '';
-        const remainingMatch = (_j = (_h = pageText.match(/(\d+)\s+(?:free\s+)?search(?:es)?\s+(?:remaining|left)/i)) !== null && _h !== void 0 ? _h : pageText.match(/(?:remaining|left)[^\d]{0,20}(\d+)\s+(?:search(?:es)?)?/i)) !== null && _j !== void 0 ? _j : pageText.match(/(?:残り|あと)\s*(\d+)\s*(?:回|件)?/);
+        const pageText = (_l = (_k = root.innerText) === null || _k === void 0 ? void 0 : _k.replace(/\u00a0/g, ' ')) !== null && _l !== void 0 ? _l : '';
+        const remainingMatch = (_o = (_m = pageText.match(/(\d+)\s+(?:free\s+)?search(?:es)?\s+(?:remaining|left)/i)) !== null && _m !== void 0 ? _m : pageText.match(/(?:remaining|left)[^\d]{0,20}(\d+)\s+(?:search(?:es)?)?/i)) !== null && _o !== void 0 ? _o : pageText.match(/(?:残り|あと)\s*(\d+)\s*(?:回|件)?/);
         const remainingSearches = remainingMatch ? Number(remainingMatch[1]) : null;
         const ok = etsySearches30d !== null || etsyListings !== null;
         const limitedRelatedTerms = relatedTerms.slice(0, 100);

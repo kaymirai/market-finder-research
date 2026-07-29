@@ -15,6 +15,82 @@ function finiteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+export function isEtsyEvidenceChecked(row = {}, planItem = {}) {
+  const rowHasMetric = [row.etsySearches30d, row.etsyListings]
+    .some((value) => finiteNumber(value) !== null)
+  const planHasMetric = [planItem?.result?.etsySearches30d, planItem?.result?.etsyListings]
+    .some((value) => finiteNumber(value) !== null)
+  return Boolean(row.etsyCheckedAt && rowHasMetric)
+    || Boolean(planItem?.status === 'completed' && planHasMetric)
+}
+
+export function sanitizeLegacyMarketplaceInsightRow(row = {}) {
+  const searches = finiteNumber(row.etsySearches30d)
+  const listings = finiteNumber(row.etsyListings)
+  const captureVersion = finiteNumber(row.etsyMetricCaptureVersion)
+  if (
+    captureVersion >= 2
+    || searches !== 30
+    || (listings !== null && listings !== 30)
+  ) return { ...row }
+
+  return {
+    ...row,
+    etsySearches30d: null,
+    etsyListings: null,
+    etsyCheckedAt: '',
+  }
+}
+
+function etsyConfirmationPriority(row = {}) {
+  const selling = finiteNumber(row.sellingListingCount) ?? 0
+  const recent = finiteNumber(row.recentSellingListingCount) ?? 0
+  const listings = Math.max(1, finiteNumber(row.listingsAnalyzed) ?? Number.MAX_SAFE_INTEGER)
+  const median = finiteNumber(row.medianMonthlySales) ?? 0
+  return (selling / listings) * 1_000 + recent * 0.1 + median * 0.01
+}
+
+export function selectEtsyConfirmationKeywords(rows = [], limit = 8) {
+  const seen = new Set()
+  const max = Math.max(1, Math.min(8, Math.floor(Number(limit) || 8)))
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => {
+      const keyword = String(row.keyword ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ')
+      const selling = finiteNumber(row.sellingListingCount) ?? 0
+      const recent = finiteNumber(row.recentSellingListingCount) ?? 0
+      const listings = finiteNumber(row.listingsAnalyzed)
+      const topShare = finiteNumber(row.topSalesShare)
+      if (!keyword || seen.has(keyword)) return false
+      if (selling < 2 || recent < 1) return false
+      if (listings === null || listings <= 0 || listings >= 50_000) return false
+      if (topShare !== null && topShare >= 0.8) return false
+      seen.add(keyword)
+      return true
+    })
+    .sort((left, right) => (
+      etsyConfirmationPriority(right) - etsyConfirmationPriority(left)
+      || (finiteNumber(right.sellingListingCount) ?? 0) - (finiteNumber(left.sellingListingCount) ?? 0)
+      || String(left.keyword).localeCompare(String(right.keyword), 'en')
+    ))
+    .slice(0, max)
+    .map((row) => String(row.keyword).normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' '))
+}
+
+export function verificationStageForRow(input = {}) {
+  if (input.hasEtsyData && !input.hasEverbeeData) return 'pending-everbee'
+
+  if (String(input.queryStrategy ?? '').trim() === 'cross-niche') {
+    if (!input.hasEverbeeData) return 'pending-everbee'
+    if (!input.hasEtsyData && !input.etsyChecked && input.selectedForEtsyConfirmation) {
+      return 'pending-etsy'
+    }
+    return 'done'
+  }
+
+  if (!input.hasEverbeeData && !input.etsyChecked && input.eligibleForEtsy) return 'pending-etsy'
+  return 'done'
+}
+
 function normalizedKeywordList(values = []) {
   const seen = new Set()
   return (Array.isArray(values) ? values : [])
@@ -101,8 +177,21 @@ export function deriveFinalEvidenceState(input = {}) {
   }
 
   const erankStatus = String(input.erankStatus ?? '').trim().toLowerCase()
+  const failureStage = normalizedStage(input.failureStage)
+  if (input.hasEverbeeData && (
+    ['no-data', 'unknown'].includes(erankStatus)
+    || (input.failed && failureStage === 'pending-erank')
+  )) {
+    return {
+      status: 'verified',
+      label: '検証済み',
+      nextStage: '',
+      actionLabel: '',
+      terminal: true,
+    }
+  }
   if (erankStatus === 'failed' || input.failed) {
-    const nextStage = normalizedStage(input.failureStage) || 'pending-erank'
+    const nextStage = failureStage || 'pending-erank'
     return {
       status: 'failed',
       label: '取得失敗',
@@ -195,6 +284,14 @@ export function formatEvidenceMetric(value, options = {}) {
   return { kind: 'pending', text: '未取得' }
 }
 
+export function isAutomatableEvidenceRow(row = {}) {
+  const candidateAction = String(row.normalized?.candidateClass?.action ?? '').trim().toLowerCase()
+  if (candidateAction && candidateAction !== 'candidate') return false
+  if (String(row.candidateStage ?? '').trim().toLowerCase() === 'reject') return false
+  if (String(row.opportunityLabel ?? '').trim().toUpperCase() === 'D') return false
+  return true
+}
+
 export function pendingEvidenceBatch(rows = [], stage, limit = 50) {
   const targetStage = normalizedStage(stage)
   if (!targetStage) return []
@@ -202,6 +299,7 @@ export function pendingEvidenceBatch(rows = [], stage, limit = 50) {
   const seen = new Set()
   const maxBatch = Math.max(1, Math.min(50, Math.floor(Number(limit) || 50)))
   return rows.filter((row) => {
+    if (!isAutomatableEvidenceRow(row)) return false
     if (row?.evidenceState?.status !== 'pending') return false
     if (row.evidenceState.nextStage !== targetStage) return false
     const keyword = String(row.keyword ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ')

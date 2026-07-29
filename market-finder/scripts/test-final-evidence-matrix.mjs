@@ -9,8 +9,12 @@ import {
   finalEvidenceFilterMatches,
   formatEvidenceMetric,
   hasCollectedEvidence,
+  isEtsyEvidenceChecked,
   pendingEvidenceBatch,
+  sanitizeLegacyMarketplaceInsightRow,
+  selectEtsyConfirmationKeywords,
   selectedResearchRoundKeywords,
+  verificationStageForRow,
 } from '../src/final-evidence-matrix.js'
 
 test('keeps empty and attempt-only rows out of evidence while retaining measured and failed rows', () => {
@@ -119,6 +123,14 @@ test('treats an eRank Unknown response as a checked terminal hold', () => {
   })
 })
 
+test('keeps Etsy and EverBee verified evidence final when optional eRank has no data', () => {
+  assert.equal(deriveFinalEvidenceState({
+    nextStage: 'done',
+    hasEverbeeData: true,
+    erankStatus: 'no-data',
+  }).status, 'verified')
+})
+
 test('distinguishes verified, excluded, and failed terminal outcomes', () => {
   assert.equal(deriveFinalEvidenceState({ nextStage: 'done', hasEverbeeData: true }).status, 'verified')
   assert.equal(deriveFinalEvidenceState({ nextStage: 'done', excluded: true }).status, 'excluded')
@@ -176,6 +188,154 @@ test('queues only the requested missing stage, without duplicates, up to fifty r
   assert.equal(batch.length, 50)
   assert.equal(batch[0].keyword, 'Ghost Shirt')
   assert.equal(batch.some((row) => row.keyword === 'teacher shirt'), false)
+})
+
+test('keeps graph dates and non-candidate phrases out of automatic evidence verification', () => {
+  const rows = [
+    {
+      keyword: 'nicu nurse halloween shirt',
+      evidenceState: { status: 'pending', nextStage: 'pending-everbee' },
+      normalized: { candidateClass: { action: 'candidate' } },
+      candidateStage: 'demand-checked',
+    },
+    {
+      keyword: 'jul 10',
+      evidenceState: { status: 'pending', nextStage: 'pending-everbee' },
+      normalized: { candidateClass: { action: 'explore' } },
+      candidateStage: 'reject',
+    },
+    {
+      keyword: 'daily searches',
+      evidenceState: { status: 'pending', nextStage: 'pending-everbee' },
+      normalized: { candidateClass: { action: 'explore' } },
+      candidateStage: 'demand-checked',
+    },
+    {
+      keyword: 'unsupported celebrity shirt',
+      evidenceState: { status: 'pending', nextStage: 'pending-everbee' },
+      normalized: { candidateClass: { action: 'reject' } },
+      candidateStage: 'reject',
+    },
+  ]
+
+  assert.deepEqual(
+    pendingEvidenceBatch(rows, 'pending-everbee').map((row) => row.keyword),
+    ['nicu nurse halloween shirt'],
+  )
+})
+
+test('removes legacy 30-day label artifacts while preserving versioned real values', () => {
+  const legacy = sanitizeLegacyMarketplaceInsightRow({
+    keyword: 'halloween sewing shirt',
+    etsySearches30d: 30,
+    etsyListings: 30,
+    etsyCheckedAt: '2026-07-27T00:00:00.000Z',
+    notes: 'Etsy Marketplace Insights / 直近30日',
+  })
+  assert.equal(legacy.etsySearches30d, null)
+  assert.equal(legacy.etsyListings, null)
+  assert.equal(legacy.etsyCheckedAt, '')
+
+  const incompleteLegacy = sanitizeLegacyMarketplaceInsightRow({
+    keyword: 'halloween knitting shirt',
+    etsySearches30d: 30,
+    etsyListings: null,
+    etsyCheckedAt: '2026-07-27T00:00:00.000Z',
+  })
+  assert.equal(incompleteLegacy.etsySearches30d, null)
+  assert.equal(incompleteLegacy.etsyCheckedAt, '')
+
+  const current = sanitizeLegacyMarketplaceInsightRow({
+    keyword: 'real thirty shirt',
+    etsySearches30d: 30,
+    etsyListings: 30,
+    etsyCheckedAt: '2026-07-27T00:00:00.000Z',
+    etsyMetricCaptureVersion: 2,
+  })
+  assert.equal(current.etsySearches30d, 30)
+  assert.equal(current.etsyListings, 30)
+  assert.equal(current.etsyCheckedAt, '2026-07-27T00:00:00.000Z')
+})
+
+test('uses EverBee first for continuous niches and confirms only selling candidates on Etsy', () => {
+  assert.equal(verificationStageForRow({
+    queryStrategy: 'cross-niche',
+    hasEverbeeData: false,
+    hasEtsyData: false,
+    etsyChecked: false,
+    eligibleForEtsy: true,
+  }), 'pending-everbee')
+
+  assert.equal(verificationStageForRow({
+    queryStrategy: 'cross-niche',
+    hasEverbeeData: true,
+    hasEtsyData: false,
+    etsyChecked: false,
+    eligibleForEtsy: true,
+    selectedForEtsyConfirmation: true,
+  }), 'pending-etsy')
+
+  assert.equal(verificationStageForRow({
+    queryStrategy: 'cross-niche',
+    hasEverbeeData: true,
+    hasEtsyData: false,
+    etsyChecked: false,
+    eligibleForEtsy: true,
+    selectedForEtsyConfirmation: false,
+  }), 'done')
+})
+
+test('does not treat skipped or failed Etsy plan items as captured evidence', () => {
+  assert.equal(isEtsyEvidenceChecked({}, { status: 'skipped' }), false)
+  assert.equal(isEtsyEvidenceChecked({}, { status: 'error' }), false)
+  assert.equal(isEtsyEvidenceChecked({}, { status: 'completed', result: {} }), false)
+  assert.equal(isEtsyEvidenceChecked({}, {
+    status: 'completed',
+    result: { etsySearches30d: 120 },
+  }), true)
+  assert.equal(isEtsyEvidenceChecked({
+    etsyCheckedAt: '2026-07-27T00:00:00.000Z',
+    etsyListings: 900,
+  }), true)
+})
+
+test('prioritizes low-competition EverBee sellers for limited Etsy confirmation', () => {
+  const selected = selectEtsyConfirmationKeywords([
+    {
+      keyword: 'halloween sewing shirt',
+      sellingListingCount: 11,
+      recentSellingListingCount: 3,
+      listingsAnalyzed: 915,
+      medianMonthlySales: 5.5,
+      topSalesShare: 0.5,
+    },
+    {
+      keyword: 'halloween saturated shirt',
+      sellingListingCount: 20,
+      recentSellingListingCount: 10,
+      listingsAnalyzed: 60000,
+      medianMonthlySales: 8,
+      topSalesShare: 0.4,
+    },
+    {
+      keyword: 'halloween no sales shirt',
+      sellingListingCount: 0,
+      recentSellingListingCount: 0,
+      listingsAnalyzed: 200,
+      medianMonthlySales: 0,
+      topSalesShare: 0,
+    },
+    {
+      keyword: 'halloween pottery shirt',
+      sellingListingCount: 3,
+      recentSellingListingCount: 2,
+      listingsAnalyzed: 103,
+      medianMonthlySales: 0,
+      topSalesShare: 0.6,
+    },
+  ], 8)
+
+  assert.deepEqual(selected, ['halloween pottery shirt', 'halloween sewing shirt'])
 })
 
 test('filters recommendations separately from verification states', () => {

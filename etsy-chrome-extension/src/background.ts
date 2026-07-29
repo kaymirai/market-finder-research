@@ -124,7 +124,7 @@
     let marketDelayMs = 4500
     let marketTimerId: ReturnType<typeof setTimeout> | null = null
     let marketRunId = 0
-    const MARKET_KEYWORD_TIMEOUT_MS = 360000
+    const MARKET_KEYWORD_TIMEOUT_MS = 90000
     const ERANK_KEYWORD_TIMEOUT_MS = 330000
     const ERANK_DAILY_LOOKUP_LIMIT_ERROR = 'ERANK_DAILY_LOOKUP_LIMIT_REACHED: eRankの1日あたりの検索上限に達しました。翌日のリセット後に再開してください（Basic 100件/日、Pro 200件/日）。'
 
@@ -517,6 +517,9 @@
             } catch (error) {
                 latestError = error instanceof Error ? error.message : String(error)
             }
+            if (/ETSY_MARKETPLACE_RATE_LIMITED/i.test(latestError)) {
+                throw new Error(latestError)
+            }
             if (attempt < attempts - 1 && retryDelayMs > 0) await wait(retryDelayMs)
         }
 
@@ -787,6 +790,20 @@
         }
 
         const root = document.querySelector('main, [role="main"]') ?? document.body
+        const fullPageText = document.body?.innerText ?? ''
+        if (/slow down,\s*buddy|uh oh!|あらら[！!]?|まあまあ[、,]?\s*そう焦らずに/i.test(fullPageText)) {
+            return {
+                ok: false,
+                keyword: expectedQuery,
+                etsySearches30d: null,
+                etsyListings: null,
+                etsyRelatedTerms: [],
+                etsyRelatedKeywordMetrics: [],
+                etsyCheckedAt: null,
+                remainingSearches: null,
+                error: 'ETSY_MARKETPLACE_RATE_LIMITED: Etsy側の連続検索制限に達しました。時間を空けて再開してください。',
+            }
+        }
         const input = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="search"], input[name*="keyword" i], input[placeholder*="keyword" i]'))
             .find((candidate) => visible(candidate))
         const actualQuery = String(input?.value ?? '').trim()
@@ -809,6 +826,31 @@
             .map((element) => (element as HTMLElement).innerText?.replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim() ?? '')
             .filter((text, index, all) => text && text.length <= 500 && all.indexOf(text) === index)
             .sort((left, right) => left.length - right.length)
+        const normalizedQuery = normalize(actualQuery || expectedQuery)
+
+        function extractCurrentQueryRowMetrics() {
+            if (!normalizedQuery) return null
+            const rows = Array.from(root.querySelectorAll<HTMLElement>('tr, [role="row"]'))
+                .filter((row) => visible(row))
+            for (const row of rows) {
+                const cells = Array.from(row.querySelectorAll<HTMLElement>('th, td, [role="cell"], [role="rowheader"]'))
+                    .map((cell) => cell.innerText?.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim() ?? '')
+                    .filter(Boolean)
+                if (cells.length < 3) continue
+                const termIndex = cells.findIndex((cell) => normalize(cell) === normalizedQuery)
+                if (termIndex < 0) continue
+                const numericValues = cells.slice(termIndex + 1)
+                    .map((cell) => parseCompactNumber(cell))
+                    .filter((value): value is number => value !== null)
+                if (numericValues.length >= 2) {
+                    return {
+                        searches: numericValues[0],
+                        listings: numericValues[1],
+                    }
+                }
+            }
+            return null
+        }
 
         function extractMetric(labelPattern: string, excludePattern?: RegExp) {
             const numberPattern = '(\\d[\\d,]*(?:\\.\\d+)?\\s*(?:百万|千|万|億|[kmb])?)'
@@ -816,9 +858,10 @@
             const before = new RegExp(`${numberPattern}[^a-z0-9]{0,30}${labelPattern}`, 'i')
             for (const text of texts) {
                 if (excludePattern?.test(text)) continue
-                const match = text.match(after)
+                const metricText = text.replace(/\b(?:last|past)\s+30\s+days?\b/gi, ' period ')
+                const match = metricText.match(after)
                 if (match) return parseCompactNumber(match[1])
-                const reverseMatch = text.match(before)
+                const reverseMatch = metricText.match(before)
                 if (reverseMatch) return parseCompactNumber(reverseMatch[1])
             }
             return null
@@ -826,9 +869,11 @@
 
         const searchLabel = '(?:searches?(?:\\s+in\\s+(?:the\\s+)?last\\s+30\\s+days)?|30[- ]day searches|search volume|buyer searches|検索(?:数)?(?!結果))'
         const listingLabel = '(?:listings|items available|available listings|competition|search results?|掲載数|出品数|検索結果(?:数)?)'
-        const etsySearches30d = extractMetric(searchLabel, /remaining|left|free searches|per week|残り|無料検索|週/i)
-        const etsyListings = extractMetric(listingLabel)
-        const normalizedQuery = normalize(actualQuery || expectedQuery)
+        const currentQueryRowMetrics = extractCurrentQueryRowMetrics()
+        const etsySearches30d = currentQueryRowMetrics?.searches
+            ?? extractMetric(searchLabel, /remaining|left|free searches|per week|残り|無料検索|週/i)
+        const etsyListings = currentQueryRowMetrics?.listings
+            ?? extractMetric(listingLabel)
         const searchTrendPercent = Array.from(root.querySelectorAll<HTMLElement>('tr, [role="row"]'))
             .filter((row) => visible(row))
             .map((row) => row.innerText?.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim() ?? '')

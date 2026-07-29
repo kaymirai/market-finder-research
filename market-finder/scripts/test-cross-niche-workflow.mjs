@@ -18,7 +18,18 @@ function candidate(keyword, depth = 1, priorityScore = 70) {
   }
 }
 
-test('automatically queues at most 12 unverified candidates and marks the pool considered', () => {
+test('defaults new cross-niche candidates to Etsy official verification', () => {
+  const result = advanceCrossNicheWorkflow({
+    workflow: createCrossNicheWorkflowState(),
+    candidates: [candidate('book club cat shirt')],
+    hasParents: true,
+  })
+
+  assert.equal(result.didQueue, true)
+  assert.equal(result.workflow.status, 'pending-etsy')
+})
+
+test('automatically queues at most eight unverified candidates and marks the pool considered', () => {
   const candidates = Array.from({ length: 15 }, (_, index) => candidate(`niche ${index + 1} cat shirt`, 1, 100 - index))
   const result = advanceCrossNicheWorkflow({
     workflow: createCrossNicheWorkflowState(),
@@ -31,9 +42,9 @@ test('automatically queues at most 12 unverified candidates and marks the pool c
   assert.equal(result.didQueue, true)
   assert.equal(result.workflow.status, 'pending-erank')
   assert.equal(result.workflow.round, 1)
-  assert.equal(result.workflow.batch.length, 12)
+  assert.equal(result.workflow.batch.length, 8)
   assert.equal(result.workflow.consideredKeywords.length, 15)
-  assert.equal(result.workflow.queuedKeywords.length, 12)
+  assert.equal(result.workflow.queuedKeywords.length, 8)
 })
 
 test('skips fully verified candidates and resumes at the earliest remaining stage', () => {
@@ -105,6 +116,58 @@ test('queues only newly discovered depth-two candidates after the first batch co
   assert.deepEqual(result.workflow.queuedKeywords, [first.keyword, second.keyword])
 })
 
+test('queues a third buyer-niche depth and then stops the branch', () => {
+  const second = candidate('special education teacher shirt', 2, 90)
+  const third = candidate('second grade special education teacher shirt', 3, 88)
+  const workflow = createCrossNicheWorkflowState({
+    status: 'pending-everbee',
+    round: 2,
+    batch: [second],
+    consideredKeywords: [second.keyword],
+    queuedKeywords: [second.keyword],
+  })
+
+  const queued = advanceCrossNicheWorkflow({
+    workflow,
+    candidates: [second, third],
+    hasParents: true,
+    stageForKeyword: (keyword) => keyword === second.keyword ? 'done' : 'pending-erank',
+  })
+
+  assert.equal(queued.didQueue, true)
+  assert.equal(queued.workflow.round, 3)
+  assert.deepEqual(queued.queuedCandidates.map((item) => item.keyword), [third.keyword])
+
+  const complete = advanceCrossNicheWorkflow({
+    workflow: queued.workflow,
+    candidates: [third],
+    hasParents: true,
+    stageForKeyword: () => 'done',
+  })
+  assert.equal(complete.didQueue, false)
+  assert.equal(complete.workflow.status, 'complete')
+})
+
+test('never requeues weak buyer-niche branches', () => {
+  const weak = {
+    ...candidate('tiny demand teacher shirt', 1, 99),
+    verdict: 'weak-demand',
+  }
+  const watch = {
+    ...candidate('art teacher shirt', 1, 70),
+    verdict: 'watch',
+  }
+
+  const result = advanceCrossNicheWorkflow({
+    workflow: createCrossNicheWorkflowState(),
+    candidates: [weak, watch],
+    hasParents: true,
+    stageForKeyword: () => 'pending-erank',
+  })
+
+  assert.deepEqual(result.queuedCandidates.map((item) => item.keyword), [watch.keyword])
+})
+
 test('completes after verified batches when no unconsidered candidates remain', () => {
   const first = candidate('book club cat shirt')
   const workflow = createCrossNicheWorkflowState({
@@ -156,4 +219,15 @@ test('restores only serializable workflow fields and valid pending status', () =
   assert.equal(restored.round, 1)
   assert.deepEqual(restored.consideredKeywords, ['book club cat shirt'])
   assert.equal(restored.batch[0].keyword, 'book club cat shirt')
+})
+
+test('restores depth-three workflow state without truncating it', () => {
+  const restored = createCrossNicheWorkflowState({
+    status: 'pending-everbee',
+    round: 3,
+    batch: [candidate('second grade special education teacher shirt', 3)],
+  })
+
+  assert.equal(restored.round, 3)
+  assert.equal(restored.batch[0].depth, 3)
 })

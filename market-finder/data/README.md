@@ -2,6 +2,16 @@
 
 This folder keeps manually or semi-automatically collected keyword metadata that can be used as broad discovery seeds.
 
+## listing-outcomes.json
+
+This file keeps time-series snapshots of results from launched Etsy listings. Each row requires `listingId` and `snapshotAt`. `snapshotAt` accepts only zero-padded `YYYY-MM-DD` or a valid ISO 8601 timestamp with `Z` or an explicit UTC offset. It is stored as the UTC value returned by `new Date(snapshotAt).toISOString()`; date-only input becomes midnight UTC. Invalid calendar dates, non-zero-padded dates, and timezone-free date-times are rejected. Standard numeric fields are `visits`, `orders`, `revenue`, and `netProfit`; `clusterId` groups related listing tests. Optional diagnostics are `impressions`, `clicks`, `favorites`, and `trafficSource`. Other evidence fields are preserved.
+
+The local server exposes `GET /market-finder/listing-outcomes` and `POST /market-finder/listing-outcomes`. POST accepts only a JSON array up to 4 MiB. It normalizes each row and atomically replaces the data file. Historical snapshots are retained; only a row with the same `listingId` and canonical `snapshotAt` is replaced, and the last duplicate in one request wins. For example, `2026-10-01` and `2026-10-01T00:00:00.000Z` identify the same snapshot.
+
+CSV imports accept the standard names above and the existing 30-day template aliases: `researchedAt`, `clusterKey`, `visits30d`, `orders30d`, `revenue30d`, and `netProfit30d`.
+
+Learning uses the latest snapshot for each listing. At M3, fewer than 100 visits and zero orders remains `watch`, 150 visits and zero orders becomes `stop`, and at least 100 visits with at least 3 orders becomes `early-go`. A cluster with at least 300 total visits and zero orders becomes `cluster-stop`. At M6, observed winner rate, net profit per order, and conversion rate replace planning assumptions.
+
 ## etsy-search-keyword-metadata-2026-05-23.csv
 
 Source: YouTube keyword table screenshots captured on 2026-05-23.

@@ -1099,8 +1099,14 @@ const FIELD_ALIASES = {
   topSalesShare: ['top sales share', 'top listing sales share'],
   medianListingAgeMonths: ['median listing age months', 'median listing age'],
   productRows: ['everbee product rows json', 'product rows json', 'everbee product rows'],
+  crossNicheRoot: ['niche root', 'cross niche root', 'root keyword'],
   crossNicheParent: ['cross niche parent', 'cross-niche parent', 'parent keyword'],
   crossNicheDepth: ['cross niche depth', 'cross-niche depth', 'drilldown depth'],
+  specificityAxis: ['specificity axis', 'drilldown axis', 'niche axis'],
+  crossNicheSources: ['drilldown sources json', 'cross niche sources json', 'drilldown sources'],
+  crossNicheVerdict: ['drilldown verdict', 'cross niche verdict'],
+  crossNicheStopReason: ['stop reason', 'drilldown stop reason', 'cross niche stop reason'],
+  crossNicheComparison: ['parent comparison json', 'cross niche comparison json', 'drilldown comparison json'],
   intentTrack: ['market track', 'intent track', 'event market track'],
   researchEventId: ['research event', 'research event id', 'event id'],
   researchCategoryId: ['research category', 'research category id', 'category id'],
@@ -2002,6 +2008,266 @@ export function suggestBuyerIdentities(options = {}) {
   return suggestions
 }
 
+export function selectAutomaticBuyerIdentities(analysis = {}, options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit) || 3, 6))
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const excluded = new Set(splitSeedText(options.exclude).map(normalizePhrase).filter(Boolean))
+  const rows = Array.isArray(analysis?.rows) ? analysis.rows : []
+  const eligible = rows
+    .filter((row) => row.signalType === 'person')
+    .filter((row) => row.freshnessLabel !== 'stale')
+    .filter((row) => row.demandKeywords >= 1 || row.supplyListings >= 2)
+    .filter((row) => !excluded.has(normalizePhrase(row.phrase)))
+    .filter((row) => detectRiskTerms(row.phrase, customRiskTerms).length === 0)
+  const bestContextRank = eligible.reduce((best, row) => Math.max(best, row.bestContextRank), 0)
+  const learned = eligible
+    .filter((row) => row.bestContextRank === bestContextRank)
+    .sort((left, right) => (
+      right.bestContextRank - left.bestContextRank
+      || right.observationRuns - left.observationRuns
+      || right.opportunityGap - left.opportunityGap
+      || right.weightedDemandSearches - left.weightedDemandSearches
+    ))
+    .slice(0, limit)
+    .map((row) => ({
+      phrase: row.phrase,
+      source: 'learned',
+      contextLevel: row.contextLevel,
+      observationRuns: row.observationRuns,
+      demandKeywords: row.demandKeywords,
+      supplyListings: row.supplyListings,
+    }))
+
+  if (learned.length > 0) return learned
+
+  return suggestBuyerIdentities({
+    limit,
+    offset: options.offset,
+    exclude: options.exclude,
+  }).map((item) => ({
+    ...item,
+    source: 'starter',
+  }))
+}
+
+export const BUYER_IDENTITY_DRILLDOWN_LIBRARY = Object.freeze({
+  teacher: Object.freeze({
+    grade: Object.freeze([
+      'kindergarten teacher', 'preschool teacher', 'first grade teacher',
+      'second grade teacher', 'third grade teacher', 'elementary teacher',
+    ]),
+    subject: Object.freeze([
+      'art teacher', 'music teacher', 'science teacher', 'math teacher',
+      'history teacher', 'esl teacher',
+    ]),
+    specialty: Object.freeze([
+      'special education teacher', 'reading intervention teacher',
+      'substitute teacher', 'daycare teacher',
+    ]),
+  }),
+  nurse: Object.freeze({
+    specialty: Object.freeze([
+      'nicu nurse', 'labor and delivery nurse', 'pediatric nurse',
+      'er nurse', 'icu nurse', 'school nurse', 'hospice nurse',
+    ]),
+    credential: Object.freeze([
+      'registered nurse', 'nurse practitioner', 'travel nurse',
+    ]),
+  }),
+  'cat mom': Object.freeze({
+    breed: Object.freeze([
+      'maine coon mom', 'siamese cat mom', 'ragdoll cat mom',
+      'tabby cat mom', 'persian cat mom', 'sphynx cat mom',
+    ]),
+    appearance: Object.freeze([
+      'black cat mom', 'orange cat mom', 'calico cat mom', 'tuxedo cat mom',
+    ]),
+    background: Object.freeze([
+      'rescue cat mom', 'foster cat mom',
+    ]),
+  }),
+  'dog mom': Object.freeze({
+    breed: Object.freeze([
+      'golden retriever mom', 'dachshund mom', 'german shepherd mom',
+      'french bulldog mom', 'labrador mom', 'corgi mom', 'poodle mom',
+    ]),
+    background: Object.freeze([
+      'rescue dog mom', 'foster dog mom',
+    ]),
+  }),
+  'book club': Object.freeze({
+    genre: Object.freeze([
+      'romantasy book club', 'romance book club', 'mystery book club',
+      'fantasy book club', 'horror book club',
+    ]),
+    format: Object.freeze([
+      'audiobook book club', 'silent book club',
+    ]),
+  }),
+  grandma: Object.freeze({
+    transition: Object.freeze([
+      'first time grandma', 'new grandma', 'great grandma',
+    ]),
+    activity: Object.freeze([
+      'baseball grandma', 'softball grandma', 'dance grandma', 'soccer grandma',
+    ]),
+  }),
+  grandpa: Object.freeze({
+    transition: Object.freeze([
+      'first time grandpa', 'new grandpa', 'great grandpa',
+    ]),
+    activity: Object.freeze([
+      'baseball grandpa', 'softball grandpa', 'golf grandpa', 'fishing grandpa',
+    ]),
+  }),
+  runner: Object.freeze({
+    distance: Object.freeze([
+      'marathon runner', 'half marathon runner', 'ultra runner', '5k runner',
+    ]),
+    group: Object.freeze([
+      'run club member', 'trail runner',
+    ]),
+  }),
+})
+
+function drilldownQualifier(detailPhrase, rootIdentity) {
+  const rootTokens = new Set(phraseTokens(rootIdentity))
+  return phraseTokens(detailPhrase).filter((token) => !rootTokens.has(token))
+}
+
+function detailMatchesIdentity(value, rootIdentity, detailPhrase) {
+  if (phraseAppears(value, detailPhrase)) return true
+  if (!phraseAppears(value, rootIdentity)) return false
+  const tokens = new Set(phraseTokens(value))
+  const qualifiers = drilldownQualifier(detailPhrase, rootIdentity)
+  return qualifiers.length > 0 && qualifiers.every((token) => tokens.has(token))
+}
+
+function buyerDrilldownRoot(value) {
+  const normalized = normalizePhrase(value)
+  const roots = Object.keys(BUYER_IDENTITY_DRILLDOWN_LIBRARY)
+    .sort((left, right) => right.length - left.length)
+  for (const rootIdentity of roots) {
+    const axes = BUYER_IDENTITY_DRILLDOWN_LIBRARY[rootIdentity]
+    const hasKnownDetail = Object.values(axes)
+      .flat()
+      .some((detail) => phraseAppears(normalized, detail))
+    if (hasKnownDetail || phraseAppears(normalized, rootIdentity)) return rootIdentity
+  }
+  return ''
+}
+
+export function classifyBuyerIdentitySpecificity(identity) {
+  const normalized = normalizePhrase(identity)
+  const rootIdentity = buyerDrilldownRoot(normalized)
+  if (!rootIdentity) {
+    return {
+      level: countWords(normalized) >= 2 ? 'leaf' : 'unknown',
+      rootIdentity: normalized,
+      axis: '',
+      axes: [],
+    }
+  }
+  const axes = Object.entries(BUYER_IDENTITY_DRILLDOWN_LIBRARY[rootIdentity])
+    .filter(([, details]) => details.some((detail) => detailMatchesIdentity(normalized, rootIdentity, detail)))
+    .map(([axis]) => axis)
+  return {
+    level: axes.length > 0 ? 'leaf' : 'parent',
+    rootIdentity,
+    axis: axes[0] ?? '',
+    axes,
+  }
+}
+
+function buildBuyerDrilldownKeyword(parentKeyword, rootIdentity, detailPhrase) {
+  const parent = normalizePhrase(parentKeyword)
+  if (phraseAppears(parent, rootIdentity)) {
+    return normalizePhrase(parent.replace(new RegExp(`\\b${escapeRegExp(rootIdentity)}\\b`), detailPhrase))
+  }
+  const qualifiers = drilldownQualifier(detailPhrase, rootIdentity).join(' ')
+  return normalizePhrase(`${qualifiers} ${parent}`)
+}
+
+export function generateBuyerIdentityDrilldownCandidates(options = {}) {
+  const parentKeyword = normalizePhrase(options.parentKeyword)
+  const rootKeyword = normalizePhrase(options.rootKeyword) || parentKeyword
+  const depth = Math.max(1, Math.min(3, Math.floor(Number(options.depth) || 1)))
+  const limit = Math.max(1, Math.min(20, Math.floor(Number(options.limit) || 8)))
+  const specificity = classifyBuyerIdentitySpecificity(parentKeyword)
+  const library = BUYER_IDENTITY_DRILLDOWN_LIBRARY[specificity.rootIdentity]
+  if (!parentKeyword || !library) return []
+
+  const etsyRelatedTerms = splitSeedText(options.etsyRelatedTerms)
+  const savedPhrases = splitSeedText(options.savedPhrases)
+  const productRows = Array.isArray(options.productRows) ? options.productRows : []
+  const candidates = []
+
+  for (const [specificityAxis, details] of Object.entries(library)) {
+    if (specificity.axes.includes(specificityAxis)) continue
+    for (const detailPhrase of details) {
+      const sources = []
+      let listingCount = 0
+      let recentListingCount = 0
+      let totalMonthlySales = 0
+
+      if (etsyRelatedTerms.some((term) => detailMatchesIdentity(term, specificity.rootIdentity, detailPhrase))) {
+        sources.push('etsy-related')
+      }
+      if (savedPhrases.some((term) => detailMatchesIdentity(term, specificity.rootIdentity, detailPhrase))) {
+        sources.push('saved-observation')
+      }
+      for (const product of productRows) {
+        const title = normalizePhrase(product?.title ?? product?.keyword)
+        if (!detailMatchesIdentity(title, specificity.rootIdentity, detailPhrase)) continue
+        listingCount += 1
+        totalMonthlySales += Math.max(0, parseNumber(product?.monthlySales ?? product?.sales) ?? 0)
+        const age = parseNumber(product?.listingAgeMonths)
+        if (age !== null && age <= 12) recentListingCount += 1
+      }
+      if (listingCount > 0) sources.push('everbee-title')
+      if (sources.length === 0) sources.push('buyer-detail-library')
+
+      const keyword = buildBuyerDrilldownKeyword(parentKeyword, specificity.rootIdentity, detailPhrase)
+      if (!isCrossNicheCandidateSafe(keyword, parentKeyword, getCategory(options.categoryId), options)) continue
+      const sourcePoints = sources.includes('everbee-title')
+        ? 50
+        : sources.includes('etsy-related')
+          ? 42
+          : sources.includes('saved-observation')
+            ? 34
+            : 10
+      const evidencePoints = Math.min(18, listingCount * 5)
+        + Math.min(12, recentListingCount * 6)
+        + Math.min(20, Math.round(Math.log10(totalMonthlySales + 1) * 10))
+      candidates.push({
+        keyword,
+        parentKeyword,
+        rootKeyword,
+        rootIdentity: specificity.rootIdentity,
+        depth,
+        specificityAxis,
+        modifier: drilldownQualifier(detailPhrase, specificity.rootIdentity).join(' '),
+        sources: unique(sources),
+        listingCount,
+        recentListingCount,
+        totalMonthlySales,
+        verdict: 'needs-research',
+        priorityScore: Math.max(0, Math.min(100, sourcePoints + evidencePoints)),
+        detailOrder: candidates.length,
+      })
+    }
+  }
+
+  return candidates
+    .sort((left, right) => right.priorityScore - left.priorityScore
+      || right.recentListingCount - left.recentListingCount
+      || right.listingCount - left.listingCount
+      || left.detailOrder - right.detailOrder
+      || left.keyword.localeCompare(right.keyword, 'en'))
+    .slice(0, limit)
+    .map(({ detailOrder, ...candidate }) => candidate)
+}
+
 // The eight-axis formula describes a person in a situation rather than a topic. Event
 // templates produce the same head terms every competitor's tool produces; naming who the
 // buyer is and what they are doing produces phrases only someone inside that world writes.
@@ -2075,12 +2341,26 @@ function buyerIntentPhrases(identity, product, options = {}) {
   const axes = { ...BUYER_INTENT_AXES, ...(options.axes ?? {}) }
   const actions = (options.actions ?? []).map(normalizePhrase).filter(Boolean)
   const measured = unique((options.measuredModifiers ?? []).map(normalizePhrase).filter(Boolean))
+  const learned = (Array.isArray(options.learnedSignals) ? options.learnedSignals : [])
+    .map((signal) => ({
+      signalType: normalizePhrase(signal?.signalType),
+      phrase: normalizePhrase(signal?.phrase),
+    }))
+    .filter((signal) => signal.phrase && ['reason', 'scene', 'modifier'].includes(signal.signalType))
   const { kind, groupId } = classifyBuyerIdentity(identity)
   const phrases = [{ phrase: `${identity} ${product}`, evidence: 'identity' }]
   const add = (phrase, evidence) => phrases.push({ phrase, evidence })
 
   for (const action of actions) {
     add(`${identity} ${action} ${product}`, 'operator')
+  }
+  for (const signal of learned) {
+    if (signal.signalType === 'reason') {
+      if (signal.phrase === 'gift') add(`gift for ${identity} ${product}`, 'learned-reason')
+      else add(`${identity} ${signal.phrase} ${product}`, 'learned-reason')
+    } else {
+      add(`${signal.phrase} ${identity} ${product}`, `learned-${signal.signalType}`)
+    }
   }
   // Modifiers counted in this market lead the list. They cost the same lookup as a guess
   // and are the only ones already known to appear in what buyers type or sellers sell.
@@ -2165,6 +2445,242 @@ function modifierNgrams(value, coreTokens) {
   }
 
   return [...grams]
+}
+
+const MARKETPLACE_REASON_PHRASES = Object.freeze([
+  'gift', 'appreciation', 'birthday', 'retirement', 'graduation', 'anniversary',
+  'memorial', 'thank you', 'new baby', 'pregnancy announcement',
+])
+
+const MARKETPLACE_SCENE_PHRASES = Object.freeze([
+  ...MARKET_EVENTS.map((event) => normalizePhrase(event.searchTerm)).filter(Boolean),
+  'family reunion', 'game day', 'vacation', 'classroom', 'work', 'school',
+  'party', 'holiday', 'season',
+])
+
+function phraseContains(value, term) {
+  const normalizedValue = ` ${normalizePhrase(value)} `
+  const normalizedTerm = normalizePhrase(term)
+  return Boolean(normalizedTerm) && normalizedValue.includes(` ${normalizedTerm} `)
+}
+
+function uniqueContainedPhrases(value, phrases = []) {
+  const sorted = unique(phrases.map(normalizePhrase).filter(Boolean))
+    .sort((left, right) => right.length - left.length)
+  return sorted.filter((phrase, index) => (
+    phraseContains(value, phrase)
+    && !sorted.slice(0, index).some((longer) => longer.includes(phrase) && phraseContains(value, longer))
+  ))
+}
+
+function marketplaceContext(record = {}, options = {}) {
+  const recordIdentities = splitSeedText(record.identitySeeds)
+  const targetIdentities = splitSeedText(options.identitySeeds)
+  const identityMatch = recordIdentities.some((identity) => targetIdentities.includes(identity))
+  if (identityMatch) return { level: 'identity', rank: 4 }
+  if (record.eventId && record.eventId === options.eventId) return { level: 'event', rank: 3 }
+  if (record.categoryId && record.categoryId === options.categoryId) return { level: 'category', rank: 2 }
+  return { level: 'global', rank: 1 }
+}
+
+function marketplaceFreshness(capturedAt, nowValue) {
+  const captured = Date.parse(String(capturedAt ?? ''))
+  const now = Date.parse(String(nowValue ?? new Date().toISOString()))
+  if (!Number.isFinite(captured) || !Number.isFinite(now)) {
+    return { label: 'unknown', weight: 0.5, days: null }
+  }
+  const days = Math.max(0, Math.floor((now - captured) / 86400000))
+  if (days <= 45) return { label: 'fresh', weight: 1, days }
+  if (days <= 90) return { label: 'aging', weight: 0.6, days }
+  return { label: 'stale', weight: 0.2, days }
+}
+
+function marketplaceSignals(value, record = {}) {
+  const phrase = normalizePhrase(value)
+  if (!phrase) return []
+
+  const category = getCategory(record.categoryId)
+  const recordEvent = getEvent(record)
+  const identityPhrases = uniqueContainedPhrases(phrase, [
+    ...splitSeedText(record.identitySeeds),
+    ...BUYER_IDENTITY_LIBRARY.flatMap((group) => group.phrases),
+    ...BUYER_INTENT_VOCABULARY.Identity,
+    ...BUYER_INTENT_VOCABULARY.Occupation,
+    ...BUYER_INTENT_VOCABULARY['Hobby/action'],
+    ...BUYER_INTENT_VOCABULARY['Relationship/recipient'],
+  ])
+  const reasons = uniqueContainedPhrases(phrase, MARKETPLACE_REASON_PHRASES)
+  const scenes = uniqueContainedPhrases(phrase, [
+    recordEvent.searchTerm,
+    ...MARKETPLACE_SCENE_PHRASES,
+  ]).filter((scene) => !reasons.includes(scene))
+  const coreTokens = new Set([
+    ...MODIFIER_STOP_WORDS,
+    ...phraseTokens(category.searchTerm),
+    ...identityPhrases.flatMap(phraseTokens),
+    ...reasons.flatMap(phraseTokens),
+    ...scenes.flatMap(phraseTokens),
+  ])
+  const modifiers = modifierNgrams(phrase, coreTokens)
+
+  return unique([
+    ...identityPhrases.map((signal) => `person:${signal}`),
+    ...reasons.map((signal) => `reason:${signal}`),
+    ...scenes.map((signal) => `scene:${signal}`),
+    ...modifiers.map((signal) => `modifier:${signal}`),
+  ]).map((entry) => {
+    const separator = entry.indexOf(':')
+    return {
+      signalType: entry.slice(0, separator),
+      phrase: entry.slice(separator + 1),
+    }
+  })
+}
+
+// Archives are observations, not one global bag of words. A Halloween modifier should lead
+// another Halloween run before a larger Christmas observation, while category-wide evidence
+// remains available as a fallback. Only duplicate snapshots from the same run are removed;
+// seeing the same phrase again on another date is evidence of repeat demand.
+export function analyzeMarketplaceVocabulary(records = [], options = {}) {
+  const input = Array.isArray(records) ? records : [records]
+  const stats = new Map()
+  const seenObservations = new Set()
+
+  const entryFor = (signal) => {
+    const key = `${signal.signalType}:${signal.phrase}`
+    if (!stats.has(key)) {
+      stats.set(key, {
+        ...signal,
+        demandKeywords: 0,
+        demandSearches: 0,
+        supplyListings: 0,
+        supplySales: 0,
+        weightedDemandSearches: 0,
+        weightedSupplySales: 0,
+        bestContextRank: 0,
+        contextLevel: 'global',
+        latestCapturedAt: '',
+        freshnessLabel: 'unknown',
+        observationRunIds: new Set(),
+        marketContexts: new Set(),
+      })
+    }
+    return stats.get(key)
+  }
+
+  input.forEach((record, recordIndex) => {
+    if (!record || typeof record !== 'object') return
+    const context = marketplaceContext(record, options)
+    const freshness = marketplaceFreshness(record.capturedAt, options.now)
+    const runId = normalizePhrase(record.runId)
+      || String(record.capturedAt ?? '').trim()
+      || `legacy-${recordIndex}`
+    const contextKey = [
+      record.categoryId ?? '',
+      record.eventId ?? '',
+      ...splitSeedText(record.identitySeeds),
+    ].join('|')
+    const weight = context.rank * freshness.weight
+
+    const applyRows = (rows, source) => {
+      const list = Array.isArray(rows) ? rows : []
+      for (const row of list) {
+        const value = normalizePhrase(source === 'demand'
+          ? (row?.keyword ?? row?.query ?? row)
+          : (row?.title ?? row?.label ?? row))
+        if (!value) continue
+        const amount = Math.max(0, parseNumber(source === 'demand'
+          ? (row?.etsySearches30d ?? row?.searches)
+          : (row?.monthlySales ?? row?.sales)) ?? 0)
+        const observationKey = `${runId}|${source}|${value}|${amount}`
+        if (seenObservations.has(observationKey)) continue
+        seenObservations.add(observationKey)
+
+        for (const signal of marketplaceSignals(value, record)) {
+          const entry = entryFor(signal)
+          if (source === 'demand') {
+            entry.demandKeywords += 1
+            entry.demandSearches += amount
+            entry.weightedDemandSearches += amount * weight
+          } else {
+            entry.supplyListings += 1
+            entry.supplySales += amount
+            entry.weightedSupplySales += amount * weight
+          }
+          entry.observationRunIds.add(runId)
+          entry.marketContexts.add(contextKey)
+          if (context.rank > entry.bestContextRank) {
+            entry.bestContextRank = context.rank
+            entry.contextLevel = context.level
+          }
+          if (!entry.latestCapturedAt || String(record.capturedAt ?? '') > entry.latestCapturedAt) {
+            entry.latestCapturedAt = String(record.capturedAt ?? '')
+            entry.freshnessLabel = freshness.label
+          }
+        }
+      }
+    }
+
+    applyRows(record.demandKeywords, 'demand')
+    applyRows(record.supplyListings, 'supply')
+  })
+
+  const rows = [...stats.values()].map((entry) => {
+    const demandStrength = Math.log10(1 + entry.weightedDemandSearches)
+    const supplyStrength = Math.log10(1 + entry.weightedSupplySales)
+    return {
+      ...entry,
+      observationRuns: entry.observationRunIds.size,
+      marketCount: entry.marketContexts.size,
+      opportunityGap: Math.round((demandStrength - supplyStrength) * 10) / 10,
+      observationRunIds: undefined,
+      marketContexts: undefined,
+    }
+  }).sort((left, right) => (
+    right.bestContextRank - left.bestContextRank
+    || right.observationRuns - left.observationRuns
+    || right.opportunityGap - left.opportunityGap
+    || right.weightedDemandSearches - left.weightedDemandSearches
+    || left.phrase.localeCompare(right.phrase, 'en')
+  ))
+
+  return {
+    rows,
+    totals: {
+      records: input.filter((record) => record && typeof record === 'object').length,
+      demandKeywords: input.reduce((sum, record) => sum + (Array.isArray(record?.demandKeywords) ? record.demandKeywords.length : 0), 0),
+      supplyListings: input.reduce((sum, record) => sum + (Array.isArray(record?.supplyListings) ? record.supplyListings.length : 0), 0),
+    },
+  }
+}
+
+export function learnedBuyerIntentSignals(analysis = {}, options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit) || 12, 60))
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const rows = Array.isArray(analysis.rows) ? analysis.rows : []
+
+  return rows
+    .filter((row) => row.signalType !== 'person')
+    .filter((row) => row.freshnessLabel !== 'stale')
+    .filter((row) => row.demandKeywords >= 1 || row.supplyListings >= 2)
+    .filter((row) => detectRiskTerms(row.phrase, customRiskTerms).length === 0)
+    .sort((left, right) => (
+      right.bestContextRank - left.bestContextRank
+      || right.observationRuns - left.observationRuns
+      || right.opportunityGap - left.opportunityGap
+      || right.weightedDemandSearches - left.weightedDemandSearches
+    ))
+    .slice(0, limit)
+    .map((row) => ({
+      signalType: row.signalType,
+      phrase: row.phrase,
+      contextLevel: row.contextLevel,
+      observationRuns: row.observationRuns,
+      demandKeywords: row.demandKeywords,
+      demandSearches: row.demandSearches,
+      supplyListings: row.supplyListings,
+      supplySales: row.supplySales,
+    }))
 }
 
 // Demand and supply are counted separately on purpose. A word both sides use is a market
@@ -3254,7 +3770,7 @@ function crossNicheDepth(row = {}) {
 }
 
 export function selectCrossNicheParentMarkets(rows = [], options = {}) {
-  const maxDepth = Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 2, 3))
+  const maxDepth = Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 3, 3))
   const maxParents = Math.max(1, Math.min(Number(options.crossNicheParentLimit) || 3, 10))
   const customRiskTerms = splitSeedText(options.customRiskTerms)
 
@@ -3264,8 +3780,10 @@ export function selectCrossNicheParentMarkets(rows = [], options = {}) {
       const depth = crossNicheDepth(row)
       const competition = crossNicheCompetitionEvidence(row, options)
       const sales = crossNicheSalesEvidence(row)
+      const previousVerdict = String(row?.crossNicheVerdict ?? row?.crossNicheComparison?.verdict ?? '')
       const safe = keyword
         && depth < maxDepth
+        && !previousVerdict.startsWith('weak-')
         && classifyCandidateKeyword(keyword, options).action !== 'reject'
         && detectRiskTerms(`${keyword} ${row?.notes ?? ''}`, customRiskTerms).length === 0
       const broadSales = sales.hasProductRows
@@ -3530,13 +4048,28 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
     const productSet = new Set(productTokens)
     const parentCoreTokens = phraseTokens(parent.keyword).filter((token) => !productSet.has(token))
 
-    const addCandidate = ({ keyword, modifier, source, hint = null, row = null }) => {
+    const addCandidate = ({
+      keyword,
+      modifier,
+      source,
+      hint = null,
+      row = null,
+      rootKeyword = '',
+      rootIdentity = '',
+      specificityAxis = '',
+      priorityScore = 0,
+    }) => {
       const normalized = normalizePhrase(keyword)
       if (!isCrossNicheCandidateSafe(normalized, parent.keyword, category, options)) return
       const buyerIntent = classifyBuyerIntentPhrase(normalized)
       const existing = candidateMap.get(normalized) ?? {
         keyword: normalized,
         parentKeyword: parent.keyword,
+        rootKeyword: normalizePhrase(rootKeyword)
+          || normalizePhrase(parent.row?.crossNicheRoot)
+          || parent.keyword,
+        rootIdentity: normalizePhrase(rootIdentity),
+        specificityAxis: normalizePhrase(specificityAxis),
         modifier: normalizePhrase(modifier),
         depth: parent.depth + 1,
         sources: [],
@@ -3548,6 +4081,9 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
         priorityScore: 0,
         ...buyerIntent,
       }
+      if (!existing.rootIdentity && rootIdentity) existing.rootIdentity = normalizePhrase(rootIdentity)
+      if (!existing.specificityAxis && specificityAxis) existing.specificityAxis = normalizePhrase(specificityAxis)
+      existing.priorityScore = Math.max(existing.priorityScore, Number(priorityScore) || 0)
       existing.sources = unique([...existing.sources, source])
       existing.listingCount = Math.max(existing.listingCount, Number(hint?.listingCount) || 0)
       existing.recentListingCount = Math.max(existing.recentListingCount, Number(hint?.recentListingCount) || 0)
@@ -3561,6 +4097,32 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
     }
 
     const productRows = Array.isArray(parent.row.productRows) ? parent.row.productRows : []
+    const buyerDrilldowns = generateBuyerIdentityDrilldownCandidates({
+      parentKeyword: parent.keyword,
+      rootKeyword: parent.row?.crossNicheRoot || parent.keyword,
+      categoryId: category.id,
+      eventId: options.eventId,
+      depth: parent.depth + 1,
+      etsyRelatedTerms: parent.row.etsyRelatedTerms,
+      productRows,
+      savedPhrases: options.savedBuyerPhrases,
+      customRiskTerms: options.customRiskTerms,
+      limit: perParentLimit,
+    })
+    for (const candidate of buyerDrilldowns) {
+      for (const source of candidate.sources) {
+        addCandidate({
+          ...candidate,
+          source,
+          hint: {
+            listingCount: candidate.listingCount,
+            recentListingCount: candidate.recentListingCount,
+            count: candidate.totalMonthlySales,
+          },
+        })
+      }
+    }
+
     const hints = extractNicheHintsFromListings(productRows, 30, {
       stopWords: [parent.keyword, ...productTokens],
     })
@@ -3600,6 +4162,8 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
         candidate.sources.includes('etsy-related')
         || candidate.sources.includes('measured-child')
         || candidate.listingCount >= 2
+        || candidate.sources.includes('buyer-detail-library')
+        || candidate.sources.includes('saved-observation')
       ))
       .map((candidate) => {
         const verdictPoints = candidate.verdict === 'promising'
@@ -3619,7 +4183,10 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
           + Math.min(12, candidate.recentListingCount * 4)
         return {
           ...candidate,
-          priorityScore: Math.max(0, Math.min(100, Math.round(20 + verdictPoints + sourcePoints + evidencePoints))),
+          priorityScore: Math.max(
+            candidate.priorityScore,
+            Math.max(0, Math.min(100, Math.round(20 + verdictPoints + sourcePoints + evidencePoints))),
+          ),
         }
       })
       .sort((left, right) => right.priorityScore - left.priorityScore
@@ -3645,8 +4212,8 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
     candidates,
     researchCandidates: candidates
       .filter((candidate) => !candidate.verdict.startsWith('weak-'))
-      .slice(0, Math.max(1, Math.min(Number(options.crossNicheResearchLimit) || 12, 30))),
-    maxDepth: Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 2, 3)),
+      .slice(0, Math.max(1, Math.min(Number(options.crossNicheResearchLimit) || 8, 30))),
+    maxDepth: Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 3, 3)),
   }
 }
 
@@ -5141,12 +5708,22 @@ export function parseEverbeeRows(text) {
     const row = {}
     values.forEach((value, index) => {
       const field = fields[index]
-      if (field === 'productRows' || field === 'sourceKeywords' || field === 'buyerIntentAxes') {
+      if (
+        field === 'productRows'
+        || field === 'sourceKeywords'
+        || field === 'buyerIntentAxes'
+        || field === 'crossNicheSources'
+        || field === 'crossNicheComparison'
+      ) {
         try {
           const parsed = JSON.parse(value)
-          row[field] = Array.isArray(parsed) ? parsed : []
+          row[field] = field === 'crossNicheComparison'
+            ? (parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null)
+            : (Array.isArray(parsed) ? parsed : [])
         } catch {
-          row[field] = field === 'productRows'
+          row[field] = field === 'crossNicheComparison'
+            ? null
+            : field === 'productRows'
             ? []
             : splitSeedText(value)
         }

@@ -119,18 +119,74 @@ test('refuses archives that are not a JSON object and never takes a path from th
   assert.equal(put.status, 405)
 })
 
-test('merges archived runs into the measurement and blocks saving when it cannot reach disk', () => {
-  assert.match(app, /function combinedModifierEvidence\(\)/)
-  assert.match(app, /analyzeModifierUsage\(combinedModifierEvidence\(\)/)
-  assert.match(app, /state\.evidenceArchives\.reduce/)
-  // Saving a run leaves the same observations in memory and on disk, so the merge has to
-  // drop the duplicate or one saved niche silently outweighs every other.
-  assert.match(app, /const dedupe = \(rows, key\) =>/)
-  assert.match(app, /normalizePhrase\(row\.keyword\)\}\|\$\{row\.etsySearches30d/)
-  assert.match(app, /normalizePhrase\(row\.title\)\}\|\$\{row\.monthlySales/)
+test('updates one version-three archive for the same run and creates a new file for another run', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'market-finder-archive-'))
+  mkdirSync(join(dir, 'market-finder'), { recursive: true })
+  const child = startServer(dir)
+  t.after(() => {
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  await waitForServer()
+
+  const post = (record) => fetch(`http://127.0.0.1:${port}/market-finder/archive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  })
+  const first = await (await post({
+    version: 3,
+    runId: 'initial:2026-07-26T01:00:00.000Z',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    drilldownNodes: [{ keyword: 'teacher shirt', verdict: 'needs-research' }],
+  })).json()
+  const second = await (await post({
+    version: 3,
+    runId: 'initial:2026-07-26T01:00:00.000Z',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    drilldownNodes: [{ keyword: 'teacher shirt', verdict: 'watch' }],
+  })).json()
+
+  assert.equal(second.name, first.name)
+  assert.equal(readdirSync(join(dir, 'market-finder', 'archive')).length, 1)
+  assert.equal(
+    JSON.parse(readFileSync(join(dir, 'market-finder', 'archive', first.name), 'utf8')).drilldownNodes[0].verdict,
+    'watch',
+  )
+
+  await post({
+    version: 3,
+    runId: 'initial:2026-07-27T01:00:00.000Z',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    drilldownNodes: [],
+  })
+  assert.equal(readdirSync(join(dir, 'market-finder', 'archive')).length, 2)
+})
+
+test('feeds versioned contextual archives into the next candidate search', () => {
+  assert.match(app, /analyzeMarketplaceVocabulary\(marketplaceLearningRecords\(\)/)
+  assert.match(app, /learnedBuyerIntentSignals\(analysis/)
+  assert.match(app, /learnedSignals: learnedSignalsForGeneration\(\)/)
+  assert.match(app, /version: 3/)
+  assert.match(app, /drilldownNodes:/)
+  assert.match(app, /function currentEvidenceRunId\(\)/)
+  assert.match(app, /`\$\{round\.id\}:\$\{startedAt\}`/)
+  assert.match(app, /const runId = currentEvidenceRunId\(\)/)
+  assert.match(app, /locale: 'en-US'/)
+  assert.match(app, /context: \{/)
+  assert.match(app, /buyerIdentities: buyerIdentityLines\(\)/)
+  assert.match(app, /function evidenceRecordFingerprint\(/)
+  assert.match(app, /runId: String\(record\.runId \?\? ''\)/)
+  assert.match(app, /function scheduleEvidenceAutoArchive\(/)
+  assert.match(app, /function addResearchRows\(rows\)[\s\S]{0,260}scheduleEvidenceAutoArchive\(\)/)
+  assert.match(app, /自動保管/)
   assert.match(app, /function evidenceArchiveBlockReason\(\)/)
   assert.match(app, /file:\/\/ で開いています/)
   assert.match(app, /elements\.evidenceArchiveBtn\.disabled = Boolean\(blocked\)/)
+  assert.match(app, /filesToLoad = \(files \?\? \[\]\)\.slice\(-EVIDENCE_ARCHIVE_LOAD_LIMIT\)/)
   assert.match(app, /loadEvidenceArchives\(\)/)
   assert.match(html, /id="evidenceArchiveBtn"/)
   assert.match(html, /id="evidenceArchiveStatus"/)

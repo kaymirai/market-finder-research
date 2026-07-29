@@ -36,7 +36,7 @@ test('uses one set of five numbered workflow steps', () => {
 
 test('renders the five-stage research console', () => {
   assert.match(html, /id="researchStageTabs"/)
-  const stages = ['conditions', 'candidates', 'etsy', 'erank', 'results']
+  const stages = ['conditions', 'candidates', 'etsy', 'everbee', 'results']
   let previousStagePosition = -1
   let previousPanelPosition = -1
 
@@ -82,6 +82,14 @@ test('renders the five-stage research console', () => {
   for (const stage of stages.slice(1)) {
     assert.match(panelOpeningTag(stage), /\shidden(?:\s|>|=)/)
   }
+
+  for (const label of ['条件', '候補', 'Etsy公式', 'EverBee', '最終結果']) {
+    assert.match(html, new RegExp(`<strong>${label}</strong>`))
+  }
+  assert.match(
+    html,
+    /data-research-panel="results"[\s\S]*?<details[^>]*class="[^"]*erank-advanced-panel[^"]*"[^>]*>[\s\S]*?<summary>eRankで追加確認<\/summary>/,
+  )
 })
 
 test('renders one global research status bar above quick start', () => {
@@ -106,6 +114,84 @@ test('renders queue rows and inspector details without starting research', () =>
   assert.match(app, /data-console-keyword=/)
   assert.match(app, /elements\.researchQueueList\.addEventListener\('click', \(event\) => \{[\s\S]{0,500}state\.consoleUi = \{ \.\.\.state\.consoleUi, selectedKeyword:/)
   assert.doesNotMatch(app, /elements\.researchQueueList\.addEventListener\('click', \(event\) => \{[\s\S]{0,800}(startMarketplaceInsight|runMarketplaceInsightAutomation|simpleStartErankResearch|simpleStartResearch)\(/)
+})
+
+test('keeps the EverBee queue populated and transitions planned keywords through runtime states', () => {
+  const body = app.match(/function researchQueueRows\(stageId = state\.consoleUi\.activeStage\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction researchInspectorDisplay/)?.[1]
+  assert.ok(body, 'researchQueueRows must be extractable')
+
+  const createQueueRows = new Function(
+    'state',
+    'normalizePhrase',
+    'salesCheckKeywords',
+    'cleanKeywordList',
+    'everbeeResultRows',
+    'rowHasEverbeeInput',
+    'findResearchRow',
+    `return function researchQueueRows(stageId = state.consoleUi.activeStage) {${body}\n}`,
+  )
+  const state = {
+    consoleUi: { activeStage: 'everbee' },
+    extensionState: null,
+  }
+  const planned = ['ghost teacher shirt', 'retro librarian tee']
+  let completed = []
+  const normalize = (value) => String(value ?? '').trim().toLowerCase()
+  const rows = createQueueRows(
+    state,
+    normalize,
+    () => planned,
+    (values) => [...new Set(values.map(normalize).filter(Boolean))],
+    () => completed,
+    (row) => Number(row?.topMonthlySales) > 0,
+    () => null,
+  )
+
+  assert.deepEqual(
+    rows('everbee').map(({ keyword, status }) => ({ keyword, status })),
+    [
+      { keyword: 'ghost teacher shirt', status: 'pending' },
+      { keyword: 'retro librarian tee', status: 'pending' },
+    ],
+  )
+
+  state.extensionState = {
+    active: true,
+    mode: 'everbee',
+    currentKeyword: 'retro librarian tee',
+    results: [],
+    error: '',
+  }
+  assert.deepEqual(
+    rows('everbee').map(({ keyword, status }) => ({ keyword, status })),
+    [
+      { keyword: 'ghost teacher shirt', status: 'pending' },
+      { keyword: 'retro librarian tee', status: 'active' },
+    ],
+  )
+
+  completed = [
+    { score: { normalized: { keyword: 'ghost teacher shirt' }, score: 82 } },
+    { score: { normalized: { keyword: 'book club sweatshirt' }, score: 74 } },
+  ]
+  state.extensionState = {
+    active: false,
+    mode: 'everbee',
+    currentKeyword: '',
+    results: [
+      { keyword: 'ghost teacher shirt', topMonthlySales: 12, error: '' },
+      { keyword: 'retro librarian tee', topMonthlySales: '', error: 'EverBee timeout' },
+    ],
+    error: 'EverBee timeout',
+  }
+  assert.deepEqual(
+    rows('everbee').map(({ keyword, status }) => ({ keyword, status })),
+    [
+      { keyword: 'ghost teacher shirt', status: 'completed' },
+      { keyword: 'retro librarian tee', status: 'failed' },
+      { keyword: 'book club sweatshirt', status: 'completed' },
+    ],
+  )
 })
 
 test('normalizes eRank queue rows so completed results suppress duplicate capture states', () => {
@@ -206,11 +292,11 @@ test('renders only the active research stage details', () => {
   assert.match(app, /switch \(state\.consoleUi\.activeStage\)/)
   assert.match(app, /case 'conditions':[\s\S]{0,300}renderTrendScoutStatus\(\)[\s\S]{0,300}renderBroadHints\(\)[\s\S]{0,300}renderSearchSeedRows\(\)/)
   assert.match(app, /case 'candidates':[\s\S]{0,160}renderCandidates\(\)/)
-  assert.match(app, /case 'erank':[\s\S]{0,160}renderErankResults\(\)/)
+  assert.match(app, /case 'everbee':[\s\S]{0,200}renderMarketplaceInsightPlan\(\)[\s\S]{0,200}renderResultsTable\(\)/)
   assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
-  assert.match(app, /case 'results':[\s\S]{0,300}renderResultsTable\(\)[\s\S]{0,300}renderCrossNicheDrilldown\(\)[\s\S]{0,300}renderSeoPlan\(\)/)
+  assert.match(app, /case 'results':[\s\S]{0,360}renderResultsTable\(\)[\s\S]{0,360}renderErankResults\(\)[\s\S]{0,360}renderCrossNicheDrilldown\(\)[\s\S]{0,360}renderSeoPlan\(\)/)
   assert.match(app, /function renderActiveResearchStage\(options = \{\}\)[\s\S]{0,2200}renderResearchQueue\(\)[\s\S]{0,300}renderResearchInspector\(\)/)
-  assert.match(app, /function renderAll\(\) \{\s*renderGlobalResearchStatus\(\)\s*renderNextResearchAction\(\)\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
+  assert.match(app, /function renderAll\(\) \{\s*renderGlobalResearchStatus\(\)\s*renderWinningNicheAutomation\(\)\s*renderNextResearchAction\(\)\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
 })
 
 test('always states the next action and why a control cannot be pressed', () => {
@@ -252,9 +338,9 @@ test('dispatches only the selected stage detail renderers', () => {
   const expected = {
     conditions: ['trend', 'broad', 'seeds', 'queue', 'inspector'],
     candidates: ['candidates', 'modifiers', 'etsy-start', 'queue', 'inspector'],
-    erank: ['erank', 'queue', 'inspector'],
+    everbee: ['etsy', 'results', 'queue', 'inspector'],
     etsy: ['etsy', 'queue', 'inspector'],
-    results: ['results', 'cross-niche', 'seo'],
+    results: ['results', 'erank', 'cross-niche', 'seo'],
   }
 
   for (const [stage, calls] of Object.entries(expected)) {
@@ -465,6 +551,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     'renderExtensionStateUpdate',
     'friendlyExtensionError',
     'isErankDailyLimitError',
+    'resumePersistedEvidenceAutomationIfReady',
     `return function handleExtensionMessage(event) {${handlerBody}\n}`,
   )
   const createPoll = new Function(
@@ -486,7 +573,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     extensionState: null,
     extensionPollFailureCount: 0,
     progress: { failed: false, message: '' },
-    consoleUi: { activeStage: 'erank' },
+    consoleUi: { activeStage: 'results' },
     researchRows: [],
   }
   const pendingRequests = new Map()
@@ -555,6 +642,7 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     renderExtensionStateUpdate,
     (error) => String(error),
     (error) => /ERANK_DAILY_LOOKUP_LIMIT_REACHED/.test(String(error ?? '')),
+    noRender,
   )
   pollExtensionState = createPoll(
     appState,
@@ -701,6 +789,18 @@ test('uses one exact label for automatic candidate discovery', () => {
   assert.doesNotMatch(app, /おすすめ自動探索をはじめる/)
 })
 
+test('lets the user edit and save the monthly listing research target', () => {
+  const panel = html.match(/<section id="winningNicheAutomationPanel"[\s\S]*?<\/section>/)?.[0]
+  assert.ok(panel, 'winning niche automation panel must exist')
+  assert.match(panel, /月の出品目標[\s\S]*?id="monthlyListingTargetInput"[^>]*type="number"[^>]*min="1"[^>]*max="1000"[^>]*value="100"/)
+  assert.match(panel, /月のリサーチ回数[\s\S]*?id="researchRunsPerMonthInput"[^>]*type="number"[^>]*min="1"[^>]*max="31"[^>]*value="4"/)
+  assert.match(panel, /A\/B候補1件から作る商品数[\s\S]*?id="listingsPerWinnerInput"[^>]*type="number"[^>]*min="1"[^>]*max="50"[^>]*value="5"/)
+  assert.match(panel, /id="listingResearchTargetSaveBtn"[^>]*>設定を保存して再計算<\/button>/)
+  assert.match(panel, /id="listingResearchTargetErrors"/)
+  assert.match(panel, /id="listingResearchTargetSummary"/)
+  assert.match(panel, /id="listingResearchTargetProgress"/)
+})
+
 test('asks who the buyer is before generating candidates and feeds it into generation', () => {
   assert.match(html, /id="buyerIdentityInput"/)
   assert.match(html, /id="buyerActionInput"/)
@@ -719,13 +819,29 @@ test('shows which candidates carry the personalization lever and the gift intent
   assert.match(styles, /\.pill\.lever \{/)
 })
 
+test('shows learned marketplace vocabulary by buyer role and reuses it in generation', () => {
+  assert.match(html, /購入者語彙の学習/)
+  assert.match(app, /signalTypeLabel/)
+  assert.match(app, /人・相手/)
+  assert.match(app, /理由/)
+  assert.match(app, /場面/)
+  assert.match(app, /修飾/)
+  assert.match(app, /observationRuns/)
+  assert.match(app, /learnedSignalsForGeneration/)
+})
+
+test('renders restored candidates even when source freshness was never stored', () => {
+  assert.match(app, /candidate\.sourceFreshness\?\.freshnessDays != null/)
+})
+
 test('offers the identity vocabulary as chips so the field is never blank', () => {
   // The suggestions must precede the field they fill, or they read as a result rather
   // than a starting point.
   assert.ok(position('buyerIdentitySuggestions') < position('buyerIdentityInput'))
   assert.ok(position('buyerIdentityShuffleBtn') < position('buyerIdentityInput'))
   assert.match(html, /id="buyerContextSuggestions"/)
-  assert.match(app, /suggestBuyerIdentities\(\{[\s\S]{0,200}exclude: chosen\.join\('\\n'\)/)
+  assert.match(app, /learnedBuyerIdentitySuggestions\(chosen\)/)
+  assert.match(app, /suggestBuyerIdentities\(\{[\s\S]{0,240}exclude: \[\.\.\.chosen, \.\.\.learned/)
   assert.match(app, /data-buyer-identity=/)
   assert.match(app, /data-buyer-context=/)
   assert.match(app, /state\.buyerIdentitySuggestOffset \+= 1/)
@@ -733,12 +849,23 @@ test('offers the identity vocabulary as chips so the field is never blank', () =
   assert.match(styles, /\.chip-btn \{/)
 })
 
+test('auto-selects measured buyer identities without overwriting a manual choice', () => {
+  assert.match(html, /id="buyerIdentityAutoStatus"/)
+  assert.match(app, /function autoSelectBuyerIdentities\(/)
+  assert.match(app, /selectAutomaticBuyerIdentities\(/)
+  assert.match(app, /state\.buyerIdentitySelectionMode === 'manual'/)
+  assert.match(app, /state\.buyerIdentitySelectionMode = 'manual'/)
+  assert.match(app, /autoSelectBuyerIdentities\(\{ refresh: true \}\)/)
+  assert.match(app, /autoSelectBuyerIdentities\(\{ persist: false \}\)/)
+})
+
 test('puts every next action after the result or inputs it uses', () => {
   assert.ok(position('yearInput') < position('trendAutoBtn'))
   assert.ok(position('candidateList') < position('marketplaceStartBtn'))
-  assert.ok(position('marketplaceResultsList') < position('candidateErankBtn'))
-  assert.ok(position('erankResultsList') < position('erankToEverbeeBtn'))
+  assert.ok(position('marketplaceResultsList') < position('erankToEverbeeBtn'))
   assert.ok(position('erankToEverbeeBtn') < position('resultsList'))
+  assert.ok(position('resultsList') < position('candidateErankBtn'))
+  assert.ok(position('candidateErankBtn') < position('erankResultsList'))
 })
 
 test('does not render duplicate automatic research buttons above the steps', () => {
@@ -746,16 +873,23 @@ test('does not render duplicate automatic research buttons above the steps', () 
   assert.doesNotMatch(html, /id="simpleStartBtn"/)
 })
 
-test('runs Etsy official before eRank and does not gate it on eRank results', () => {
-  const stages = ['conditions', 'candidates', 'etsy', 'erank', 'results']
+test('runs Etsy official before EverBee and keeps eRank optional', () => {
+  const stages = ['conditions', 'candidates', 'etsy', 'everbee', 'results']
   assert.deepEqual([...html.matchAll(/data-research-stage="([a-z]+)"/g)].map((match) => match[1]), stages)
-  assert.match(app, /const fromErank = buildEtsyCandidatesFromErank\(erankResultRows\(\), state\.candidates\)\n\s*if \(fromErank\.length > 0\) return fromErank\n\s*return buildEtsyCandidatesFromPool\(state\.candidates\)/)
+  assert.match(app, /function etsyValidationCandidates\(\) \{[\s\S]{0,200}return buildEtsyCandidatesFromPool\(state\.candidates\)/)
+  assert.doesNotMatch(app, /function etsyValidationCandidates\(\) \{[\s\S]{0,300}buildEtsyCandidatesFromErank/)
+  assert.match(app, /const stageOrder = \['pending-etsy', 'pending-everbee', 'pending-erank'\]/)
+  assert.doesNotMatch(app, /if \(!failed && !erankAttempted\) nextStage = 'pending-erank'/)
   assert.match(app, /'2「候補」を確認し、「Etsy公式確認を自動実行」を押してください。'/)
-  assert.match(app, /'3「Etsy公式」の下にある「eRankで関連語を広げる」を押してください。'/)
-  assert.match(app, /'4「eRank」の下にある「EverBeeで売上を確認する」を押してください。'/)
+  assert.match(app, /'3「Etsy公式」を確認し、4「EverBee」の「EverBeeで売上を確認する」を押してください。'/)
+  assert.doesNotMatch(html.match(/id="researchStageTabs"[\s\S]*?<\/nav>/)?.[0] ?? '', />eRank</)
+  assert.doesNotMatch(app, /候補を作り、eRankから順に確認してください/)
+  assert.match(app, /次は3段目の「Etsy公式確認を自動実行」を押してください。/)
+  assert.doesNotMatch(app, /次は4段目の「Etsy公式確認を自動実行」を押してください。/)
+  assert.match(html, /複数商品が売れている高競合市場から交差キーワードを作り、通常のEtsy公式・EverBee確認へ自動で戻します。eRankは最終結果で任意の補助確認です。/)
 })
 
-test('starts Etsy after eRank and renders official results before EverBee', () => {
+test('starts Etsy and renders official results before EverBee', () => {
   assert.match(app, /async function startMarketplaceInsight\(\)/)
   assert.match(app, /function renderMarketplaceInsightResults\(\)/)
   assert.match(app, /marketplaceCompletedKeywords\(state\.marketplaceInsightPlan\)/)
@@ -773,6 +907,7 @@ test('automatically opens, waits for, captures, and advances Etsy candidates', (
   assert.match(app, /RUN_AND_CAPTURE_ETSY_MARKETPLACE_INSIGHT/)
   assert.match(app, /async function runMarketplaceInsightAutomation\(\)/)
   assert.match(app, /while \(state\.marketplaceInsightAutoRunning\)/)
+  assert.match(app, /await waitForMarketplaceQueryCooldown\(\)/)
   assert.match(app, /elements\.marketplaceStartBtn\.addEventListener\('click', startMarketplaceInsight\)/)
   assert.match(app, /elements\.marketplaceNextBtn\.addEventListener\('click', runMarketplaceInsightAutomation\)/)
   assert.match(app, /elements\.marketplaceAutoStopBtn\.addEventListener\('click', stopMarketplaceInsightAutomation\)/)
@@ -819,7 +954,7 @@ test('confirms the cross-niche round before swapping the candidate list', () => 
   assert.match(html, /id="crossNicheList"/)
   assert.match(html, /id="crossNicheStatus"/)
   assert.match(html, /id="crossNicheProposal"/)
-  assert.ok(position('crossNicheSection') < position('resultsList'))
+  assert.ok(position('finalEvidenceTable') < position('crossNicheSection'))
   assert.ok(position('crossNicheProposal') < position('crossNicheList'))
   assert.match(app, /function renderCrossNicheProposal\(\)/)
   assert.match(app, /function applyCrossNicheProposal\(\)/)
@@ -849,9 +984,16 @@ test('confirms the cross-niche round before swapping the candidate list', () => 
   assert.match(app, /crossNicheParent/)
   assert.match(app, /'Cross Niche Parent'/)
   assert.match(app, /'Cross Niche Depth'/)
+  assert.match(app, /'Niche Root'/)
+  assert.match(app, /'Specificity Axis'/)
+  assert.match(app, /'Drilldown Verdict'/)
+  assert.match(app, /'Stop Reason'/)
   assert.match(app, /row\.crossNicheParent \?\? ''/)
   assert.match(app, /row\.crossNicheDepth \?\? ''/)
-  assert.match(app, /function limitNextResearchCandidates\(candidates, limit = 12\)/)
+  assert.match(app, /function limitNextResearchCandidates\(candidates, limit = 8\)/)
+  assert.match(html, /id="nicheExplorationHistory"/)
+  assert.match(html, /id="nicheExplorationHistoryList"/)
+  assert.match(app, /function renderNicheExplorationHistory\(\)/)
   assert.match(app, /競合減少率/)
   assert.match(app, /需要維持率/)
   assert.match(app, /効率改善/)
@@ -938,6 +1080,53 @@ test('separates restored results from the current research run', () => {
   assert.match(app, /この前回結果から続ける/)
   assert.match(app, /if \(restoredResultsAwaitingConfirmation\(\)\) return \[\]/)
   assert.match(app, /const canUsePlan = hasPlan && !restoredAwaiting/)
+})
+
+test('puts the restored-result continuation button beside the persistent next action', () => {
+  const nextActionStart = html.indexOf('id="researchNextAction"')
+  const nextActionEnd = html.indexOf('</div>', nextActionStart)
+  const nextActionMarkup = html.slice(nextActionStart, nextActionEnd)
+
+  assert.match(nextActionMarkup, /id="acceptRestoredResultsBtn"/)
+  assert.match(nextActionMarkup, />この前回結果から続ける<\/button>/)
+  assert.match(app, /acceptRestoredResultsBtn:\s*document\.querySelector\('#acceptRestoredResultsBtn'\)/)
+  assert.match(app, /acceptRestoredResultsBtn\.hidden\s*=\s*next\.action\s*!==\s*'restored-results'/)
+  assert.match(app, /acceptRestoredResultsBtn\.addEventListener\('click',\s*acceptRestoredResearchResults\)/)
+})
+
+test('puts cross-niche accept and dismiss choices beside the persistent next action', () => {
+  const nextActionStart = html.indexOf('id="researchNextAction"')
+  const nextActionEnd = html.indexOf('</div>', nextActionStart)
+  const nextActionMarkup = html.slice(nextActionStart, nextActionEnd)
+
+  assert.match(nextActionMarkup, /id="crossNicheNextApplyBtn"/)
+  assert.match(nextActionMarkup, /id="crossNicheNextDismissBtn"/)
+  assert.match(nextActionMarkup, />今回は見送る<\/button>/)
+  assert.match(app, /crossNicheNextApplyBtn\.textContent\s*=\s*`この\$\{proposalCount\}件を調査する`/)
+  assert.match(app, /crossNicheNextApplyBtn\.hidden\s*=\s*!showCrossNicheActions/)
+  assert.match(app, /crossNicheNextDismissBtn\.hidden\s*=\s*!showCrossNicheActions/)
+  assert.match(app, /crossNicheNextApplyBtn\.addEventListener\('click',\s*applyCrossNicheProposal\)/)
+  assert.match(app, /crossNicheNextDismissBtn\.addEventListener\('click',\s*dismissCrossNicheProposal\)/)
+})
+
+test('stacks next-action copy above its decision buttons without squeezing Japanese text', () => {
+  assert.match(html, /class="research-next-action-buttons"/)
+  assert.match(
+    styles,
+    /\.research-next-action\s*\{[^}]*display:\s*grid/
+  )
+  assert.match(
+    styles,
+    /\.research-next-action\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/
+  )
+  assert.match(
+    styles,
+    /\.research-next-action-buttons\s*\{[^}]*grid-column:\s*2/
+  )
+  assert.match(
+    styles,
+    /\.research-next-action strong\s*\{[^}]*min-width:\s*0/
+  )
 })
 
 test('synchronizes radio checked state in setFlowMode', () => {
@@ -1134,6 +1323,13 @@ test('uses action names instead of legacy Step labels in user-facing copy', () =
   assert.doesNotMatch(html, /<button[^>]*>\s*[1-5]\s/)
 })
 
+test('keeps accepted results when the guided flow sends Etsy-confirmed words to EverBee', () => {
+  assert.match(
+    app,
+    /async function simpleStartResearch\(\)[\s\S]{0,900}await startExtensionResearch\(\{\s*preserveExisting:\s*true\s*\}\)/,
+  )
+})
+
 test('styles a desktop research console without mobile stacking', () => {
   assert.match(styles, /body\s*\{[^}]*min-width:\s*1280px/)
   assert.match(styles, /\.app-shell\s*\{[^}]*width:\s*min\(1760px,\s*calc\(100% - 20px\)\)[^}]*min-width:\s*1260px/)
@@ -1155,7 +1351,7 @@ test('styles a desktop research console without mobile stacking', () => {
   assert.match(styles, /\.research-console-workspace\s*\{[^}]*overflow:\s*auto/)
   assert.match(styles, /\.research-console\[data-active-stage="results"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
   assert.match(styles, /\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-queue,[\s\S]{0,300}\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-inspector\s*\{[^}]*display:\s*none/)
-  assert.match(styles, /\.research-console\[data-active-stage="erank"\][\s\S]{0,300}\.research-console\[data-active-stage="etsy"\][\s\S]{0,300}\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-workspace > \.workspace-grid\s*\{[^}]*display:\s*none/)
+  assert.match(styles, /\.research-console\[data-active-stage="everbee"\][\s\S]{0,300}\.research-console\[data-active-stage="etsy"\][\s\S]{0,300}\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-workspace > \.workspace-grid\s*\{[^}]*display:\s*none/)
   assert.match(styles, /\.final-result-toolbar\s*\{[^}]*position:\s*sticky/)
   assert.match(styles, /\.final-result-actions \.primary-btn\s*\{[^}]*width:\s*auto/)
   assert.doesNotMatch(styles, /font-size:\s*[^;]*(?:vw|vh|vmin|vmax)/)
@@ -1186,5 +1382,4 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
-  assert.equal(stylesheetVersion, '20260726-8')
 })

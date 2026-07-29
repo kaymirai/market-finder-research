@@ -18,6 +18,29 @@ test('provides a single final evidence matrix with filters and bulk verification
   assert.match(app, /async function verifyPendingEvidence\(/)
 })
 
+test('keeps eRank as an optional advanced panel inside the final stage', () => {
+  const finalStage = html.match(/data-research-panel="results"[\s\S]*?(?=<section class="seo-section)/)?.[0] ?? ''
+
+  assert.match(finalStage, /<details[^>]*class="[^"]*erank-advanced-panel[^"]*"/)
+  assert.match(finalStage, /<summary>eRankで追加確認<\/summary>/)
+  assert.match(finalStage, /id="candidateErankBtn"/)
+  assert.match(finalStage, /id="erankResultsList"/)
+  assert.match(app, /elements\.candidateErankBtn\.addEventListener\('click', simpleStartErankResearch\)/)
+  assert.match(app, /elements\.erankResultsList\.addEventListener\('click'/)
+})
+
+test('edits profit evidence for the selected final row without replacing its market score', () => {
+  assert.match(html, /id="profitStrategyPanel"/)
+  assert.match(html, /市場機会スコア/)
+  assert.match(html, /商品化・利益スコア/)
+  assert.match(app, /function renderProfitStrategyAssessment\(/)
+  assert.match(app, /function deriveProfitStrategyInput\(/)
+  assert.match(app, /state\.profitInputsByKeyword/)
+  assert.match(app, /data-profit-input/)
+  assert.match(app, /deriveProfitStrategyAssessment/)
+  assert.match(app, /selectVisibleProfitRow/)
+})
+
 test('labels bulk verification as a selected shortlist instead of every generated idea', () => {
   assert.match(app, /buildFinalEvidenceKeywordPool/)
   assert.match(app, /analysis\.scoredRows\.filter\(hasCollectedEvidence\)/)
@@ -43,6 +66,90 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /wasActive\s*&&\s*!data\.state\?\.active[\s\S]*schedulePendingEvidenceAutomation/)
   assert.match(app, /選抜済みを自動検証/)
   assert.match(app, /自動検証を停止/)
+})
+
+test('continues with a new taxonomy batch after a completed no-winner verification', () => {
+  assert.match(app, /from '\.\/winning-niche-automation\.js\?v=/)
+  assert.match(app, /winningNicheAutomation:\s*createWinningNicheAutomation\(\)/)
+  assert.match(app, /function queueNextWinningNicheBatch\(/)
+  assert.match(app, /function startWinningNicheSearch\(/)
+  assert.match(app, /function pauseWinningNicheSearch\(/)
+  assert.match(app, /function stopWinningNicheSearch\(/)
+  assert.match(app, /function resumeWinningNicheSearch\(/)
+  assert.match(app, /evaluateWinningNicheRows\(/)
+  assert.match(app, /queueNextWinningNicheBatch\(\)/)
+})
+
+test('confirms saved EverBee sellers on Etsy before generating another taxonomy batch', () => {
+  const completeBody = app.match(/function completeWinningNicheBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
+  assert.match(completeBody, /pendingEvidenceBatch\(\s*finalEvidenceRows\(\),\s*'pending-etsy',\s*8,\s*\)/)
+  assert.match(completeBody, /targetKeywords:\s*etsyConfirmationRows\.map\(\(row\) => row\.keyword\)/)
+  assert.ok(
+    completeBody.indexOf("pendingEvidenceBatch(\n    finalEvidenceRows(),\n    'pending-etsy',\n    8,") < completeBody.lastIndexOf('queueNextWinningNicheBatch()'),
+  )
+})
+
+test('prefilters continuous taxonomy batches with EverBee before limited Etsy confirmation', () => {
+  assert.match(app, /sanitizeLegacyMarketplaceInsightRow/)
+  assert.match(app, /isEtsyEvidenceChecked/)
+  assert.match(app, /selectEtsyConfirmationKeywords/)
+  assert.match(app, /verificationStageForRow/)
+  assert.match(app, /etsyMetricCaptureVersion:\s*2/)
+  assert.match(
+    app,
+    /type:\s*'continuous-niche'[\s\S]*status:\s*'pending-everbee'/,
+  )
+  assert.match(
+    app,
+    /state\.researchRows = Array\.isArray\(savedState\.researchRows\)[\s\S]*sanitizeLegacyMarketplaceInsightRow/,
+  )
+})
+
+test('persists continuous-search progress and restores running work as paused', () => {
+  assert.match(app, /winningNicheAutomation:\s*state\.winningNicheAutomation/)
+  assert.match(
+    app,
+    /createWinningNicheAutomation\(\{[\s\S]*savedState\.winningNicheAutomation[\s\S]*targetWinnerCount:\s*restoredWinnerTarget/,
+  )
+  assert.match(app, /前回の連続探索を復元しました/)
+})
+
+test('keeps manual cross-niche confirmation but auto-applies it during continuous search', () => {
+  assert.match(app, /winningNicheSearchIsRunning\(\)[\s\S]*applyCrossNicheProposal\(\)/)
+  assert.match(app, /data-cross-niche-apply/)
+  assert.match(app, /data-cross-niche-dismiss/)
+})
+
+test('shows a desktop exploration rail with one stop or resume control', () => {
+  assert.match(html, /id="winningNicheAutomationPanel"/)
+  assert.match(html, /id="winningNicheAutomationRail"/)
+  assert.match(html, /id="winningNicheAutomationStatus"/)
+  assert.match(html, /id="winningNicheAutomationToggle"/)
+  assert.match(app, /function renderWinningNicheAutomation\(/)
+  assert.match(app, /data-winning-niche-axis/)
+  assert.match(app, /stopWinningNicheSearch/)
+  assert.match(app, /resumeWinningNicheSearch/)
+  assert.match(css, /\.winning-niche-automation-panel/)
+  assert.match(css, /\.winning-niche-rail/)
+})
+
+test('keeps continuous exploration visible outside every stage-specific panel', () => {
+  const automationPanelIndex = html.indexOf('id="winningNicheAutomationPanel"')
+  const researchConsoleIndex = html.indexOf('id="researchConsole"')
+
+  assert.ok(automationPanelIndex >= 0)
+  assert.ok(researchConsoleIndex >= 0)
+  assert.ok(
+    automationPanelIndex < researchConsoleIndex,
+    'continuous exploration must remain visible while Conditions, Etsy, or EverBee is active',
+  )
+  assert.match(app, /function renderAll\(\)\s*\{\s*renderGlobalResearchStatus\(\)\s*renderWinningNicheAutomation\(\)/)
+})
+
+test('turns the completed no-winner state into continuous-search guidance', () => {
+  assert.match(app, /勝ち候補を探索中/)
+  assert.match(app, /次の未調査カテゴリ/)
+  assert.doesNotMatch(app, /<h3>今回は採用できるキーワードなし<\/h3>/)
 })
 
 test('updates the automation button without rebuilding the final evidence table', () => {
@@ -103,7 +210,7 @@ test('keeps headers and the first three comparison columns visible on desktop', 
   assert.match(css, /\.final-evidence-table-shell\s*\{[^}]*overflow:\s*auto/s)
   assert.match(css, /\.final-evidence-table\s+thead\s+th\s*\{[^}]*position:\s*sticky/s)
   assert.match(css, /\.final-evidence-table\s+\.is-sticky-column\s*\{[^}]*position:\s*sticky/s)
-  assert.match(css, /min-width:\s*2800px/)
+  assert.match(css, /min-width:\s*3500px/)
 })
 
 test('shows an explicit keyword decision before the comparison table', () => {
@@ -111,7 +218,7 @@ test('shows an explicit keyword decision before the comparison table', () => {
   assert.match(app, /function renderFinalKeywordDecision\(/)
   assert.match(app, /deriveFinalKeywordDecision/)
   assert.match(app, /まず使うキーワード/)
-  assert.match(app, /今回は採用できるキーワードなし/)
+  assert.match(app, /勝ち候補を探索中/)
 })
 
 test('provides an always-accessible horizontal scrollbar synchronized with the table', () => {

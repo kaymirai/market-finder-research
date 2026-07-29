@@ -22,12 +22,18 @@ function emptyCounts(value = {}) {
 }
 
 function roundId(type, depth) {
-  return type === 'initial' ? 'initial' : `cross-niche-${Math.max(1, Math.min(2, Number(depth) || 1))}`
+  if (type === 'initial') return 'initial'
+  if (type === 'continuous-niche') return `continuous-niche-${Math.max(1, Number(depth) || 1)}`
+  return `cross-niche-${Math.max(1, Math.min(3, Number(depth) || 1))}`
 }
 
 function sanitizeRound(value = {}) {
-  const type = value.type === 'cross-niche' ? 'cross-niche' : 'initial'
-  const depth = type === 'initial' ? 0 : Math.max(1, Math.min(2, Number(value.depth) || 1))
+  const type = ['cross-niche', 'continuous-niche'].includes(value.type) ? value.type : 'initial'
+  const depth = type === 'initial'
+    ? 0
+    : type === 'continuous-niche'
+      ? Math.max(1, Number(value.depth) || 1)
+      : Math.max(1, Math.min(3, Number(value.depth) || 1))
   return {
     id: roundId(type, depth),
     type,
