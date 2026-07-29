@@ -224,6 +224,27 @@ test('uses the Etsy automation as the active global header service', () => {
   assert.equal(header.canStop, true)
 })
 
+test('enables global Stop for running or paused multi-angle work but not terminal states', () => {
+  for (const status of ['running', 'paused']) {
+    const header = deriveResearchHeaderState({
+      connected: true,
+      multiAngleStatus: status,
+    })
+    assert.equal(header.canStop, true, `${status} exploration must be stoppable`)
+    assert.equal(header.stopKind, 'multi-angle')
+    assert.match(header.stopReason, /探索|調査/)
+  }
+
+  for (const status of ['idle', 'stopped', 'winner-found', 'exhausted']) {
+    const header = deriveResearchHeaderState({
+      connected: true,
+      multiAngleStatus: status,
+    })
+    assert.equal(header.canStop, false, `${status} exploration must not show Stop`)
+    assert.equal(header.stopKind, '')
+  }
+})
+
 test('clicking a research stage tab shows only its panel', () => {
   const dom = createResearchConsoleDom()
   const stages = deriveResearchStageStates()

@@ -134,8 +134,13 @@ test('completes a restored batch from persisted multi-angle candidates', () => {
 })
 
 test('uses one fixed research context for gates pools resume results and archives', () => {
+  const activeContext = app.match(/function activeResearchContext\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   assert.match(app, /function activeResearchContext\(/)
   assert.match(app, /resolveMultiAngleResearchContext\(/)
+  assert.match(activeContext, /eventSnapshot/)
+  assert.match(activeContext, /categorySnapshot/)
+  assert.match(app, /eventSnapshot:\s*researchContext\.event/)
+  assert.match(app, /categorySnapshot:\s*researchContext\.category/)
   for (const functionName of [
     'evidenceArchiveRecord',
     'renderMarketTimingGate',
@@ -148,6 +153,19 @@ test('uses one fixed research context for gates pools resume results and archive
     assert.match(body, /activeResearchContext\(\)/, `${functionName} must use the fixed context`)
   }
   assert.match(app, /pauseMultiAngleForContextChange\(/)
+})
+
+test('routes analysis Marketplace planning and Etsy row metadata through fixed research options', () => {
+  const analysis = app.match(/function currentResearchAnalysis\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const plan = app.match(/function rebuildMarketplaceInsightPlan\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const mergedRow = app.match(/function buildMergedResearchRow\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(app, /function activeResearchOptions\(/)
+  assert.match(analysis, /activeResearchOptions\(\)/)
+  assert.match(plan, /activeResearchOptions\(\)/)
+  assert.match(plan, /eventId:\s*researchOptions\.eventId/)
+  assert.match(plan, /categoryId:\s*researchOptions\.categoryId/)
+  assert.match(mergedRow, /activeResearchContext\(\)/)
+  assert.match(mergedRow, /activeResearchOptions\(\)/)
 })
 
 test('routes marketplace extension and global stop controls through multi-angle orchestration', () => {
@@ -163,12 +181,27 @@ test('routes marketplace extension and global stop controls through multi-angle 
   assert.match(globalStop, /stopMultiAngleOrchestration\('global'\)/)
 })
 
+test('global research Stop receives multi-angle state including between-batch running work', () => {
+  const header = app.match(/function researchHeaderState\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const render = app.match(/function renderGlobalResearchStatus\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(header, /multiAngleStatus:\s*state\.multiAngleExploration\.status/)
+  assert.match(render, /headerState\.canStop/)
+})
+
 test('persists seasonal reference objects and feeds compatible later cycles', () => {
   assert.match(app, /savedSeasonalReferences:\s*\[\]/)
   assert.match(app, /savedSeasonalReferences:\s*state\.savedSeasonalReferences/)
   assert.match(app, /restoreSavedSeasonalReferences\(/)
   assert.match(app, /savedNextCycleCandidates:\s*state\.savedSeasonalReferences/)
   assert.match(app, /state\.savedSeasonalReferences = \[\.\.\.state\.savedSeasonalReferences,\s*reference\]/)
+})
+
+test('legacy seasonal migration can reconstruct the event currently selected for a later cycle', () => {
+  const restorable = app.match(/function restorableSeasonalReferenceCandidates\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.doesNotMatch(restorable, /\.filter\(\(event\) => event\.id !== context\.eventId\)/)
+  assert.match(restorable, /allowActiveEvent:\s*true/)
+  assert.match(app, /originEventId:\s*context\.eventId/)
+  assert.match(app, /originCategoryId:\s*context\.categoryId/)
 })
 
 test('keeps manual cross-niche confirmation while using drilldown evidence in multi-angle pools', () => {

@@ -154,3 +154,53 @@ test('saved seasonal references persist as useful objects and enter only a compa
   assert.equal(laterCandidate.source, 'saved-next-cycle-seasonal-reference')
   assert.equal(laterCandidate.resultLane, 'event')
 })
+
+test('legacy reference can enter the selected later event while origin-tagged references stay out of their source cycle', () => {
+  const legacyRestored = candidateApi.restoreSavedSeasonalReferences({
+    legacyKeys: ['thanksgiving|thanksgiving'],
+    availableCandidates: [{
+      keyword: 'thanksgiving nurse shirt',
+      categoryId: 'shirt',
+      eventId: 'thanksgiving',
+      timingStatus: 'timely',
+      source: 'legacy-seasonal-reference-key',
+      legacyKeys: ['thanksgiving|thanksgiving'],
+    }],
+  })
+  const originTagged = candidateApi.restoreSavedSeasonalReferences({
+    saved: [{
+      keyword: 'thanksgiving teacher shirt',
+      categoryId: 'shirt',
+      eventId: 'thanksgiving',
+      originEventId: 'thanksgiving',
+      originCategoryId: 'shirt',
+      timingStatus: 'timely',
+      source: 'seasonal-result-lane',
+    }],
+  })
+  const laterEventPools = buildMultiAngleCandidatePools({
+    ...base,
+    event: { id: 'thanksgiving', searchTerm: 'thanksgiving' },
+    savedNextCycleCandidates: [...legacyRestored, ...originTagged],
+  })
+
+  assert.deepEqual(legacyRestored, [{
+    keyword: 'thanksgiving nurse shirt',
+    categoryId: 'shirt',
+    eventId: 'thanksgiving',
+    timingStatus: 'timely',
+    source: 'legacy-seasonal-reference-key',
+  }])
+  assert.equal(
+    laterEventPools['demand-neighborhood'].some(
+      (candidate) => candidate.keyword === 'thanksgiving nurse shirt',
+    ),
+    true,
+  )
+  assert.equal(
+    laterEventPools['demand-neighborhood'].some(
+      (candidate) => candidate.keyword === 'thanksgiving teacher shirt',
+    ),
+    false,
+  )
+})

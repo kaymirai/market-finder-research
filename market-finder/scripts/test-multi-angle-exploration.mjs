@@ -410,6 +410,178 @@ test('selector changes pause the fixed research context and resume its batch', (
   assert.deepEqual(completed.evidenceKeys, ['fixed halloween niche|shirt|halloween'])
 })
 
+test('custom event snapshot survives Alpha to Beta input changes and reload', () => {
+  assert.equal(typeof multiAngleApi.resolveMultiAngleResearchOptions, 'function')
+
+  const alphaEvent = {
+    id: 'custom-event',
+    label: 'Alpha Launch',
+    jpLabel: 'Alpha Launch',
+    searchTerm: 'alpha launch',
+    displayTerm: 'Alpha Launch',
+    month: 0,
+    defaultYear: 2026,
+    targets: ['teacher'],
+    intents: ['alpha launch gift'],
+    designAngles: ['clear typography'],
+    peakDate: '',
+    peakStatus: 'evergreen',
+  }
+  const shirt = {
+    id: 'shirt',
+    label: 'Shirt',
+    searchTerm: 'shirt',
+    tags: ['shirt', 'graphic tee'],
+  }
+  const started = startMultiAngleExploration({}, {
+    activeEventId: alphaEvent.id,
+    categoryId: shirt.id,
+    eventSnapshot: alphaEvent,
+    categorySnapshot: shirt,
+  })
+  const reloaded = createMultiAngleExplorationState(
+    JSON.parse(JSON.stringify(started)),
+  )
+  const betaSelection = {
+    eventId: 'custom-event',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      ...alphaEvent,
+      label: 'Beta Launch',
+      jpLabel: 'Beta Launch',
+      searchTerm: 'beta launch',
+      displayTerm: 'Beta Launch',
+      intents: ['beta launch gift'],
+    },
+    categorySnapshot: shirt,
+  }
+
+  const paused = multiAngleApi.pauseMultiAngleForContextChange(
+    reloaded,
+    betaSelection,
+    'input-context-changed',
+  )
+  const resumed = resumeMultiAngleExploration(paused)
+  const fixed = multiAngleApi.resolveMultiAngleResearchContext(
+    resumed,
+    betaSelection,
+  )
+  const options = multiAngleApi.resolveMultiAngleResearchOptions(
+    resumed,
+    {
+      eventId: 'custom-event',
+      customEventName: 'Beta Launch',
+      categoryId: 'shirt',
+      eventSnapshot: betaSelection.eventSnapshot,
+      categorySnapshot: shirt,
+      year: 2026,
+    },
+  )
+
+  assert.equal(paused.status, 'paused')
+  assert.equal(fixed.eventSnapshot.searchTerm, 'alpha launch')
+  assert.equal(fixed.eventSnapshot.label, 'Alpha Launch')
+  assert.equal(fixed.eventSnapshot.peakStatus, 'evergreen')
+  assert.equal(options.eventId, 'custom-event')
+  assert.equal(options.customEventName, 'Alpha Launch')
+  assert.equal(options.categoryId, 'shirt')
+})
+
+test('backfills snapshots when safely migrating an older fixed-context state', () => {
+  assert.equal(typeof multiAngleApi.backfillMultiAngleResearchSnapshots, 'function')
+  const legacy = createMultiAngleExplorationState({
+    status: 'paused',
+    activeEventId: 'custom-event',
+    categoryId: 'shirt',
+  })
+  const migrated = multiAngleApi.backfillMultiAngleResearchSnapshots(legacy, {
+    eventSnapshot: {
+      id: 'custom-event',
+      label: 'Legacy Alpha',
+      searchTerm: 'legacy alpha',
+      month: 0,
+    },
+    categorySnapshot: {
+      id: 'shirt',
+      label: 'Shirt',
+      searchTerm: 'shirt',
+      tags: ['shirt'],
+    },
+  })
+
+  assert.equal(migrated.eventSnapshot.label, 'Legacy Alpha')
+  assert.equal(migrated.eventSnapshot.searchTerm, 'legacy alpha')
+  assert.equal(migrated.categorySnapshot.id, 'shirt')
+})
+
+test('paused normal selector changes keep analysis and plan options on the original context', () => {
+  const halloween = {
+    id: 'halloween',
+    label: 'Halloween',
+    jpLabel: 'Halloween',
+    searchTerm: 'halloween',
+    month: 10,
+    defaultYear: 2026,
+  }
+  const shirt = {
+    id: 'shirt',
+    label: 'Shirt',
+    searchTerm: 'shirt',
+    tags: ['shirt'],
+  }
+  const started = startMultiAngleExploration({}, {
+    activeEventId: halloween.id,
+    categoryId: shirt.id,
+    eventSnapshot: halloween,
+    categorySnapshot: shirt,
+  })
+  const nextSelection = {
+    eventId: 'christmas',
+    customEventName: '',
+    categoryId: 'mug',
+    eventSnapshot: {
+      id: 'christmas',
+      label: 'Christmas',
+      searchTerm: 'christmas',
+      month: 12,
+    },
+    categorySnapshot: {
+      id: 'mug',
+      label: 'Mug',
+      searchTerm: 'mug',
+      tags: ['mug'],
+    },
+    year: 2026,
+  }
+  const paused = multiAngleApi.pauseMultiAngleForContextChange(
+    started,
+    nextSelection,
+  )
+  const resumed = resumeMultiAngleExploration(paused)
+  const analysisOptions = multiAngleApi.resolveMultiAngleResearchOptions(
+    resumed,
+    nextSelection,
+  )
+  const planOptions = multiAngleApi.resolveMultiAngleResearchOptions(
+    resumed,
+    nextSelection,
+  )
+
+  assert.deepEqual(
+    {
+      eventId: analysisOptions.eventId,
+      categoryId: analysisOptions.categoryId,
+      customEventName: analysisOptions.customEventName,
+    },
+    {
+      eventId: 'halloween',
+      categoryId: 'shirt',
+      customEventName: '',
+    },
+  )
+  assert.deepEqual(planOptions, analysisOptions)
+})
+
 test('marketplace extension and global stops preserve a resumable batch', () => {
   assert.equal(typeof multiAngleApi.stopMultiAngleWork, 'function')
 

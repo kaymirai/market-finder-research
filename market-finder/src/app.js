@@ -95,7 +95,7 @@ import {
   selectResearchQueueFilter,
   selectResearchStage,
   stableRenderSignature,
-} from './research-console-ui.js?v=20260723-1'
+} from './research-console-ui.js?v=20260730-1'
 import {
   buildFinalEvidenceKeywordPool,
   deriveFinalEvidenceState,
@@ -145,8 +145,9 @@ import {
   EXPLORATION_ANGLE_ORDER,
   buildMultiAngleCandidatePools,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260730-2'
+} from './multi-angle-candidates.js?v=20260730-3'
 import {
+  backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
   nextMultiAngleBatch,
   pauseMultiAngleForContextChange,
@@ -154,10 +155,11 @@ import {
   recordMultiAngleBatch,
   recordMultiAngleFailure,
   resolveMultiAngleResearchContext,
+  resolveMultiAngleResearchOptions,
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-2'
+} from './multi-angle-exploration.js?v=20260730-3'
 import {
   calculateMonthlyProfitTarget,
 } from './monthly-profit-target.js?v=20260726-1'
@@ -886,6 +888,21 @@ function restorePersistedState() {
         ...migrateWinningNicheState(savedState.winningNicheAutomation),
         targetWinnerCount: restoredWinnerTarget,
       })
+  const selectedRestoreEvent = selectedEvent()
+  const selectedRestoreCategory = selectedCategory()
+  const restoredEvent = state.multiAngleExploration.activeEventId === selectedRestoreEvent.id
+    ? selectedRestoreEvent
+    : resolveMarketEvent({ eventId: state.multiAngleExploration.activeEventId })
+  const restoredCategory = PRODUCT_CATEGORIES.find(
+    (category) => category.id === state.multiAngleExploration.categoryId,
+  ) ?? selectedRestoreCategory
+  state.multiAngleExploration = backfillMultiAngleResearchSnapshots(
+    state.multiAngleExploration,
+    {
+      eventSnapshot: researchEventSnapshot(restoredEvent),
+      categorySnapshot: restoredCategory,
+    },
+  )
   state.savedSeasonalReferences = restoreSavedSeasonalReferences({
     saved: state.savedSeasonalReferences,
     legacyKeys: state.savedSeasonalReferenceKeys,
@@ -987,23 +1004,48 @@ function selectedCategory() {
   return PRODUCT_CATEGORIES.find((category) => category.id === elements.categorySelect.value) ?? PRODUCT_CATEGORIES[0]
 }
 
+function researchEventSnapshot(event = selectedEvent()) {
+  const timing = classifyProductionWindow(event)
+  return {
+    ...event,
+    peakDate: timing.peakDate instanceof Date
+      ? timing.peakDate.toISOString()
+      : String(timing.peakDate ?? ''),
+    peakStatus: timing.status,
+    peakDaysUntil: timing.daysUntil,
+  }
+}
+
 function activeResearchContext() {
   const selected = {
     event: selectedEvent(),
     category: selectedCategory(),
   }
+  const selectedEventSnapshot = researchEventSnapshot(selected.event)
   const context = resolveMultiAngleResearchContext(state.multiAngleExploration, {
     eventId: selected.event.id,
     categoryId: selected.category.id,
+    eventSnapshot: selectedEventSnapshot,
+    categorySnapshot: selected.category,
   })
   return {
     ...context,
-    event: context.eventId === selected.event.id
-      ? selected.event
-      : resolveMarketEvent({ eventId: context.eventId }),
-    category: PRODUCT_CATEGORIES.find((category) => category.id === context.categoryId)
+    event: context.eventSnapshot
+      ?? (context.eventId === selected.event.id
+        ? selectedEventSnapshot
+        : researchEventSnapshot(resolveMarketEvent({ eventId: context.eventId }))),
+    category: context.categorySnapshot
+      ?? PRODUCT_CATEGORIES.find((category) => category.id === context.categoryId)
       ?? selected.category,
   }
+}
+
+function activeResearchOptions() {
+  return resolveMultiAngleResearchOptions(state.multiAngleExploration, {
+    ...currentOptions(),
+    eventSnapshot: researchEventSnapshot(selectedEvent()),
+    categorySnapshot: selectedCategory(),
+  })
 }
 
 function selectedTargets() {
@@ -1321,9 +1363,9 @@ function currentOptions() {
 
 function marketTrackOptionsForRow(row = {}) {
   return {
-    ...currentOptions(),
-    eventId: row.researchEventId || elements.eventSelect.value,
-    categoryId: row.researchCategoryId || elements.categorySelect.value,
+    ...activeResearchOptions(),
+    eventId: row.researchEventId || activeResearchContext().eventId,
+    categoryId: row.researchCategoryId || activeResearchContext().categoryId,
   }
 }
 
@@ -1371,7 +1413,7 @@ function syncResearchMarketHistory() {
   state.researchedMarketHistory = buildResearchMarketHistory(
     state.researchedMarketHistory,
     state.researchRows,
-    currentOptions(),
+    activeResearchOptions(),
   )
 }
 
@@ -1398,7 +1440,7 @@ const analyzeResearchRows = createMemoizedAnalysis((rows, options) => {
 })
 
 function currentResearchAnalysis() {
-  return analyzeResearchRows(state.researchRows, currentOptions())
+  return analyzeResearchRows(state.researchRows, activeResearchOptions())
 }
 
 // Both sides of the measurement come from work the operator has already paid for: Etsy's own
@@ -2484,6 +2526,7 @@ function renderDiscoveryControls() {
 
 function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = [] } = {}) {
   const mode = state.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
+  const researchOptions = activeResearchOptions()
   const quota = mode === 'plus' ? 60 : 15
   const previous = preserveExisting ? state.marketplaceInsightPlan : null
   const requestedKeywords = Array.isArray(keywords) && keywords.length > 0
@@ -2511,7 +2554,7 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = []
     capturedRelatedMetrics,
   )
   const built = buildMarketplaceInsightPlan(validationCandidates, {
-    ...currentOptions(),
+    ...researchOptions,
     marketplaceInsightMode: mode,
     relatedKeywordMetrics,
   })
@@ -2551,8 +2594,8 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = []
     ...built,
     mode,
     counts,
-    eventId: selectedEvent().id,
-    categoryId: selectedCategory().id,
+    eventId: researchOptions.eventId,
+    categoryId: researchOptions.categoryId,
     createdAt: new Date().toISOString(),
     officialRemaining: previous?.officialRemaining ?? null,
     relatedKeywordMetrics,
@@ -3944,13 +3987,13 @@ function explorationResultKey(item = {}) {
   return `${eventId}|${keyword}`
 }
 
-function seasonalReferenceCandidate(item = {}) {
+function seasonalReferenceCandidate(item = {}, options = {}) {
   const context = activeResearchContext()
   const legacyKey = explorationResultKey(item)
   const event = item.event ?? (item.eventId
     ? resolveMarketEvent({ eventId: item.eventId })
     : null)
-  if (!event?.id || event.id === context.eventId) return null
+  if (!event?.id || (!options.allowActiveEvent && event.id === context.eventId)) return null
   const keyword = normalizePhrase(item.keyword)
     || normalizePhrase(`${event.searchTerm} ${context.category.searchTerm}`)
   if (!keyword) return null
@@ -3960,6 +4003,12 @@ function seasonalReferenceCandidate(item = {}) {
     keyword,
     eventId: event.id,
     categoryId: String(item.categoryId ?? context.categoryId).trim(),
+    ...(String(item.originEventId ?? '').trim()
+      ? { originEventId: String(item.originEventId).trim() }
+      : {}),
+    ...(String(item.originCategoryId ?? '').trim()
+      ? { originCategoryId: String(item.originCategoryId).trim() }
+      : {}),
     timingStatus: String(item.timingStatus ?? item.status ?? '').trim(),
     source: String(item.source ?? 'timely-seasonal-suggestion').trim(),
     legacyKeys: [legacyKey].filter(Boolean),
@@ -3983,16 +4032,16 @@ function availableSeasonalReferenceCandidates() {
 }
 
 function restorableSeasonalReferenceCandidates() {
-  const context = activeResearchContext()
   return [
     ...state.multiAngleExploration.resultLanes.seasonalReference,
     ...MARKET_EVENTS
-      .filter((event) => event.id !== context.eventId)
       .map((event) => ({
         event,
         ...classifyProductionWindow(event),
       })),
-  ].map(seasonalReferenceCandidate).filter(Boolean)
+  ].map((item) => seasonalReferenceCandidate(item, {
+    allowActiveEvent: true,
+  })).filter(Boolean)
 }
 
 function explorationResultItemHtml(item = {}, options = {}) {
@@ -5491,6 +5540,8 @@ async function startMultiAngleSearch() {
     {
       activeEventId: researchContext.eventId,
       categoryId: researchContext.categoryId,
+      eventSnapshot: researchContext.event,
+      categorySnapshot: researchContext.category,
       targetWinnerCount: target.targetWinnerCount,
     },
   )
@@ -5515,6 +5566,8 @@ async function startNewMultiAngleCycle() {
     {
       activeEventId: nextCycleContext.event.id,
       categoryId: nextCycleContext.category.id,
+      eventSnapshot: researchEventSnapshot(nextCycleContext.event),
+      categorySnapshot: nextCycleContext.category,
       targetWinnerCount: target.targetWinnerCount,
     },
   )
@@ -5795,6 +5848,8 @@ function pauseMultiAngleForInputChange() {
   const selectedContext = {
     eventId: selectedEvent().id,
     categoryId: selectedCategory().id,
+    eventSnapshot: researchEventSnapshot(selectedEvent()),
+    categorySnapshot: selectedCategory(),
   }
   const previousStatus = state.multiAngleExploration.status
   const fixedContext = resolveMultiAngleResearchContext(
@@ -6430,6 +6485,7 @@ function researchHeaderState() {
     extensionState: state.extensionState,
     marketplaceActive: state.marketplaceInsightAutoRunning,
     marketplaceKeyword,
+    multiAngleStatus: state.multiAngleExploration.status,
   })
 }
 
@@ -6453,6 +6509,7 @@ function stopActiveResearch() {
   const headerState = researchHeaderState()
   if (headerState.stopKind === 'marketplace') return stopMarketplaceInsightAutomation()
   if (headerState.stopKind === 'extension') return stopExtensionResearch()
+  if (headerState.stopKind === 'multi-angle') return stopMultiAngleOrchestration('global')
 }
 
 function researchConsoleMetrics() {
@@ -6804,6 +6861,8 @@ function limitNextResearchCandidates(candidates, limit = 8) {
 }
 
 function buildMergedResearchRow(existingRow, row, keyword) {
+  const researchContext = activeResearchContext()
+  const researchOptions = activeResearchOptions()
   const keepExistingWhenBlank = (field) => {
     const incoming = row[field]
     return String(incoming ?? '').trim() !== '' ? incoming : existingRow?.[field]
@@ -6821,11 +6880,11 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     || existingRow?.sourceKeyword
     || erankSourceKeyword(existingRow ?? {})
   const candidate = state.candidates.find((item) => normalizePhrase(item.keyword) === keyword)
-  const researchEvent = selectedEvent()
+  const researchEvent = researchContext.event
   const researchEventId = String(row.researchEventId ?? existingRow?.researchEventId ?? candidate?.eventId ?? researchEvent.id)
-  const researchCategoryId = String(row.researchCategoryId ?? existingRow?.researchCategoryId ?? candidate?.categoryId ?? elements.categorySelect.value)
+  const researchCategoryId = String(row.researchCategoryId ?? existingRow?.researchCategoryId ?? candidate?.categoryId ?? researchContext.categoryId)
   const intentTrack = classifyEventMarketTrack(keyword, {
-    ...currentOptions(),
+    ...researchOptions,
     eventId: researchEventId,
     categoryId: researchCategoryId,
   }, {
@@ -8953,12 +9012,15 @@ function bindEvents() {
     if (!button) return
     const key = String(button.dataset.saveSeasonalReference ?? '').trim()
     if (!key || state.savedSeasonalReferenceKeys.includes(key)) return
+    const context = activeResearchContext()
     const displayedReference = availableSeasonalReferenceCandidates()
       .find((candidate) => explorationResultKey(candidate) === key)
     if (!displayedReference) return
     const reference = {
       eventId: displayedReference.eventId,
       categoryId: displayedReference.categoryId,
+      originEventId: context.eventId,
+      originCategoryId: context.categoryId,
       keyword: displayedReference.keyword,
       timingStatus: displayedReference.timingStatus,
       source: displayedReference.source,

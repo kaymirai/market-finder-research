@@ -40,6 +40,53 @@ function positiveInteger(value, fallback = 1) {
   return Number.isFinite(number) && number > 0 ? Math.ceil(number) : fallback
 }
 
+function normalizedEventSnapshot(value, fallbackId = '') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const id = String(value.id ?? fallbackId).trim()
+  if (!id) return null
+  const defaultYear = value.defaultYear === null || value.defaultYear === ''
+    ? Number.NaN
+    : Number(value.defaultYear)
+  const month = Number(value.month)
+  const peakDaysUntil = value.peakDaysUntil === null || value.peakDaysUntil === ''
+    ? Number.NaN
+    : Number(value.peakDaysUntil)
+  return {
+    id,
+    label: String(value.label ?? '').trim(),
+    jpLabel: String(value.jpLabel ?? value.label ?? '').trim(),
+    searchTerm: String(value.searchTerm ?? '').trim(),
+    displayTerm: String(value.displayTerm ?? value.label ?? '').trim(),
+    month: Number.isFinite(month) ? month : 0,
+    defaultYear: Number.isFinite(defaultYear) ? defaultYear : null,
+    targets: uniqueStrings(value.targets),
+    intents: uniqueStrings(value.intents),
+    designAngles: uniqueStrings(value.designAngles),
+    peakDate: String(value.peakDate ?? '').trim(),
+    peakStatus: String(value.peakStatus ?? '').trim(),
+    peakDaysUntil: Number.isFinite(peakDaysUntil) ? peakDaysUntil : null,
+  }
+}
+
+function normalizedCategorySnapshot(value, fallbackId = '') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const id = String(value.id ?? fallbackId).trim()
+  if (!id) return null
+  return {
+    id,
+    label: String(value.label ?? '').trim(),
+    searchTerm: String(value.searchTerm ?? '').trim(),
+    tags: uniqueStrings(value.tags),
+  }
+}
+
+function eventSnapshotKey(value) {
+  const snapshot = normalizedEventSnapshot(value)
+  return snapshot
+    ? [snapshot.id, snapshot.searchTerm, snapshot.label, snapshot.displayTerm].join('|')
+    : ''
+}
+
 function normalizedProvenance(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return Object.fromEntries(Object.entries(value)
@@ -154,6 +201,8 @@ export function createMultiAngleExplorationState(saved = {}) {
   const status = VALID_STATUSES.has(saved?.status) ? saved.status : 'idle'
   const activeEventId = String(saved?.activeEventId ?? '').trim()
   const categoryId = String(saved?.categoryId ?? '').trim()
+  const eventSnapshot = normalizedEventSnapshot(saved?.eventSnapshot, activeEventId)
+  const categorySnapshot = normalizedCategorySnapshot(saved?.categorySnapshot, categoryId)
   const currentAngleId = String(saved?.currentAngleId ?? '').trim()
   const currentBatchCandidates = (Array.isArray(saved?.currentBatchCandidates)
     ? saved.currentBatchCandidates
@@ -167,6 +216,8 @@ export function createMultiAngleExplorationState(saved = {}) {
     status,
     activeEventId,
     categoryId,
+    eventSnapshot,
+    categorySnapshot,
     currentAngleId,
     angleIndex: Math.max(0, Number(saved?.angleIndex) || 0),
     evidenceKeys: uniqueStrings(saved?.evidenceKeys),
@@ -191,6 +242,12 @@ export function resolveMultiAngleResearchContext(state = {}, selected = {}) {
   const hasFixedContext = FIXED_CONTEXT_STATUSES.has(current.status)
     && Boolean(current.activeEventId)
     && Boolean(current.categoryId)
+  const eventSnapshot = hasFixedContext
+    ? current.eventSnapshot
+    : normalizedEventSnapshot(selected?.eventSnapshot, selected?.eventId)
+  const categorySnapshot = hasFixedContext
+    ? current.categorySnapshot
+    : normalizedCategorySnapshot(selected?.categorySnapshot, selected?.categoryId)
   return {
     eventId: hasFixedContext
       ? current.activeEventId
@@ -199,7 +256,49 @@ export function resolveMultiAngleResearchContext(state = {}, selected = {}) {
       ? current.categoryId
       : String(selected?.categoryId ?? '').trim(),
     fixed: hasFixedContext,
+    ...(eventSnapshot ? { eventSnapshot } : {}),
+    ...(categorySnapshot ? { categorySnapshot } : {}),
   }
+}
+
+export function resolveMultiAngleResearchOptions(state = {}, selectedOptions = {}) {
+  const context = resolveMultiAngleResearchContext(state, selectedOptions)
+  const customEventName = context.eventId === 'custom-event'
+    ? String(
+      context.eventSnapshot?.label
+      || context.eventSnapshot?.displayTerm
+      || context.eventSnapshot?.searchTerm
+      || selectedOptions?.customEventName
+      || '',
+    ).trim()
+    : ''
+  return {
+    ...selectedOptions,
+    eventId: context.eventId,
+    customEventName,
+    categoryId: context.categoryId,
+    ...(context.eventSnapshot ? { eventSnapshot: context.eventSnapshot } : {}),
+    ...(context.categorySnapshot ? { categorySnapshot: context.categorySnapshot } : {}),
+  }
+}
+
+export function backfillMultiAngleResearchSnapshots(state = {}, context = {}) {
+  const current = createMultiAngleExplorationState(state)
+  const suppliedEvent = normalizedEventSnapshot(
+    context?.eventSnapshot,
+    current.activeEventId,
+  )
+  const suppliedCategory = normalizedCategorySnapshot(
+    context?.categorySnapshot,
+    current.categoryId,
+  )
+  return createMultiAngleExplorationState({
+    ...current,
+    eventSnapshot: current.eventSnapshot
+      || (suppliedEvent?.id === current.activeEventId ? suppliedEvent : null),
+    categorySnapshot: current.categorySnapshot
+      || (suppliedCategory?.id === current.categoryId ? suppliedCategory : null),
+  })
 }
 
 export function pauseMultiAngleForContextChange(
@@ -215,6 +314,11 @@ export function pauseMultiAngleForContextChange(
   const selectedCategoryId = String(selected?.categoryId ?? '').trim()
   const changed = (selectedEventId && selectedEventId !== fixed.eventId)
     || (selectedCategoryId && selectedCategoryId !== fixed.categoryId)
+    || (
+      fixed.eventSnapshot
+      && selected?.eventSnapshot
+      && eventSnapshotKey(selected.eventSnapshot) !== eventSnapshotKey(fixed.eventSnapshot)
+    )
   return changed ? pauseMultiAngleExploration(current, reason, now) : current
 }
 
@@ -232,6 +336,14 @@ export function startMultiAngleExploration(state = {}, context = {}, now = '') {
     activeEventId: restored.activeEventId
       || String(context?.activeEventId ?? context?.eventId ?? '').trim(),
     categoryId: restored.categoryId || String(context?.categoryId ?? '').trim(),
+    eventSnapshot: restored.eventSnapshot || normalizedEventSnapshot(
+      context?.eventSnapshot,
+      context?.activeEventId ?? context?.eventId,
+    ),
+    categorySnapshot: restored.categorySnapshot || normalizedCategorySnapshot(
+      context?.categorySnapshot,
+      context?.categoryId,
+    ),
     targetWinnerCount,
     startedAt: restored.startedAt || updatedAt,
     updatedAt,

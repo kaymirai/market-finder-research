@@ -75,6 +75,12 @@ function savedSeasonalReference(candidate = {}) {
     keyword,
     categoryId,
     eventId,
+    ...(String(candidate.originEventId ?? '').trim()
+      ? { originEventId: String(candidate.originEventId).trim() }
+      : {}),
+    ...(String(candidate.originCategoryId ?? '').trim()
+      ? { originCategoryId: String(candidate.originCategoryId).trim() }
+      : {}),
     timingStatus: String(candidate.timingStatus ?? '').trim(),
     source: String(candidate.source ?? 'seasonal-result-lane').trim()
       || 'seasonal-result-lane',
@@ -185,6 +191,11 @@ export function buildMultiAngleCandidatePools(input = {}) {
   })
     .filter((candidate) => candidate.eventId === activeEventId)
     .filter((candidate) => candidate.categoryId === common.categoryId)
+    .filter((candidate) => (
+      !candidate.originEventId
+      || candidate.originEventId !== activeEventId
+      || candidate.originCategoryId !== common.categoryId
+    ))
     .map((candidate) => ({
       ...candidate,
       source: 'saved-next-cycle-seasonal-reference',
