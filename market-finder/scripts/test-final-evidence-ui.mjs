@@ -501,20 +501,30 @@ test('ordinary Marketplace reload keeps compatible and legacy plans outside mult
   )
 })
 
-test('explicit normal candidate discovery archives terminal work before resetting its fixed context', () => {
-  const prepareBody = app.match(/function prepareForNewCandidateDiscovery\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+test('explicit normal candidate discovery persists terminal work before resetting its fixed context', () => {
+  const preserveBody = app.match(/async function preserveTerminalMultiAngleEvidenceForNewDiscovery\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const prepareBody = app.match(/async function prepareForNewCandidateDiscovery\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   const autoBody = app.match(/async function collectTrendScoutTerms\(\) \{([\s\S]*?)\n\}\n\nfunction/)?.[1] ?? ''
+  const applyBody = app.match(/async function applyTrendScoutTerms\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
 
-  assert.match(prepareBody, /preserveTerminalMultiAngleEvidenceForNewDiscovery\(\)/)
+  assert.match(preserveBody, /persistTerminalMultiAngleEvidenceBeforeReset\(/)
+  assert.match(preserveBody, /saveEvidenceArchive\(\{[\s\S]*record/)
+  assert.match(prepareBody, /await preserveTerminalMultiAngleEvidenceForNewDiscovery\(\)/)
+  assert.match(prepareBody, /if \(!terminalEvidencePersisted\) return false/)
   assert.match(prepareBody, /prepareNewMultiAngleCycle\(/)
   assert.ok(
-    prepareBody.indexOf('preserveTerminalMultiAngleEvidenceForNewDiscovery()')
+    prepareBody.indexOf('await preserveTerminalMultiAngleEvidenceForNewDiscovery()')
+      < prepareBody.indexOf('clearResearchResults'),
+  )
+  assert.ok(
+    prepareBody.indexOf('if (!terminalEvidencePersisted) return false')
       < prepareBody.indexOf('prepareNewMultiAngleCycle('),
   )
   assert.ok(
-    autoBody.indexOf('prepareForNewCandidateDiscovery()')
+    autoBody.indexOf('await prepareForNewCandidateDiscovery()')
       < autoBody.indexOf('generateCandidates()'),
   )
+  assert.match(applyBody, /await prepareForNewCandidateDiscovery\(\)/)
 })
 
 test('completes a restored batch from persisted multi-angle candidates', () => {

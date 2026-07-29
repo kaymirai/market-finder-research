@@ -316,6 +316,44 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
   }
 }
 
+export async function persistTerminalMultiAngleEvidenceBeforeReset({
+  exploration = {},
+  archiveRecord = null,
+  hasArchivedRecord = () => false,
+  persistArchiveRecord,
+} = {}) {
+  const current = createMultiAngleExplorationState(exploration)
+  if (!['winner-found', 'exhausted', 'stopped'].includes(current.status)) {
+    return { ok: true, persisted: false }
+  }
+  if (hasArchivedRecord(archiveRecord)) {
+    return { ok: true, persisted: false }
+  }
+  if (typeof persistArchiveRecord !== 'function') {
+    return {
+      ok: false,
+      persisted: false,
+      error: 'archive-persist-failed',
+    }
+  }
+  try {
+    const persisted = await persistArchiveRecord(archiveRecord)
+    return persisted === true
+      ? { ok: true, persisted: true }
+      : {
+        ok: false,
+        persisted: false,
+        error: 'archive-persist-failed',
+      }
+  } catch {
+    return {
+      ok: false,
+      persisted: false,
+      error: 'archive-persist-failed',
+    }
+  }
+}
+
 export function pauseMultiAngleWorkAfterReload(snapshot = {}, now = '') {
   const exploration = createMultiAngleExplorationState(snapshot?.exploration)
   const pending = snapshot?.pendingEvidenceAutomation ?? {}

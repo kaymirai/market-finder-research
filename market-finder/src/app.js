@@ -163,6 +163,7 @@ import {
   pauseMultiAngleForContextChange,
   pauseMultiAngleExploration,
   pauseMultiAngleWorkAfterReload,
+  persistTerminalMultiAngleEvidenceBeforeReset,
   prepareNewMultiAngleCycle,
   recordMultiAngleBatch,
   recordMultiAngleFailure,
@@ -176,7 +177,7 @@ import {
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-11'
+} from './multi-angle-exploration.js?v=20260730-12'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -1678,7 +1679,7 @@ function scheduleEvidenceAutoArchive() {
   }, 1200)
 }
 
-function evidenceArchiveBlockReason() {
+function evidenceArchiveBlockReason(options = {}) {
   if (!window.location.origin.startsWith('http')) {
     return 'file:// で開いています。保存にはローカルサーバが必要です: node market-finder/scripts/static-server.mjs . 4174'
   }
@@ -1686,7 +1687,11 @@ function evidenceArchiveBlockReason() {
     return 'このサーバは保管庫に対応していません。node market-finder/scripts/static-server.mjs . 4174 で起動してください。'
   }
   const evidence = modifierEvidenceInput()
-  if (evidence.demandKeywords.length === 0 && evidence.supplyListings.length === 0) {
+  if (
+    options.allowEmptyEvidence !== true
+    && evidence.demandKeywords.length === 0
+    && evidence.supplyListings.length === 0
+  ) {
     return '保管できる実測データがまだありません。3「Etsy公式」かEverBee確認を実行してください。'
   }
   return ''
@@ -1728,17 +1733,21 @@ async function saveEvidenceArchive(options = {}) {
     clearTimeout(evidenceAutoArchiveTimer)
     evidenceAutoArchiveTimer = null
   }
-  const blocked = evidenceArchiveBlockReason()
+  const blocked = evidenceArchiveBlockReason({
+    allowEmptyEvidence: options.allowEmptyEvidence === true,
+  })
   if (blocked) {
     if (!automatic) elements.evidenceArchiveStatus.textContent = blocked
-    return
+    return false
   }
   elements.evidenceArchiveBtn.disabled = true
   try {
-    const record = evidenceArchiveRecord()
+    const record = options.record && typeof options.record === 'object'
+      ? options.record
+      : evidenceArchiveRecord()
     if (hasArchivedEvidenceRecord(record)) {
       if (!automatic) elements.evidenceArchiveStatus.textContent = '同じ調査内容はすでに保管済みです。'
-      return
+      return true
     }
     const response = await fetch('/market-finder/archive', {
       method: 'POST',
@@ -1753,8 +1762,10 @@ async function saveEvidenceArchive(options = {}) {
     ]
     elements.evidenceArchiveStatus.textContent = `${automatic ? '自動保管' : '保管'}: ${name} / 検索語${record.demandKeywords.length}件、商品${record.supplyListings.length}件。`
     renderModifierEvidence()
+    return true
   } catch (error) {
     elements.evidenceArchiveStatus.textContent = `${automatic ? '自動保管' : '保管'}に失敗しました: ${error instanceof Error ? error.message : String(error)}`
+    return false
   } finally {
     elements.evidenceArchiveBtn.disabled = false
   }
@@ -2435,7 +2446,7 @@ function ingestBroadSnippetsFromExtensionState(extensionState) {
   }
 }
 
-function applyBroadHintsToSeeds() {
+async function applyBroadHintsToSeeds() {
   const selected = Array.from(elements.broadHintList.querySelectorAll('input:checked'))
     .map((input) => normalizePhrase(input.value))
     .filter(Boolean)
@@ -2445,7 +2456,7 @@ function applyBroadHintsToSeeds() {
     return
   }
 
-  if (!prepareForNewCandidateDiscovery()) return
+  if (!await prepareForNewCandidateDiscovery()) return
   const merged = cleanKeywordList([
     ...elements.seedInput.value.split(/\r?\n|,/),
     ...selected,
@@ -7887,8 +7898,8 @@ function fillTrendSample() {
   setTrendStatus('サンプルの流行語を入れました。まだ候補一覧には入っていません。', 'warn')
 }
 
-function applyTrendScoutTerms() {
-  if (!prepareForNewCandidateDiscovery()) return
+async function applyTrendScoutTerms() {
+  if (!await prepareForNewCandidateDiscovery()) return
   const count = trendScoutTerms().length
   generateCandidates()
   const made = state.candidates.length
@@ -7902,23 +7913,36 @@ function applyTrendScoutTerms() {
     : `流行語なしで調査候補を${made}件作りました。次は「Etsy公式確認を自動実行」です。`, 'ready')
 }
 
-function preserveTerminalMultiAngleEvidenceForNewDiscovery() {
+async function preserveTerminalMultiAngleEvidenceForNewDiscovery() {
   const exploration = createMultiAngleExplorationState(state.multiAngleExploration)
-  if (!['winner-found', 'exhausted', 'stopped'].includes(exploration.status)) return
   const record = evidenceArchiveRecord()
-  if (hasArchivedEvidenceRecord(record)) return
-  state.evidenceArchives = [...state.evidenceArchives, record]
+  const result = await persistTerminalMultiAngleEvidenceBeforeReset({
+    exploration,
+    archiveRecord: record,
+    hasArchivedRecord: hasArchivedEvidenceRecord,
+    persistArchiveRecord: (terminalRecord) => saveEvidenceArchive({
+      automatic: true,
+      allowEmptyEvidence: true,
+      record: terminalRecord,
+    }),
+  })
+  if (result.ok) return true
+  const message = '前回の連続探索結果を保存できませんでした。結果は消していません。ローカルサーバーを確認して、もう一度「候補を自動で探す」を押してください。'
+  elements.evidenceArchiveStatus.textContent = message
+  setTrendStatus(message, 'warn')
+  setSimpleStatus(message)
+  return false
 }
 
-function prepareForNewCandidateDiscovery() {
+async function prepareForNewCandidateDiscovery() {
+  if (
+    state.researchRows.length > 0
+    && !confirmExportBeforeClearingResults({ scope: 'all', label: '前回のeRank・Etsy・EverBee結果' })
+  ) return false
+  const terminalEvidencePersisted = await preserveTerminalMultiAngleEvidenceForNewDiscovery()
+  if (!terminalEvidencePersisted) return false
   state.acceptExtensionResults = false
-  if (state.researchRows.length > 0) {
-    if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回のeRank・Etsy・EverBee結果' })) return false
-    preserveTerminalMultiAngleEvidenceForNewDiscovery()
-    clearResearchResults('all')
-  } else {
-    preserveTerminalMultiAngleEvidenceForNewDiscovery()
-  }
+  if (state.researchRows.length > 0) clearResearchResults('all')
   const event = selectedEvent()
   const category = selectedCategory()
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
@@ -7978,7 +8002,7 @@ function appendTrendScoutCandidates(candidates) {
 }
 
 async function collectTrendScoutTerms() {
-  if (!prepareForNewCandidateDiscovery()) return
+  if (!await prepareForNewCandidateDiscovery()) return
   autoSelectBuyerIdentities({ persist: false })
   const originalLabel = elements.trendAutoBtn.textContent
   state.lastTrendRunStartedAt = new Date().toISOString()

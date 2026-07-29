@@ -759,6 +759,81 @@ test('explicit normal discovery releases terminal context while selector changes
   assert.deepEqual(afterAction.evidenceArchives, archived)
 })
 
+test('persists terminal evidence once before allowing an explicit new cycle', async () => {
+  assert.equal(
+    typeof multiAngleApi.persistTerminalMultiAngleEvidenceBeforeReset,
+    'function',
+  )
+  const exploration = createMultiAngleExplorationState({
+    status: 'winner-found',
+    activeEventId: 'custom-event',
+    categoryId: 'mug',
+    eventSnapshot: {
+      id: 'custom-event',
+      label: 'Alpha Launch',
+      searchTerm: 'alpha launch',
+    },
+  })
+  const archiveRecord = {
+    runId: 'alpha-terminal',
+    eventId: 'custom-event',
+    categoryId: 'mug',
+    eventSnapshot: exploration.eventSnapshot,
+  }
+  const persistedRecords = []
+  let persistCalls = 0
+  const persistArchiveRecord = async (record) => {
+    persistCalls += 1
+    persistedRecords.push(JSON.parse(JSON.stringify(record)))
+    return true
+  }
+  const hasArchivedRecord = (record) => persistedRecords.some(
+    (persisted) => persisted.runId === record.runId,
+  )
+
+  const first = await multiAngleApi.persistTerminalMultiAngleEvidenceBeforeReset({
+    exploration,
+    archiveRecord,
+    hasArchivedRecord,
+    persistArchiveRecord,
+  })
+  const second = await multiAngleApi.persistTerminalMultiAngleEvidenceBeforeReset({
+    exploration,
+    archiveRecord,
+    hasArchivedRecord,
+    persistArchiveRecord,
+  })
+  const reloadedRecords = JSON.parse(JSON.stringify(persistedRecords))
+
+  assert.deepEqual(first, { ok: true, persisted: true })
+  assert.deepEqual(second, { ok: true, persisted: false })
+  assert.equal(persistCalls, 1)
+  assert.deepEqual(reloadedRecords, [archiveRecord])
+})
+
+test('keeps terminal exploration intact when its archive cannot be persisted', async () => {
+  const exploration = createMultiAngleExplorationState({
+    status: 'exhausted',
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    winnerKeywords: [],
+  })
+  const before = JSON.parse(JSON.stringify(exploration))
+  const result = await multiAngleApi.persistTerminalMultiAngleEvidenceBeforeReset({
+    exploration,
+    archiveRecord: { runId: 'failed-terminal' },
+    hasArchivedRecord: () => false,
+    persistArchiveRecord: async () => false,
+  })
+
+  assert.deepEqual(result, {
+    ok: false,
+    persisted: false,
+    error: 'archive-persist-failed',
+  })
+  assert.deepEqual(exploration, before)
+})
+
 test('reload leaves idle and terminal multi-angle states terminal', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 

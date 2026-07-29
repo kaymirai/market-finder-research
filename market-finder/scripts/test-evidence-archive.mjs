@@ -50,7 +50,12 @@ test('stores research evidence on disk and lists it back', async (t) => {
   const record = {
     version: 1,
     categoryId: 'shirt',
-    eventId: 'halloween',
+    eventId: 'custom-event',
+    eventSnapshot: {
+      id: 'custom-event',
+      label: 'Alpha Launch',
+      searchTerm: 'alpha launch',
+    },
     demandKeywords: [{ keyword: 'halloween nurse shirt', etsySearches30d: 1300 }],
     supplyListings: [{ title: 'NICU Nurse Halloween Sweatshirt', monthlySales: 4 }],
     multiAngleExploration: {
@@ -67,11 +72,12 @@ test('stores research evidence on disk and lists it back', async (t) => {
   })
   assert.equal(saved.status, 200)
   const { name } = await saved.json()
-  assert.match(name, /shirt-halloween\.json$/)
+  assert.match(name, /shirt-custom-event\.json$/)
 
   // The stored file has to be readable back through the same static route the app fetches.
   const fetched = await (await fetch(`http://127.0.0.1:${port}/market-finder/archive/${name}`)).json()
   assert.deepEqual(fetched.demandKeywords, record.demandKeywords)
+  assert.deepEqual(fetched.eventSnapshot, record.eventSnapshot)
   assert.deepEqual(fetched.multiAngleExploration.exhaustedAngles, [
     'demand-neighborhood',
     'attribute-combination',
@@ -199,7 +205,8 @@ test('feeds versioned contextual archives into the next candidate search', () =>
   assert.match(app, /function scheduleEvidenceAutoArchive\(/)
   assert.match(app, /function addResearchRows\(rows\)[\s\S]{0,260}scheduleEvidenceAutoArchive\(\)/)
   assert.match(app, /自動保管/)
-  assert.match(app, /function evidenceArchiveBlockReason\(\)/)
+  assert.match(app, /function evidenceArchiveBlockReason\(options = \{\}\)/)
+  assert.match(app, /const record = options\.record && typeof options\.record === 'object'/)
   assert.match(app, /file:\/\/ で開いています/)
   assert.match(app, /elements\.evidenceArchiveBtn\.disabled = Boolean\(blocked\)/)
   assert.match(app, /filesToLoad = \(files \?\? \[\]\)\.slice\(-EVIDENCE_ARCHIVE_LOAD_LIMIT\)/)
