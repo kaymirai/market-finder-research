@@ -203,7 +203,7 @@ test('feeds versioned contextual archives into the next candidate search', () =>
   assert.match(app, /function evidenceRecordFingerprint\(/)
   assert.match(app, /runId: String\(record\.runId \?\? ''\)/)
   assert.match(app, /function scheduleEvidenceAutoArchive\(/)
-  assert.match(app, /function addResearchRows\(rows\)[\s\S]{0,260}scheduleEvidenceAutoArchive\(\)/)
+  assert.match(app, /function addResearchRows\(rows\)[\s\S]{0,650}scheduleEvidenceAutoArchive\(\)/)
   assert.match(app, /自動保管/)
   assert.match(app, /function evidenceArchiveBlockReason\(options = \{\}\)/)
   assert.match(app, /const record = options\.record && typeof options\.record === 'object'/)

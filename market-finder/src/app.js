@@ -40,7 +40,6 @@ import {
 } from '../../shared/market-keyword-engine/index.js?v=20260726-12'
 import {
   createMemoizedAnalysis,
-  mergeRowsByKey,
 } from './research-performance.js?v=20260720-1'
 import {
   buildEtsyCandidatesFromPool,
@@ -167,6 +166,8 @@ import {
   prepareNewMultiAngleCycle,
   recordMultiAngleBatch,
   recordMultiAngleFailure,
+  mergeResearchRowsByContext,
+  researchRowContextKey,
   researchRowForMultiAngleCandidate,
   resolveMultiAngleCandidateResearchContext,
   resolveMultiAngleExportResearchContext,
@@ -178,7 +179,7 @@ import {
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-14'
+} from './multi-angle-exploration.js?v=20260730-15'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -1501,6 +1502,10 @@ function currentResearchAnalysis() {
 function modifierEvidenceInput() {
   const plan = state.marketplaceInsightPlan
   const planItems = Array.isArray(plan?.items) ? plan.items : []
+  const researchContext = activeResearchContext()
+  const contextualResearchRows = state.researchRows.filter((row) => (
+    candidateMatchesResearchContext(row, researchContext, { requireContext: true })
+  ))
   const demandKeywords = [
     ...planItems
       .filter((item) => item.status === 'completed')
@@ -1511,7 +1516,7 @@ function modifierEvidenceInput() {
     )),
   ].filter((row) => normalizePhrase(row?.keyword))
 
-  const supplyListings = state.researchRows.flatMap((row) => (
+  const supplyListings = contextualResearchRows.flatMap((row) => (
     Array.isArray(row.productRows) ? row.productRows : []
   )).map((product) => ({
     title: product?.title ?? product?.label,
@@ -1564,6 +1569,9 @@ function currentEvidenceRunId() {
 function evidenceArchiveRecord() {
   const researchContext = activeResearchContext()
   const evidence = modifierEvidenceInput()
+  const contextualResearchRows = state.researchRows.filter((row) => (
+    candidateMatchesResearchContext(row, researchContext, { requireContext: true })
+  ))
   const capturedAt = new Date().toISOString()
   const runId = currentEvidenceRunId()
   const previousNodes = state.evidenceArchives
@@ -1595,7 +1603,7 @@ function evidenceArchiveRecord() {
     multiAngleExploration: createMultiAngleExplorationState(state.multiAngleExploration),
     explorationProvenance: state.multiAngleExploration.provenance,
     drilldownNodes: mergeNicheDrilldownNodes(previousNodes, buildNicheDrilldownGraph({
-      rows: state.researchRows,
+      rows: contextualResearchRows,
       candidates: [...state.candidateCatalog, ...drilldown.candidates],
       categoryId: researchContext.categoryId,
       eventId: researchContext.eventId,
@@ -1997,9 +2005,33 @@ function appendSeedLine(input, phrase) {
   resetCandidatesForInputChange()
 }
 
-function findResearchRow(keyword) {
+function findResearchRow(keyword, contextCandidate = null) {
   const normalized = normalizePhrase(keyword)
-  return state.researchRows.find((row) => normalizePhrase(row.keyword) === normalized)
+  const keywordRows = state.researchRows.filter(
+    (row) => normalizePhrase(row.keyword) === normalized,
+  )
+  const multiAngleCandidate = contextCandidate ?? currentMultiAngleBatchCandidates()
+    .find((candidate) => normalizePhrase(candidate.keyword) === normalized)
+  if (multiAngleCandidate) {
+    return researchRowForMultiAngleCandidate(keywordRows, multiAngleCandidate)
+  }
+  const researchContext = activeResearchContext()
+  return keywordRows.find((row) => (
+    row.resultLane !== 'seasonal-reference'
+    && row.intentTrack !== 'seasonal-reference'
+    && candidateMatchesResearchContext(row, researchContext, { requireContext: true })
+  )) ?? keywordRows.find((row) => (
+    !Object.hasOwn(row, 'researchEventId')
+    && !Object.hasOwn(row, 'researchCategoryId')
+  ))
+}
+
+function isCurrentResearchRow(row = {}) {
+  const current = findResearchRow(row.keyword)
+  return Boolean(
+    current
+    && researchRowContextKey(current) === researchRowContextKey(row)
+  )
 }
 
 function readyKeywords() {
@@ -2130,7 +2162,7 @@ function erankExploreRows() {
 }
 
 function erankRowsWithOpportunity() {
-  const rows = currentResearchAnalysis().erankRows
+  const rows = currentResearchAnalysis().erankRows.filter(isCurrentResearchRow)
   const batchKeywords = activeCrossNicheBatchKeywords()
   if (batchKeywords.size === 0) return rows
   return rows.filter((row) => [
@@ -3133,7 +3165,7 @@ function erankCaptureStateRows() {
     ? normalizePhrase(state.extensionState.currentKeyword)
     : ''
   return state.erankQueryPlan.flatMap((item) => {
-    const row = state.researchRows.find((candidate) => normalizePhrase(candidate.keyword) === normalizePhrase(item.query))
+    const row = findResearchRow(item.query)
     const uiState = deriveErankCaptureUiState(row, {
       active: Boolean(activeKeyword) && activeKeyword === normalizePhrase(item.query),
     })
@@ -4528,19 +4560,19 @@ function currentDesignClusterPlan() {
 
 function finalEvidenceRows() {
   const analysis = currentResearchAnalysis()
-  const scoredByKeyword = new Map(analysis.scoredRows.map((row) => [normalizePhrase(row.keyword), row]))
-  const everbeeByKeyword = new Map(everbeeResultRows().map((row) => [normalizePhrase(row.score.normalized.keyword), row]))
+  const currentEverbeeRows = everbeeResultRows()
+  const everbeeByContext = new Map(
+    currentEverbeeRows.map((row) => [researchRowContextKey(row), row]),
+  )
   const currentMultiAngleCandidates = currentMultiAngleBatchCandidates()
     .filter((candidate) => candidate.resultLane !== 'seasonal-reference')
-  const multiAngleCandidateByKeyword = new Map(
-    currentMultiAngleCandidates.map((candidate) => [normalizePhrase(candidate.keyword), candidate]),
-  )
   const captureByKeyword = new Map(
     erankCaptureStateRows()
       .filter((row) => hasCollectedEvidence({ ...row, erankCaptureStatus: row.status }))
       .map((row) => [normalizePhrase(row.query), row])
   )
   const candidateByKeyword = new Map()
+  const candidateByContext = new Map()
   ;[
     ...state.candidateCatalog,
     ...state.candidates,
@@ -4548,7 +4580,16 @@ function finalEvidenceRows() {
     ...currentMultiAngleCandidates,
   ].forEach((candidate) => {
     const keyword = normalizePhrase(candidate?.keyword)
-    if (keyword) candidateByKeyword.set(keyword, { ...candidateByKeyword.get(keyword), ...candidate, keyword })
+    if (!keyword) return
+    const normalizedCandidate = { ...candidate, keyword }
+    candidateByKeyword.set(keyword, { ...candidateByKeyword.get(keyword), ...normalizedCandidate })
+    const contextKey = researchRowContextKey(normalizedCandidate)
+    if (!contextKey.includes(':legacy')) {
+      candidateByContext.set(contextKey, {
+        ...candidateByContext.get(contextKey),
+        ...normalizedCandidate,
+      })
+    }
   })
   const eligibleForEtsy = new Set(
     etsyValidationCandidates().map((candidate) => normalizePhrase(candidate.keyword ?? candidate.query))
@@ -4579,21 +4620,65 @@ function finalEvidenceRows() {
     hasSelection,
     fallbackLimit: ERANK_RESEARCH_LIMIT,
   }))
+  currentMultiAngleCandidates.forEach((candidate) => {
+    const keyword = normalizePhrase(candidate.keyword)
+    if (keyword) keywords.add(keyword)
+  })
+  const evidenceSourceByContext = new Map()
+  analysis.scoredRows.forEach((row) => {
+    const keyword = normalizePhrase(row.keyword)
+    if (!keywords.has(keyword)) return
+    const contextKey = researchRowContextKey(row)
+    evidenceSourceByContext.set(contextKey, {
+      keyword,
+      contextKey,
+      raw: row,
+      scoredRow: row,
+      candidate: candidateByContext.get(contextKey),
+    })
+  })
+  currentMultiAngleCandidates.forEach((candidate) => {
+    const keyword = normalizePhrase(candidate.keyword)
+    if (!keywords.has(keyword)) return
+    const scoredRow = researchRowForMultiAngleCandidate(analysis.scoredRows, candidate)
+    const raw = scoredRow
+      ?? researchRowForMultiAngleCandidate(state.researchRows, candidate)
+      ?? {
+        keyword,
+        researchEventId: candidate.eventId,
+        researchCategoryId: candidate.categoryId,
+        intentTrack: candidate.resultLane === 'evergreen' ? 'evergreen' : 'event-specific',
+        resultLane: candidate.resultLane,
+      }
+    const contextKey = researchRowContextKey(raw)
+    evidenceSourceByContext.set(contextKey, {
+      ...evidenceSourceByContext.get(contextKey),
+      keyword,
+      contextKey,
+      raw,
+      scoredRow,
+      candidate,
+    })
+  })
+  keywords.forEach((keyword) => {
+    const alreadyIncluded = [...evidenceSourceByContext.values()]
+      .some((source) => source.keyword === keyword)
+    if (alreadyIncluded) return
+    const raw = findResearchRow(keyword) ?? { keyword }
+    const contextKey = researchRowContextKey(raw)
+    evidenceSourceByContext.set(contextKey, {
+      keyword,
+      contextKey,
+      raw,
+      scoredRow: analysis.scoredRows.find(
+        (row) => researchRowContextKey(row) === contextKey,
+      ),
+      candidate: candidateByContext.get(contextKey) ?? candidateByKeyword.get(keyword),
+    })
+  })
+  const evidenceSources = [...evidenceSourceByContext.values()]
   const etsyConfirmationKeywords = new Set(selectEtsyConfirmationKeywords(
-    [...keywords].map((keyword) => {
-      const candidate = candidateByKeyword.get(keyword) ?? {}
-      const multiAngleCandidate = multiAngleCandidateByKeyword.get(keyword)
-      const raw = multiAngleCandidate
-        ? researchRowForMultiAngleCandidate(analysis.scoredRows, multiAngleCandidate)
-          ?? researchRowForMultiAngleCandidate(state.researchRows, multiAngleCandidate)
-          ?? {
-            keyword,
-            researchEventId: multiAngleCandidate.eventId,
-            researchCategoryId: multiAngleCandidate.categoryId,
-            intentTrack: multiAngleCandidate.resultLane === 'evergreen' ? 'evergreen' : 'event-specific',
-            resultLane: multiAngleCandidate.resultLane,
-          }
-        : scoredByKeyword.get(keyword) ?? findResearchRow(keyword) ?? { keyword }
+    evidenceSources.map(({ keyword, raw, candidate = {} }) => {
       return {
         keyword,
         queryStrategy: candidate.queryStrategy ?? raw.queryStrategy,
@@ -4603,36 +4688,33 @@ function finalEvidenceRows() {
     8,
   ))
 
-  const rows = [...keywords].map((keyword) => {
-    const multiAngleCandidate = multiAngleCandidateByKeyword.get(keyword)
-    const scoredRow = multiAngleCandidate
-      ? researchRowForMultiAngleCandidate(analysis.scoredRows, multiAngleCandidate)
-      : scoredByKeyword.get(keyword)
-    const everbeeRow = multiAngleCandidate
-      ? researchRowForMultiAngleCandidate(everbeeResultRows(), multiAngleCandidate)
-      : everbeeByKeyword.get(keyword)
-    const candidate = multiAngleCandidate ?? candidateByKeyword.get(keyword) ?? {}
-    const capture = captureByKeyword.get(keyword) ?? {}
-    const raw = scoredRow
-      ?? (multiAngleCandidate
-        ? researchRowForMultiAngleCandidate(state.researchRows, multiAngleCandidate)
-          ?? {
-            keyword,
-            researchEventId: multiAngleCandidate.eventId,
-            researchCategoryId: multiAngleCandidate.categoryId,
-            intentTrack: multiAngleCandidate.resultLane === 'evergreen' ? 'evergreen' : 'event-specific',
-            resultLane: multiAngleCandidate.resultLane,
-          }
-        : findResearchRow(keyword) ?? { keyword })
+  const activeContext = activeResearchContext()
+  const rows = evidenceSources.map((source) => {
+    const { keyword, contextKey, raw } = source
+    const scoredRow = source.scoredRow
+    const everbeeRow = everbeeByContext.get(contextKey)
+    const candidate = source.candidate ?? candidateByContext.get(contextKey) ?? {}
+    const hasExplicitContext = Object.hasOwn(raw, 'researchEventId')
+      || Object.hasOwn(raw, 'researchCategoryId')
+    const currentContextCompatible = !hasExplicitContext || candidateMatchesResearchContext(
+      raw,
+      activeContext,
+      { requireContext: true },
+    )
+    const capture = currentContextCompatible ? captureByKeyword.get(keyword) ?? {} : {}
     const normalized = scoredRow?.score?.normalized ?? raw
     const captureUi = deriveErankCaptureUiState(raw, {
-      active: Boolean(state.extensionState?.active && normalizePhrase(state.extensionState.currentKeyword) === keyword),
+      active: Boolean(
+        currentContextCompatible
+        && state.extensionState?.active
+        && normalizePhrase(state.extensionState.currentKeyword) === keyword
+      ),
     })
     const erankAttempted = captureUi.status !== 'unsearched' || Boolean(capture.erankAttemptedAt)
     const erankDemandUnknown = captureUi.status === 'no-data'
       || (captureUi.status === 'partial'
         && ![raw.erankSearchVolume, raw.erankClicks].some((value) => String(value ?? '').trim() !== ''))
-    const planItem = marketplaceByKeyword.get(keyword)
+    const planItem = currentContextCompatible ? marketplaceByKeyword.get(keyword) : undefined
     const etsyChecked = isEtsyEvidenceChecked(raw, planItem)
     const hasEtsyData = rowHasEtsyMarketplaceInput(raw)
       || [planItem?.result?.etsySearches30d, planItem?.result?.etsyListings]
@@ -4654,13 +4736,13 @@ function finalEvidenceRows() {
       hasEverbeeData,
       hasEtsyData,
       etsyChecked,
-      eligibleForEtsy: eligibleForEtsy.has(keyword),
-      selectedForEtsyConfirmation: etsyConfirmationKeywords.has(keyword),
+      eligibleForEtsy: currentContextCompatible && eligibleForEtsy.has(keyword),
+      selectedForEtsyConfirmation: currentContextCompatible && etsyConfirmationKeywords.has(keyword),
     })
 
     const excluded = Boolean(hasEverbeeData && scoredRow?.score?.opportunityLabel === 'D')
       || Boolean(erankAttempted && !erankDemandUnknown && !failed && !hasEverbeeData
-        && !hasEtsyData && !eligibleForEtsy.has(keyword))
+        && !hasEtsyData && !(currentContextCompatible && eligibleForEtsy.has(keyword)))
     const evidenceState = deriveFinalEvidenceState({
       nextStage,
       erankStatus: erankDemandUnknown ? 'unknown' : captureUi.status,
@@ -4680,7 +4762,7 @@ function finalEvidenceRows() {
 
     return {
       keyword,
-      key: keyword,
+      key: contextKey,
       raw,
       normalized,
       everbeeRow,
@@ -4733,7 +4815,7 @@ function renderFinalEvidenceMatrixRow(row) {
     ? `<small>探索優先度 ${escapeHtml(row.scoreState.explorationPriority)}</small>`
     : row.scoreState.type === 'reference' ? '<small>売上確認前</small>' : ''
   const action = row.evidenceState.actionLabel
-    ? `<button type="button" class="text-btn final-evidence-action" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
+    ? `<button type="button" class="text-btn final-evidence-action" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}" data-final-verify-key="${escapeHtml(row.key)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
     : ''
   const topShare = data.topSalesShare === null || data.topSalesShare === undefined
     ? data.topSalesShare
@@ -4781,7 +4863,7 @@ function renderFinalEvidenceDetail(row) {
   if (row?.everbeeRow) return renderEverbeeDetail(row.everbeeRow)
   if (!row) return '<div class="empty-state">表示する候補がありません。</div>'
   const nextAction = row.evidenceState.actionLabel
-    ? `<button type="button" class="primary-btn" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
+    ? `<button type="button" class="primary-btn" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}" data-final-verify-key="${escapeHtml(row.key)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
     : ''
   return `
     <article class="result-detail-card final-evidence-detail">
@@ -5322,10 +5404,19 @@ function pendingEvidenceRows(rows = finalEvidenceRows(), allowedKeywords = []) {
       .map(normalizePhrase)
       .filter(Boolean),
   )
+  const batchCandidates = multiAngleSearchIsRunning()
+    ? currentMultiAngleBatchCandidates()
+    : []
   return rows.filter((row) => (
     row.evidenceState.status === 'pending'
     && isAutomatableEvidenceRow(row)
     && (allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword)))
+    && (
+      batchCandidates.length === 0
+      || batchCandidates.some(
+        (candidate) => researchRowForMultiAngleCandidate([row], candidate),
+      )
+    )
   ))
 }
 
@@ -6229,10 +6320,20 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '',
       .map(normalizePhrase)
       .filter(Boolean),
   )
+  const batchCandidates = multiAngleSearchIsRunning()
+    ? currentMultiAngleBatchCandidates()
+    : []
   const rows = finalEvidenceRows().filter((row) => (
-    allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword))
+    (allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword)))
+    && (
+      batchCandidates.length === 0
+      || batchCandidates.some(
+        (candidate) => researchRowForMultiAngleCandidate([row], candidate),
+      )
+    )
   ))
   const requested = normalizePhrase(requestedKeyword)
+  const requestedContextKey = String(options.requestedContextKey ?? '').trim()
   const stageOrder = ['pending-etsy', 'pending-everbee', 'pending-erank']
   const batchLimit = Math.max(1, Math.min(
     FINAL_EVIDENCE_BATCH_SIZE,
@@ -6242,7 +6343,10 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '',
   let batch = []
 
   if (requested) {
-    const row = rows.find((item) => item.keyword === requested)
+    const row = rows.find((item) => (
+      item.keyword === requested
+      && (!requestedContextKey || item.key === requestedContextKey)
+    ))
     if (row && (row.evidenceState.status === 'pending' || row.evidenceState.status === 'failed')) {
       stage = stage || row.evidenceState.nextStage
       batch = [row]
@@ -6302,6 +6406,7 @@ function handleResultListClick(event) {
     verifyPendingEvidence(
       verifyButton.dataset.finalVerifyStage,
       verifyButton.dataset.finalVerifyKeyword,
+      { requestedContextKey: verifyButton.dataset.finalVerifyKey },
     ).catch((error) => setSimpleStatus(friendlyExtensionError(error)))
     return
   }
@@ -6480,7 +6585,7 @@ function researchQueueRows(stageId = state.consoleUi.activeStage) {
   }
 
   if (stageId === 'erank') {
-    const completed = erankResultRows().map((row) => ({
+    const completed = erankResultRows().filter(isCurrentResearchRow).map((row) => ({
       keyword: row.keyword,
       ...deriveErankCaptureUiState(findResearchRow(row.keyword) ?? row, {
         active: Boolean(state.extensionState?.active)
@@ -6519,7 +6624,7 @@ function researchQueueRows(stageId = state.consoleUi.activeStage) {
   }
 
   if (stageId === 'everbee') {
-    const completed = everbeeResultRows()
+    const completed = everbeeResultRows().filter(isCurrentResearchRow)
     const completedByKeyword = new Map(
       completed.map((row) => [normalizePhrase(row.score?.normalized?.keyword ?? row.keyword), row])
     )
@@ -7092,6 +7197,12 @@ function buildMergedResearchRow(existingRow, row, keyword) {
   )
   const researchEventId = importedResearchContext.eventId
   const researchCategoryId = importedResearchContext.categoryId
+  const resultLane = String(
+    row.resultLane
+      ?? existingRow?.resultLane
+      ?? candidate?.resultLane
+      ?? (researchEventId ? 'event' : 'evergreen'),
+  ).trim()
   const intentTrack = classifyEventMarketTrack(keyword, {
     ...researchOptions,
     eventId: researchEventId,
@@ -7134,6 +7245,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     occasion: String(row.occasion ?? existingRow?.occasion ?? candidate?.occasion ?? ''),
     personalization: String(row.personalization ?? existingRow?.personalization ?? candidate?.personalization ?? ''),
     intentTrack,
+    resultLane,
     historyClusterKey,
     listingsAnalyzed: keepExistingWhenBlank('listingsAnalyzed'),
     topMonthlySales: keepExistingWhenBlank('topMonthlySales'),
@@ -7202,9 +7314,14 @@ function buildMergedResearchRow(existingRow, row, keyword) {
 }
 
 function addResearchRows(rows) {
-  state.researchRows = mergeRowsByKey(state.researchRows, rows, {
-    keyOf: (row) => normalizePhrase(row.keyword),
-    merge: buildMergedResearchRow,
+  state.researchRows = mergeResearchRowsByContext(state.researchRows, rows, {
+    contextualize: (row) => buildMergedResearchRow(null, row, normalizePhrase(row.keyword)),
+    keyOf: researchRowContextKey,
+    merge: (existingRow, row) => buildMergedResearchRow(
+      existingRow,
+      row,
+      normalizePhrase(row.keyword),
+    ),
   })
   syncResearchMarketHistory()
   scheduleEvidenceAutoArchive()
@@ -7560,9 +7677,19 @@ function evidenceCsvValue(value, checked = false) {
   return metric.kind === 'pending' ? '' : metric.text
 }
 
-function finalEvidenceMetadataCsvValues(row, evidenceByKeyword) {
-  const keyword = normalizePhrase(row?.keyword ?? row?.query)
-  const evidence = evidenceByKeyword.get(keyword)
+function researchExportRowContextKey(row = {}) {
+  const exportContext = researchExportContextForRow(row)
+  return researchRowContextKey({
+    ...row,
+    keyword: row?.keyword ?? row?.query,
+    researchEventId: exportContext.eventId,
+    researchCategoryId: exportContext.categoryId,
+    resultLane: row.resultLane ?? (exportContext.eventId ? 'event' : 'evergreen'),
+  })
+}
+
+function finalEvidenceMetadataCsvValues(row, evidenceByContext) {
+  const evidence = evidenceByContext.get(researchExportRowContextKey(row))
   const captureStatus = String(row?.erankCaptureStatus ?? '').trim()
     || (evidence?.erankChecked ? 'captured' : '')
   return [
@@ -7578,7 +7705,9 @@ function exportErankCsv() {
   const captureStates = erankCaptureStateRows()
     .filter((row) => !rowHasErankInput(findResearchRow(row.query) ?? {}))
   if (rows.length === 0 && captureStates.length === 0) return
-  const evidenceByKeyword = new Map(finalEvidenceRows().map((row) => [row.keyword, row]))
+  const evidenceByContext = new Map(
+    finalEvidenceRows().map((row) => [researchRowContextKey(row), row]),
+  )
 
   const header = [
     'Source Type',
@@ -7638,7 +7767,7 @@ function exportErankCsv() {
       row.crossNicheParent ?? '',
       row.crossNicheDepth ?? '',
       row.notes ?? '',
-      ...finalEvidenceMetadataCsvValues(row, evidenceByKeyword),
+      ...finalEvidenceMetadataCsvValues(row, evidenceByContext),
       ...researchMetadataCsvValues(row),
     ].map(csvCell).join(',')
   })
@@ -7667,7 +7796,7 @@ function exportErankCsv() {
         ...row,
         keyword: row.query,
         erankCaptureStatus: row.status,
-      }, evidenceByKeyword),
+      }, evidenceByContext),
       ...researchMetadataCsvValues({
         ...row,
         keyword: row.query,
@@ -7693,7 +7822,9 @@ function exportDesignShortlistCsv() {
 
 function exportResultRowsCsv(rows, fileBaseName) {
   if (rows.length === 0) return
-  const evidenceByKeyword = new Map(finalEvidenceRows().map((row) => [row.keyword, row]))
+  const evidenceByContext = new Map(
+    finalEvidenceRows().map((row) => [researchRowContextKey(row), row]),
+  )
 
   const header = [
     'Rank',
@@ -7837,7 +7968,7 @@ function exportResultRowsCsv(rows, fileBaseName) {
       scoreReasonLabels(row.score).join(' / '),
       row.score.exclusionReasons.join(' / '),
       row.notes ?? '',
-      ...finalEvidenceMetadataCsvValues(row, evidenceByKeyword),
+      ...finalEvidenceMetadataCsvValues(row, evidenceByContext),
       ...researchMetadataCsvValues(row),
     ].map(csvCell).join(',')
   })

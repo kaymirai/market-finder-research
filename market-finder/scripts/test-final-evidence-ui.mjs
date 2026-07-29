@@ -565,6 +565,38 @@ test('scopes current multi-angle evidence rows before pending and completion dec
   assert.match(completeBody, /researchRowForMultiAngleCandidate\(/)
 })
 
+test('keeps final evidence and CSV metadata indexed by research context instead of keyword alone', () => {
+  const finalRowsBody = app.match(/function finalEvidenceRows\(\) \{([\s\S]*?)\n\}\n\nfunction finalEvidenceMetric/)?.[1] ?? ''
+  const erankExportBody = app.match(/function exportErankCsv\(\) \{([\s\S]*?)\n\}\n\nfunction exportStep4Csv/)?.[1] ?? ''
+  const resultExportBody = app.match(/function exportResultRowsCsv\([^)]*\) \{([\s\S]*?)\n\}\n\nfunction exportAvailableResearchCsv/)?.[1] ?? ''
+
+  assert.match(finalRowsBody, /researchRowContextKey\(/)
+  assert.match(finalRowsBody, /key:\s*contextKey/)
+  assert.doesNotMatch(finalRowsBody, /const scoredByKeyword = new Map/)
+  assert.match(erankExportBody, /evidenceByContext/)
+  assert.match(resultExportBody, /evidenceByContext/)
+  assert.doesNotMatch(erankExportBody, /const evidenceByKeyword = new Map/)
+  assert.doesNotMatch(resultExportBody, /const evidenceByKeyword = new Map/)
+})
+
+test('assigns imported batch context before merging research rows', () => {
+  const addRowsBody = app.match(/function addResearchRows\(rows\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(addRowsBody, /mergeResearchRowsByContext\(/)
+  assert.match(addRowsBody, /contextualize:\s*\(row\)\s*=>\s*buildMergedResearchRow\(null,\s*row/)
+  assert.match(addRowsBody, /keyOf:\s*researchRowContextKey/)
+})
+
+test('archives learning rows only from the active research context', () => {
+  const modifierBody = app.match(/function modifierEvidenceInput\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const archiveBody = app.match(/function evidenceArchiveRecord\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(modifierBody, /candidateMatchesResearchContext\(/)
+  assert.match(modifierBody, /requireContext:\s*true/)
+  assert.match(archiveBody, /contextualResearchRows/)
+  assert.match(archiveBody, /rows:\s*contextualResearchRows/)
+})
+
 test('uses one fixed research context for gates pools resume results and archives', () => {
   const activeContext = app.match(/function activeResearchContext\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   assert.match(app, /function activeResearchContext\(/)

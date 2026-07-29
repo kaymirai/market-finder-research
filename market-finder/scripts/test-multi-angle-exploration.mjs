@@ -1001,6 +1001,126 @@ test('rejects contradictory and seasonal evidence for event and evergreen candid
   )
 })
 
+test('merges research rows only after assigning their exact event category and lane context', () => {
+  assert.equal(typeof multiAngleApi.researchRowContextKey, 'function')
+  assert.equal(typeof multiAngleApi.mergeResearchRowsByContext, 'function')
+  const keyword = 'nurse life shirt'
+  const christmasShirt = {
+    keyword,
+    researchEventId: 'christmas',
+    researchCategoryId: 'shirt',
+    intentTrack: 'event-specific',
+    resultLane: 'event',
+    erankSearchVolume: 100,
+  }
+  const evergreenShirt = {
+    keyword,
+    researchEventId: '',
+    researchCategoryId: 'shirt',
+    intentTrack: 'evergreen',
+    resultLane: 'evergreen',
+    erankSearchVolume: 80,
+  }
+  const legacy = {
+    keyword,
+    erankSearchVolume: 10,
+  }
+  const imported = [{
+    keyword,
+    importContext: 'christmas-shirt',
+    topMonthlySales: 12,
+  }, {
+    keyword,
+    importContext: 'evergreen-shirt',
+    topMonthlySales: 9,
+  }, {
+    keyword,
+    importContext: 'christmas-mug',
+    topMonthlySales: 5,
+  }]
+  const contextualize = (row) => {
+    if (row.importContext === 'evergreen-shirt') {
+      return {
+        ...row,
+        researchEventId: '',
+        researchCategoryId: 'shirt',
+        intentTrack: 'evergreen',
+        resultLane: 'evergreen',
+      }
+    }
+    if (row.importContext === 'christmas-mug') {
+      return {
+        ...row,
+        researchEventId: 'christmas',
+        researchCategoryId: 'mug',
+        intentTrack: 'event-specific',
+        resultLane: 'event',
+      }
+    }
+    return {
+      ...row,
+      researchEventId: 'christmas',
+      researchCategoryId: 'shirt',
+      intentTrack: 'event-specific',
+      resultLane: 'event',
+    }
+  }
+  const merged = multiAngleApi.mergeResearchRowsByContext(
+    [christmasShirt, evergreenShirt, legacy],
+    imported,
+    {
+      contextualize,
+      merge: (existing, incoming) => ({ ...existing, ...incoming }),
+    },
+  )
+  const restored = JSON.parse(JSON.stringify(merged))
+  const keys = restored.map(multiAngleApi.researchRowContextKey)
+
+  assert.equal(restored.length, 4)
+  assert.equal(new Set(keys).size, 4)
+  assert.equal(
+    restored.find((row) => row.researchEventId === 'christmas' && row.researchCategoryId === 'shirt')
+      .topMonthlySales,
+    12,
+  )
+  assert.equal(
+    restored.find((row) => row.researchEventId === '' && row.researchCategoryId === 'shirt')
+      .topMonthlySales,
+    9,
+  )
+  assert.equal(
+    restored.find((row) => row.researchCategoryId === 'mug').topMonthlySales,
+    5,
+  )
+  assert.equal(restored.filter((row) => !Object.hasOwn(row, 'researchEventId')).length, 1)
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(restored, {
+      keyword,
+      eventId: 'christmas',
+      categoryId: 'shirt',
+      resultLane: 'event',
+    }).topMonthlySales,
+    12,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(restored, {
+      keyword,
+      eventId: '',
+      categoryId: 'shirt',
+      resultLane: 'evergreen',
+    }).topMonthlySales,
+    9,
+  )
+  assert.notEqual(
+    multiAngleApi.researchRowContextKey(christmasShirt),
+    multiAngleApi.researchRowContextKey({
+      ...christmasShirt,
+      intentTrack: 'evergreen',
+      resultLane: 'evergreen',
+    }),
+  )
+})
+
 test('reload leaves idle and terminal multi-angle states terminal', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 

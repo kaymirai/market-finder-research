@@ -4,6 +4,7 @@ import {
   marketplaceInsightPlanForContext,
   normalizeExplorationCandidate,
 } from './multi-angle-candidates.js'
+import { mergeRowsByKey } from './research-performance.js?v=20260720-1'
 
 const VALID_STATUSES = new Set([
   'idle',
@@ -354,21 +355,85 @@ export async function persistTerminalMultiAngleEvidenceBeforeReset({
   }
 }
 
+function explicitResearchContextValue(row = {}, names = []) {
+  const raw = row?.raw && typeof row.raw === 'object' ? row.raw : row
+  const sources = raw === row ? [row] : [raw, row]
+  for (const name of names) {
+    const owner = sources.find((source) => Object.hasOwn(source ?? {}, name))
+    if (owner) {
+      return {
+        explicit: true,
+        value: String(owner[name] ?? '').trim(),
+      }
+    }
+  }
+  return { explicit: false, value: '' }
+}
+
+function normalizedResearchLane(value) {
+  const lane = String(value ?? '').trim().toLowerCase()
+  if (['event', 'event-specific'].includes(lane)) return 'event'
+  if (['evergreen', 'evergreen-adjacent'].includes(lane)) return 'evergreen'
+  if (['seasonal', 'seasonal-reference'].includes(lane)) return 'seasonal'
+  return lane
+}
+
 function researchRowContext(row = {}) {
   const raw = row?.raw && typeof row.raw === 'object' ? row.raw : row
-  const eventOwner = Object.hasOwn(raw, 'researchEventId') ? raw : row
-  const categoryOwner = Object.hasOwn(raw, 'researchCategoryId') ? raw : row
+  const event = explicitResearchContextValue(row, ['researchEventId', 'eventId'])
+  const category = explicitResearchContextValue(row, ['researchCategoryId', 'categoryId'])
+  const intentTrack = String(raw?.intentTrack ?? row?.intentTrack ?? '').trim().toLowerCase()
+  const resultLane = String(raw?.resultLane ?? row?.resultLane ?? '').trim().toLowerCase()
+  const normalizedIntent = normalizedResearchLane(intentTrack)
+  const normalizedResultLane = normalizedResearchLane(resultLane)
+  const lane = normalizedIntent && normalizedResultLane && normalizedIntent !== normalizedResultLane
+    ? `conflict:${normalizedResultLane}:${normalizedIntent}`
+    : normalizedResultLane
+      || normalizedIntent
+      || (event.explicit ? (event.value ? 'event' : 'evergreen') : 'legacy')
   return {
     keyword: normalizeExplorationCandidate({
       keyword: row?.keyword ?? raw?.keyword ?? row?.score?.normalized?.keyword,
     })?.keyword ?? '',
-    eventId: String(eventOwner?.researchEventId ?? '').trim(),
-    categoryId: String(categoryOwner?.researchCategoryId ?? '').trim(),
-    hasEventContext: Object.hasOwn(eventOwner ?? {}, 'researchEventId'),
-    hasCategoryContext: Object.hasOwn(categoryOwner ?? {}, 'researchCategoryId'),
-    intentTrack: String(raw?.intentTrack ?? row?.intentTrack ?? '').trim().toLowerCase(),
-    resultLane: String(raw?.resultLane ?? row?.resultLane ?? '').trim().toLowerCase(),
+    eventId: event.value,
+    categoryId: category.value,
+    hasEventContext: event.explicit,
+    hasCategoryContext: category.explicit,
+    intentTrack,
+    resultLane,
+    lane,
   }
+}
+
+export function researchRowContextKey(row = {}) {
+  const context = researchRowContext(row)
+  if (!context.keyword) return ''
+  const category = context.hasCategoryContext
+    ? `category:${context.categoryId}`
+    : 'category:legacy'
+  const event = context.hasEventContext
+    ? `event:${context.eventId}`
+    : 'event:legacy'
+  return [context.keyword, category, event, `lane:${context.lane}`].join('|')
+}
+
+export function mergeResearchRowsByContext(
+  existingRows = [],
+  incomingRows = [],
+  {
+    contextualize = (row) => row,
+    keyOf = researchRowContextKey,
+    merge = (existing, incoming) => ({ ...existing, ...incoming }),
+  } = {},
+) {
+  const contextualRows = (Array.isArray(incomingRows) ? incomingRows : [])
+    .map((row) => contextualize(row))
+    .filter(Boolean)
+  return mergeRowsByKey(
+    Array.isArray(existingRows) ? existingRows : [],
+    contextualRows,
+    { keyOf, merge },
+  )
 }
 
 export function researchRowForMultiAngleCandidate(rows = [], candidate = {}) {

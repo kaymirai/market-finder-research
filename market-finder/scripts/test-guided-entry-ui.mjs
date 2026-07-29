@@ -128,6 +128,7 @@ test('keeps the EverBee queue populated and transitions planned keywords through
     'everbeeResultRows',
     'rowHasEverbeeInput',
     'findResearchRow',
+    'isCurrentResearchRow',
     `return function researchQueueRows(stageId = state.consoleUi.activeStage) {${body}\n}`,
   )
   const state = {
@@ -145,6 +146,7 @@ test('keeps the EverBee queue populated and transitions planned keywords through
     () => completed,
     (row) => Number(row?.topMonthlySales) > 0,
     () => null,
+    () => true,
   )
 
   assert.deepEqual(
@@ -206,18 +208,25 @@ test('executes eRank capture UI states from extension progress without changing 
     'state',
     'normalizePhrase',
     'deriveErankCaptureUiState',
+    'findResearchRow',
     `return function erankCaptureStateRows() {${body}\n}`,
   )
   const plan = [{ query: 'ghost shirt', queryKind: 'direct', sourceKeywords: ['ghost shirt'] }]
-  const statusFor = ({ researchRow, extensionState }) => createCaptureRows(
-    {
+  const statusFor = ({ researchRow, extensionState }) => {
+    const appState = {
       erankQueryPlan: plan,
       researchRows: researchRow ? [researchRow] : [],
       extensionState,
-    },
-    (value) => String(value ?? '').trim().toLowerCase(),
-    deriveErankCaptureUiState,
-  )()[0]?.status ?? 'completed'
+    }
+    return createCaptureRows(
+      appState,
+      (value) => String(value ?? '').trim().toLowerCase(),
+      deriveErankCaptureUiState,
+      (keyword) => appState.researchRows.find(
+        (row) => row.keyword === String(keyword ?? '').trim().toLowerCase(),
+      ),
+    )()[0]?.status ?? 'completed'
+  }
 
   assert.equal(statusFor({}), 'unsearched')
   assert.equal(statusFor({ extensionState: { active: true, mode: 'erank', currentKeyword: 'ghost shirt' } }), 'active')
