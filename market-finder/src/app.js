@@ -150,7 +150,6 @@ import {
   buildMultiAngleCandidatePools,
   candidateMatchesResearchContext,
   candidateEvidenceKey,
-  marketplaceInsightPlanForContext,
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
@@ -158,6 +157,7 @@ import {
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
+  hasMeaningfulMultiAngleContext,
   multiAngleAutomationControl,
   nextMultiAngleBatch,
   pauseMultiAngleForContextChange,
@@ -171,11 +171,12 @@ import {
   resolveMultiAngleImportedResearchContext,
   resolveMultiAngleResearchContext,
   resolveMultiAngleResearchOptions,
+  restoreMarketplaceInsightPlanForResearchFlow,
   restoredMultiAngleTargetKeywords,
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-9'
+} from './multi-angle-exploration.js?v=20260730-10'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -197,6 +198,7 @@ import {
   normalizePendingEvidenceAutomation,
   restoreInterruptedMarketplaceInsightPlan,
   restorePendingEvidenceAutomation,
+  shouldAutoResumeEvidenceAutomation,
 } from './persistent-evidence-automation.js?v=20260728-1'
 
 const PAGE_SOURCE = 'market-finder-page'
@@ -925,9 +927,20 @@ function restorePersistedState() {
       categorySnapshot: restoredCategory,
     },
   )
-  const compatibleMarketplaceInsightPlan = marketplaceInsightPlanForContext(
-    state.marketplaceInsightPlan,
+  const restoringMultiAngleWork = hasMeaningfulMultiAngleContext(
     state.multiAngleExploration,
+  )
+  const compatibleMarketplaceInsightPlan = restoreMarketplaceInsightPlanForResearchFlow(
+    state.marketplaceInsightPlan,
+    {
+      exploration: state.multiAngleExploration,
+      ordinaryContext: {
+        eventId: selectedRestoreEvent.id,
+        categoryId: selectedRestoreCategory.id,
+        eventSnapshot: researchEventSnapshot(selectedRestoreEvent),
+        categorySnapshot: selectedRestoreCategory,
+      },
+    },
   )
   if (!compatibleMarketplaceInsightPlan) state.marketplaceInsightMessage = ''
   state.marketplaceInsightPlan = compatibleMarketplaceInsightPlan
@@ -947,7 +960,7 @@ function restorePersistedState() {
     state.multiAngleExploration,
     savedPendingTargets,
   )
-  const savedPendingForContext = savedState.multiAngleExploration
+  const savedPendingForContext = restoringMultiAngleWork
     ? {
         ...savedState.pendingEvidenceAutomation,
         active: savedState.pendingEvidenceAutomation?.active === true
@@ -955,13 +968,16 @@ function restorePersistedState() {
         targetKeywords: restoredMultiAngleTargets,
       }
     : savedState.pendingEvidenceAutomation
-  const legacyRestoreAutomation = savedState.multiAngleExploration
+  const legacyRestoreAutomation = restoringMultiAngleWork
     ? {
         status: state.multiAngleExploration.status,
         queuedKeywords: restoredMultiAngleTargets,
       }
     : {
-        status: state.multiAngleExploration.status,
+        status: state.marketplaceInsightPlan
+          || savedState.pendingEvidenceAutomation?.active === true
+          ? 'running'
+          : state.winningNicheAutomation.status,
         queuedKeywords: state.winningNicheAutomation.queuedKeywords,
       }
   state.pendingEvidenceAutomation = restorePendingEvidenceAutomation({
@@ -970,13 +986,20 @@ function restorePersistedState() {
     marketplaceInsightPlan: state.marketplaceInsightPlan,
   })
   state.marketplaceRetryState = normalizeMarketplaceRetryState(savedState.marketplaceRetryState)
-  const reloadTransition = pauseMultiAngleWorkAfterReload({
-    exploration: state.multiAngleExploration,
-    pendingEvidenceAutomation: state.pendingEvidenceAutomation,
-  })
-  state.multiAngleExploration = reloadTransition.exploration
-  state.pendingEvidenceAutomation = reloadTransition.pendingEvidenceAutomation
-  state.restoredAutomationPending = false
+  if (restoringMultiAngleWork) {
+    const reloadTransition = pauseMultiAngleWorkAfterReload({
+      exploration: state.multiAngleExploration,
+      pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+    })
+    state.multiAngleExploration = reloadTransition.exploration
+    state.pendingEvidenceAutomation = reloadTransition.pendingEvidenceAutomation
+    state.restoredAutomationPending = false
+  } else {
+    state.restoredAutomationPending = shouldAutoResumeEvidenceAutomation({
+      winningNicheAutomation: legacyRestoreAutomation,
+      pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+    })
+  }
   state.seoPlan = savedState.seoPlan ?? null
   state.consoleUi = restoreResearchConsoleUiFromPayload(savedState)
 

@@ -532,6 +532,94 @@ test('restores only saved targets that belong to the current batch or retry queu
   )
 })
 
+test('distinguishes ordinary Marketplace restore from meaningful multi-angle context', () => {
+  assert.equal(typeof multiAngleApi.hasMeaningfulMultiAngleContext, 'function')
+  assert.equal(typeof multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow, 'function')
+  const ordinaryExploration = createMultiAngleExplorationState({ status: 'idle' })
+  const ordinaryContext = {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'halloween',
+      label: 'Halloween',
+      searchTerm: 'halloween',
+    },
+  }
+  const matchingPlan = {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    items: [{ query: 'halloween nurse shirt', status: 'planned' }],
+  }
+  const mismatchedPlan = {
+    eventId: 'christmas',
+    categoryId: 'mug',
+    items: [{ query: 'christmas nurse mug', status: 'planned' }],
+  }
+  const legacyPlan = {
+    items: [{ query: 'legacy halloween shirt', status: 'planned' }],
+  }
+
+  assert.equal(
+    multiAngleApi.hasMeaningfulMultiAngleContext(ordinaryExploration),
+    false,
+  )
+  assert.equal(
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(
+      matchingPlan,
+      {
+        exploration: ordinaryExploration,
+        ordinaryContext,
+      },
+    ),
+    matchingPlan,
+  )
+  assert.equal(
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(
+      mismatchedPlan,
+      {
+        exploration: ordinaryExploration,
+        ordinaryContext,
+      },
+    ),
+    null,
+  )
+  assert.equal(
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(
+      legacyPlan,
+      {
+        exploration: ordinaryExploration,
+        ordinaryContext,
+      },
+    ),
+    legacyPlan,
+  )
+
+  const activeExploration = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'christmas',
+    categoryId: 'shirt',
+    currentBatchCandidates: [{
+      keyword: 'christmas nurse shirt',
+      eventId: 'christmas',
+      categoryId: 'shirt',
+    }],
+  })
+  assert.equal(
+    multiAngleApi.hasMeaningfulMultiAngleContext(activeExploration),
+    true,
+  )
+  assert.equal(
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(
+      matchingPlan,
+      {
+        exploration: activeExploration,
+        ordinaryContext,
+      },
+    ),
+    null,
+  )
+})
+
 test('reload leaves idle and terminal multi-angle states terminal', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 

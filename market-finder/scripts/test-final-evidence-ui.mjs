@@ -202,7 +202,7 @@ test('persists multi-angle progress and reconstructs legacy pending targets', ()
     app,
     /createWinningNicheAutomation\(\{[\s\S]*savedState\.winningNicheAutomation[\s\S]*targetWinnerCount:\s*restoredWinnerTarget/,
   )
-  assert.match(app, /const legacyRestoreAutomation = savedState\.multiAngleExploration/)
+  assert.match(app, /const legacyRestoreAutomation = restoringMultiAngleWork/)
   assert.match(app, /queuedKeywords:\s*state\.winningNicheAutomation\.queuedKeywords/)
   assert.match(app, /winningNicheAutomation:\s*legacyRestoreAutomation/)
 })
@@ -432,6 +432,73 @@ test('reload ignores an old Marketplace plan before restoring and resumes the cu
 
   assert.equal(await resume(), true)
   assert.equal(dispatchCount, 1)
+})
+
+test('ordinary Marketplace reload keeps compatible and legacy plans outside multi-angle pausing', () => {
+  assert.equal(typeof multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow, 'function')
+  const exploration = createMultiAngleExplorationState({ status: 'idle' })
+  const ordinaryContext = {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'halloween',
+      label: 'Halloween',
+      searchTerm: 'halloween',
+    },
+  }
+  const matchingPlan = {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    items: [{
+      query: 'halloween nurse shirt',
+      status: 'planned',
+    }],
+  }
+  const legacyPlan = {
+    items: [{
+      query: 'legacy halloween shirt',
+      status: 'planned',
+    }],
+  }
+  const restorePlan = (plan) => (
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(plan, {
+      exploration,
+      ordinaryContext,
+    })
+  )
+  const pendingFor = (plan) => restorePendingEvidenceAutomation({
+    saved: {
+      active: false,
+      scheduled: false,
+      targetKeywords: [],
+    },
+    winningNicheAutomation: {
+      status: 'running',
+      queuedKeywords: [],
+    },
+    marketplaceInsightPlan: restorePlan(plan),
+  })
+
+  assert.deepEqual(
+    pendingFor(matchingPlan).targetKeywords,
+    ['halloween nurse shirt'],
+  )
+  assert.deepEqual(
+    pendingFor(legacyPlan).targetKeywords,
+    ['legacy halloween shirt'],
+  )
+  assert.equal(exploration.status, 'idle')
+
+  const restoreBody = app.match(/function restorePersistedState\(\) \{([\s\S]*?)\n\}\n\nfunction migrateLegacyResearchRounds/)?.[1] ?? ''
+  assert.match(restoreBody, /const restoringMultiAngleWork = hasMeaningfulMultiAngleContext\(/)
+  assert.match(
+    restoreBody,
+    /if \(restoringMultiAngleWork\) \{[\s\S]*pauseMultiAngleWorkAfterReload\(/,
+  )
+  assert.match(
+    restoreBody,
+    /else \{[\s\S]*shouldAutoResumeEvidenceAutomation\(/,
+  )
 })
 
 test('completes a restored batch from persisted multi-angle candidates', () => {

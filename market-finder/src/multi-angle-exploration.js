@@ -1,6 +1,7 @@
 import {
   candidateEvidenceKey,
   EXPLORATION_ANGLE_ORDER,
+  marketplaceInsightPlanForContext,
   normalizeExplorationCandidate,
 } from './multi-angle-candidates.js'
 
@@ -359,6 +360,36 @@ export function restoredMultiAngleTargetKeywords(state = {}, savedTargets = []) 
       : []
   })
   return matchingSavedTargets.length > 0 ? matchingSavedTargets : workKeywords
+}
+
+export function hasMeaningfulMultiAngleContext(state = {}) {
+  const current = createMultiAngleExplorationState(state)
+  return FIXED_CONTEXT_STATUSES.has(current.status)
+    || Boolean(current.eventSnapshot)
+    || Boolean(current.categorySnapshot)
+    || current.currentBatchCandidates.length > 0
+    || current.retryQueue.length > 0
+}
+
+export function restoreMarketplaceInsightPlanForResearchFlow(
+  plan,
+  {
+    exploration = {},
+    ordinaryContext = {},
+  } = {},
+) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return null
+  const current = createMultiAngleExplorationState(exploration)
+  if (hasMeaningfulMultiAngleContext(current)) {
+    return marketplaceInsightPlanForContext(plan, current)
+  }
+  const hasPlanContextMetadata = Boolean(
+    String(plan.eventId ?? plan.researchEventId ?? '').trim()
+    || String(plan.categoryId ?? plan.researchCategoryId ?? '').trim()
+  )
+  return hasPlanContextMetadata
+    ? marketplaceInsightPlanForContext(plan, ordinaryContext)
+    : plan
 }
 
 export function resolveMultiAngleResearchContext(state = {}, selected = {}) {
