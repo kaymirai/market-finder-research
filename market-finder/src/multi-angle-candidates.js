@@ -1,0 +1,182 @@
+import { normalizePhrase } from '../../shared/market-keyword-engine/index.js'
+
+export const EXPLORATION_ANGLE_ORDER = Object.freeze([
+  'demand-neighborhood',
+  'attribute-combination',
+  'recent-sales',
+  'adjacent-product',
+  'market-gap',
+  'evergreen',
+])
+
+function normalizedList(value) {
+  const values = Array.isArray(value) ? value : [value]
+  return [...new Set(values.map(normalizePhrase).filter(Boolean))]
+}
+
+function optionalNumber(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function resultLaneFor(candidate, activeEventId) {
+  if (candidate.resultLane) return String(candidate.resultLane)
+  if (candidate.angleId === 'evergreen') return 'evergreen'
+  if (candidate.angleId === 'seasonal-reference') return 'seasonal-reference'
+  if (candidate.eventId && candidate.eventId !== activeEventId) return 'seasonal-reference'
+  return 'event'
+}
+
+export function normalizeExplorationCandidate(candidate = {}) {
+  const keyword = normalizePhrase(candidate.keyword ?? candidate.query)
+  if (!keyword) return null
+
+  const source = String(candidate.source ?? '').trim()
+  const sources = normalizedList([source, ...(candidate.sources ?? [])])
+  const angleId = String(candidate.angleId ?? '').trim()
+  const angleIds = [...new Set([
+    angleId,
+    ...(Array.isArray(candidate.angleIds) ? candidate.angleIds : []),
+  ].map((value) => String(value ?? '').trim()).filter(Boolean))]
+
+  return {
+    ...candidate,
+    keyword,
+    categoryId: String(candidate.categoryId ?? '').trim(),
+    eventId: String(candidate.eventId ?? '').trim(),
+    angleId,
+    angleIds,
+    source: source || sources[0] || '',
+    sources,
+    sourceKeywords: normalizedList(candidate.sourceKeywords ?? keyword),
+    resultLane: String(candidate.resultLane ?? '').trim(),
+    priorityScore: optionalNumber(candidate.priorityScore),
+    timingStatus: String(candidate.timingStatus ?? '').trim(),
+  }
+}
+
+export function candidateEvidenceKey(candidate = {}) {
+  return [
+    normalizePhrase(candidate.keyword),
+    String(candidate.categoryId ?? ''),
+    String(candidate.eventId ?? ''),
+  ].join('|')
+}
+
+export function candidateProvenanceKey(candidate = {}) {
+  return `${candidateEvidenceKey(candidate)}|${String(candidate.angleId ?? '')}`
+}
+
+function mergeCandidate(existing, incoming) {
+  const sources = [...new Set([...existing.sources, ...incoming.sources])]
+  const angleIds = [...new Set([...existing.angleIds, ...incoming.angleIds])]
+  const sourceKeywords = [...new Set([...existing.sourceKeywords, ...incoming.sourceKeywords])]
+  return {
+    ...existing,
+    sources,
+    angleIds,
+    sourceKeywords,
+    source: existing.source || incoming.source,
+    priorityScore: Math.max(existing.priorityScore ?? 0, incoming.priorityScore ?? 0) || null,
+  }
+}
+
+function addCandidates(byEvidence, rawCandidates, defaults) {
+  for (const rawCandidate of rawCandidates) {
+    const normalized = normalizeExplorationCandidate({ ...defaults, ...rawCandidate })
+    if (!normalized) continue
+    normalized.resultLane = resultLaneFor(normalized, defaults.activeEventId)
+    const key = candidateEvidenceKey(normalized)
+    byEvidence.set(key, byEvidence.has(key) ? mergeCandidate(byEvidence.get(key), normalized) : normalized)
+  }
+}
+
+function listingCandidate(listing, category) {
+  if (!listing || optionalNumber(listing.sales) < 1 || optionalNumber(listing.listingAgeMonths) > 12) return null
+  if (String(listing.categoryId ?? '').trim() === String(category.id ?? '').trim()) return null
+  const title = normalizePhrase(listing.title)
+  const sourceCategory = normalizePhrase(listing.categorySearchTerm ?? listing.categoryId)
+  const productTerm = normalizePhrase(category.searchTerm)
+  if (!title || !productTerm) return null
+  const withoutSourceCategory = sourceCategory
+    ? title.replace(new RegExp(`\\b${sourceCategory.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'g'), ' ')
+    : title
+  return normalizePhrase(`${withoutSourceCategory} ${productTerm}`)
+}
+
+function isMarketGap(candidate) {
+  const demand = optionalNumber(
+    candidate.searchDemand
+    ?? candidate.etsySearches30d
+    ?? candidate.erankSearchVolume
+    ?? candidate.metrics?.etsy?.searches30d
+    ?? candidate.metrics?.erank?.searches,
+  )
+  const reduction = optionalNumber(candidate.competitionReduction ?? candidate.comparison?.competitionReduction)
+  const sales = optionalNumber(
+    candidate.sellingListingCount
+    ?? candidate.recentSellingListingCount
+    ?? candidate.metrics?.everbee?.sellingListings
+    ?? candidate.metrics?.everbee?.recentSellingListings,
+  )
+  return demand !== null && demand > 0 && reduction !== null && reduction >= 0.3 && sales !== null && sales >= 2
+}
+
+export function buildMultiAngleCandidatePools(input = {}) {
+  const event = input.event ?? {}
+  const category = input.category ?? {}
+  const activeEventId = String(event.id ?? '').trim()
+  const common = {
+    categoryId: String(category.id ?? '').trim(),
+    eventId: activeEventId,
+    timingStatus: String(input.timingStatus ?? '').trim(),
+    activeEventId,
+  }
+  const byEvidence = new Map()
+
+  addCandidates(byEvidence, normalizedList(input.relatedTerms).map((keyword) => ({ keyword, source: 'marketplace-insights' })), {
+    ...common,
+    angleId: 'demand-neighborhood',
+  })
+  addCandidates(byEvidence, input.taxonomyCandidates ?? [], {
+    ...common,
+    angleId: 'attribute-combination',
+  })
+  addCandidates(byEvidence, input.drilldownCandidates ?? [], {
+    ...common,
+    angleId: 'recent-sales',
+  })
+  addCandidates(byEvidence, (input.adjacentProductListings ?? [])
+    .map((listing) => ({
+      keyword: listingCandidate(listing, category),
+      source: 'adjacent-product-title',
+      sourceKeywords: [listing.title],
+    }))
+    .filter((candidate) => candidate.keyword), {
+    ...common,
+    angleId: 'adjacent-product',
+  })
+  addCandidates(byEvidence, (input.marketGapCandidates ?? []).filter(isMarketGap), {
+    ...common,
+    angleId: 'market-gap',
+  })
+  addCandidates(byEvidence, input.evergreenCandidates ?? [], {
+    ...common,
+    eventId: '',
+    angleId: 'evergreen',
+    resultLane: 'evergreen',
+  })
+  addCandidates(byEvidence, (input.seasonalReferenceCandidates ?? [])
+    .filter((candidate) => candidate.eventId && candidate.eventId !== activeEventId && candidate.timingStatus === 'timely'), {
+    ...common,
+    angleId: 'seasonal-reference',
+    resultLane: 'seasonal-reference',
+  })
+
+  const pools = Object.fromEntries([...EXPLORATION_ANGLE_ORDER, 'seasonal-reference'].map((angleId) => [angleId, []]))
+  for (const candidate of byEvidence.values()) {
+    const angleId = candidate.angleIds.find((angle) => Object.hasOwn(pools, angle))
+    if (angleId) pools[angleId].push({ ...candidate, angleId })
+  }
+  return pools
+}
