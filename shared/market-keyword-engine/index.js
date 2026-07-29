@@ -1,3 +1,5 @@
+import { classifyProductionWindow } from './market-timing.js'
+
 const DEFAULT_EVENT_YEAR = 2026
 
 const TARGET_GROUPS = {
@@ -1173,21 +1175,6 @@ export function normalizePhrase(value) {
     .trim()
 }
 
-const EVENT_DAY_BY_ID = {
-  'new-years-day': 1,
-  'valentines-day': 14,
-  'st-patricks-day': 17,
-  'earth-day': 22,
-  'national-pet-day': 11,
-  'fathers-day': 21,
-  'canada-day': 1,
-  'independence-day': 4,
-  halloween: 31,
-  'veterans-day': 11,
-  christmas: 25,
-  'new-years-eve': 31,
-}
-
 const CLUSTER_IGNORED_TOKENS = new Set([
   'shirt',
   'shirts',
@@ -1266,24 +1253,27 @@ export function getMarketplaceInsightFreshness(capturedAt, now = new Date()) {
   }
 }
 
+export {
+  buildTimelySeasonalSuggestions,
+  classifyProductionWindow,
+  nextEventPeakDate,
+  resolveEventPeakDate,
+} from './market-timing.js'
+
 export function getMarketTiming(event = {}, now = new Date()) {
-  const nowDate = parseDate(now)
-  const month = Number(event.month)
-  if (!nowDate || event.id === 'auto-discovery' || !Number.isInteger(month) || month < 1 || month > 12) {
-    return { label: 'evergreen', weeksUntil: null, priority: 2 }
+  const timing = classifyProductionWindow(event, now)
+  const label = {
+    evergreen: 'evergreen',
+    timely: 'launch',
+    early: 'prepare',
+    late: 'late',
+  }[timing.status]
+  return {
+    ...timing,
+    label,
+    weeksUntil: timing.daysUntil === null ? null : Math.round(timing.daysUntil / 7),
+    priority: timing.status === 'timely' ? 5 : timing.status === 'early' ? 2 : 1,
   }
-
-  const day = EVENT_DAY_BY_ID[event.id] ?? 15
-  let eventDate = new Date(Date.UTC(nowDate.getUTCFullYear(), month - 1, day))
-  if (eventDate.getTime() < nowDate.getTime()) {
-    eventDate = new Date(Date.UTC(nowDate.getUTCFullYear() + 1, month - 1, day))
-  }
-  const weeksUntil = Math.max(0, Math.round((eventDate.getTime() - nowDate.getTime()) / (7 * 86400000)))
-
-  if (weeksUntil >= 10 && weeksUntil <= 16) return { label: 'prepare', weeksUntil, priority: 4 }
-  if (weeksUntil >= 4 && weeksUntil < 10) return { label: 'launch', weeksUntil, priority: 5 }
-  if (weeksUntil < 4) return { label: 'late', weeksUntil, priority: 1 }
-  return { label: 'next-cycle', weeksUntil, priority: 2 }
 }
 
 export function buildKeywordClusterKey(keyword, options = {}) {

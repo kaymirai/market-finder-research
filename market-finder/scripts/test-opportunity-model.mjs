@@ -466,6 +466,7 @@ test('returns evergreen timing for auto discovery', () => {
   const result = getMarketTiming({ id: 'auto-discovery', month: 0 }, '2026-07-19T00:00:00Z')
 
   assert.equal(result.label, 'evergreen')
+  assert.equal(result.status, 'evergreen')
   assert.equal(result.weeksUntil, null)
 })
 
@@ -473,6 +474,8 @@ test('labels an event 12 weeks away as prepare', () => {
   const result = getMarketTiming({ id: 'halloween', month: 10 }, '2026-08-08T00:00:00Z')
 
   assert.equal(result.label, 'prepare')
+  assert.equal(result.status, 'early')
+  assert.equal(result.priority, 2)
   assert.ok(result.weeksUntil >= 10 && result.weeksUntil <= 16)
 })
 
