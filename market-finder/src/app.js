@@ -3761,6 +3761,9 @@ function renderWinningNicheAutomation() {
   const targetWinnerCount = automation.targetWinnerCount
   const winnerCount = automation.winnerKeywords.length
   const remainingWinnerCount = Math.max(0, targetWinnerCount - winnerCount)
+  const automationWorkActive = status === 'running'
+    || state.pendingEvidenceAutomation.active
+    || state.pendingEvidenceAutomation.scheduled
   const statusCopy = {
     idle: `未開始です。A/B候補${targetWinnerCount}件を目標に、最初の未調査カテゴリ「${nextAxisLabel}」から始めます。`,
     running: `勝ち候補を探索中（${winnerCount}/${targetWinnerCount}件）。「${axisLabel}」を検証し、残り${remainingWinnerCount}件へ向けて「${nextAxisLabel}」へ進みます。`,
@@ -3769,14 +3772,14 @@ function renderWinningNicheAutomation() {
     'winner-found': `A/Bの勝ち候補を${winnerCount}/${targetWinnerCount}件確保し、今回の出品目標を達成しました。`,
     exhausted: `安全な未調査候補を使い切りました。A/B候補は${winnerCount}/${targetWinnerCount}件で、残り${remainingWinnerCount}件です。`,
   }
-  const action = status === 'running'
+  const action = automationWorkActive
     ? 'stop'
     : status === 'idle'
       ? 'start'
       : status === 'winner-found'
         ? 'new-cycle'
       : 'resume'
-  const buttonLabel = status === 'running'
+  const buttonLabel = automationWorkActive
     ? '探索を停止'
     : status === 'idle'
       ? '目標まで勝ち候補を探す'
@@ -3830,18 +3833,22 @@ function renderMarketTimingGate() {
   elements.marketTimingStatus.textContent = statusCopy[timing.status] || statusCopy.evergreen
   elements.marketTimingDetail.textContent = detailCopy[timing.status] || detailCopy.evergreen
   elements.marketTimingOverrideBtn.hidden = !blocked
-  elements.winningNicheAutomationToggle.disabled = blocked
-  elements.winningNicheAutomationToggle.title = blocked
+  const canStopActiveResearch = elements.winningNicheAutomationToggle.dataset.winningNicheAction === 'stop'
+  elements.winningNicheAutomationToggle.disabled = blocked && !canStopActiveResearch
+  elements.winningNicheAutomationToggle.title = blocked && !canStopActiveResearch
     ? '制作時期を確認し、「このイベントを続けて調査する」を押してください。'
     : ''
 }
 
-function explorationAngleState(automation, angleId) {
-  const wasMeasured = automation.evidenceKeys.some((evidenceKey) => (
-    (automation.provenance[evidenceKey] ?? []).includes(angleId)
-  ))
-  if (automation.status === 'running' && automation.currentAngleId === angleId) return 'active'
-  if (wasMeasured) return 'complete'
+function explorationAngleState(automation, angleId, index) {
+  const isCurrent = automation.currentAngleId === angleId
+  const currentFinished = isCurrent && (
+    automation.status === 'winner-found'
+    || automation.exhaustedAngles.includes(angleId)
+  )
+  if (currentFinished) return 'complete'
+  if (isCurrent) return 'active'
+  if (index < automation.angleIndex) return 'complete'
   if (automation.exhaustedAngles.includes(angleId)) return 'empty'
   return 'idle'
 }
@@ -3867,7 +3874,7 @@ function renderExplorationAngleRail() {
   }
 
   renderHtmlIfChanged(elements.multiAngleRail, EXPLORATION_ANGLE_ORDER.map((angleId, index) => {
-    const angleState = explorationAngleState(automation, angleId)
+    const angleState = explorationAngleState(automation, angleId, index)
     return `
       <span
         class="exploration-angle-step is-${angleState}"
@@ -5596,6 +5603,37 @@ function stopPendingEvidenceAutomation(message = '') {
   renderPendingEvidenceAutomationButton()
 }
 
+function pauseMultiAngleForBlockedTimingChange() {
+  const timing = classifyProductionWindow(selectedEvent())
+  const blocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
+  if (!blocked) return false
+
+  const pendingWasActive = state.pendingEvidenceAutomation.active
+    || state.pendingEvidenceAutomation.scheduled
+  const explorationWasActive = multiAngleSearchIsRunning()
+  if (!pendingWasActive && !explorationWasActive) return false
+
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.scheduled = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  state.restoredAutomationPending = false
+  if (explorationWasActive) {
+    state.multiAngleExploration = pauseMultiAngleExploration(
+      state.multiAngleExploration,
+      '制作時期が対象外へ変わったため、現在の候補を保持して一時停止しました。',
+    )
+  }
+  setSimpleStatus('制作時期が対象外へ変わったため、自動調査を一時停止しました。候補は保持しています。')
+  renderAll()
+  persistMarketFinderState()
+
+  if (pendingWasActive && state.extensionState?.active) {
+    stopExtensionResearch()
+      .catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+  }
+  return true
+}
+
 function schedulePendingEvidenceAutomation(delayMs = 500) {
   if (!state.pendingEvidenceAutomation.active || state.pendingEvidenceAutomation.scheduled) return
   state.pendingEvidenceAutomation.scheduled = true
@@ -5603,6 +5641,11 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
   window.setTimeout(async () => {
     state.pendingEvidenceAutomation.scheduled = false
     if (!state.pendingEvidenceAutomation.active) return
+    const timing = classifyProductionWindow(selectedEvent())
+    if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+      pauseMultiAngleForBlockedTimingChange()
+      return
+    }
     if (state.extensionState?.active || state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) {
       schedulePendingEvidenceAutomation(2000)
       return
@@ -8661,15 +8704,17 @@ function bindEvents() {
   })
   elements.eventSelect.addEventListener('change', () => {
     state.timingOverrideConfirmed = false
+    const pausedForTiming = pauseMultiAngleForBlockedTimingChange()
     renderTargets({ syncYear: true })
     autoSelectBuyerIdentities({ refresh: true })
-    resetCandidatesForInputChange()
+    if (!pausedForTiming) resetCandidatesForInputChange()
   })
   elements.customEventInput.addEventListener('input', () => {
     state.timingOverrideConfirmed = false
+    const pausedForTiming = pauseMultiAngleForBlockedTimingChange()
     renderTargets({ syncYear: false })
     autoSelectBuyerIdentities({ refresh: true })
-    resetCandidatesForInputChange()
+    if (!pausedForTiming) resetCandidatesForInputChange()
   })
   elements.categorySelect.addEventListener('change', () => {
     autoSelectBuyerIdentities({ refresh: true })
@@ -8693,7 +8738,7 @@ function bindEvents() {
   })
   elements.seasonalReferenceLane?.addEventListener('click', (event) => {
     const button = event.target?.closest?.('[data-save-seasonal-reference]')
-    if (!button || button.dataset.saveSeasonalReference === 'all') return
+    if (!button) return
     const key = String(button.dataset.saveSeasonalReference ?? '').trim()
     if (!key || state.savedSeasonalReferenceKeys.includes(key)) return
     state.savedSeasonalReferenceKeys = [...state.savedSeasonalReferenceKeys, key]

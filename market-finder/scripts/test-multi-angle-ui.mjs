@@ -57,8 +57,8 @@ test('keeps event, evergreen, and seasonal-reference results in separate lanes',
 
 test('seasonal references can only be saved for a later run', () => {
   const seasonalLane = html.match(/<article id="seasonalReferenceLane"[\s\S]*?<\/article>/)?.[0] ?? ''
-  assert.match(seasonalLane, /次回候補に保存/)
   assert.doesNotMatch(seasonalLane, /自動検索|調査を開始|探索を開始/)
+  assert.match(app, /次回候補に保存/)
   assert.match(app, /data-save-seasonal-reference/)
   assert.doesNotMatch(app, /data-(?:start|search)-seasonal-reference/)
 })
@@ -68,4 +68,56 @@ test('desktop route and result lanes protect readable Japanese columns', () => {
   assert.match(css, /\.exploration-angle-status\s*\{[\s\S]*min-width:\s*\d+px/)
   assert.match(css, /\.exploration-result-lanes\s*\{[\s\S]*display:\s*grid/)
   assert.match(css, /\.exploration-result-item\s*\{[\s\S]*min-width:\s*\d+px/)
+})
+
+test('a blocked event change pauses scheduled verification without losing its targets', () => {
+  const pauseBody = app.slice(
+    app.indexOf('function pauseMultiAngleForBlockedTimingChange()'),
+    app.indexOf('\nfunction ', app.indexOf('function pauseMultiAngleForBlockedTimingChange()') + 1),
+  )
+  const scheduleBody = app.slice(
+    app.indexOf('function schedulePendingEvidenceAutomation('),
+    app.indexOf('\nfunction ', app.indexOf('function schedulePendingEvidenceAutomation(') + 1),
+  )
+  const eventChangeBody = app.slice(
+    app.indexOf("elements.eventSelect.addEventListener('change'"),
+    app.indexOf("elements.customEventInput.addEventListener('input'"),
+  )
+
+  assert.match(pauseBody, /state\.pendingEvidenceAutomation\.active = false/)
+  assert.match(pauseBody, /state\.pendingEvidenceAutomation\.scheduled = false/)
+  assert.match(pauseBody, /pauseMultiAngleExploration\(/)
+  assert.doesNotMatch(pauseBody, /targetKeywords\s*=\s*\[\]/)
+  assert.match(eventChangeBody, /pauseMultiAngleForBlockedTimingChange\(\)/)
+  assert.match(eventChangeBody, /const pausedForTiming = pauseMultiAngleForBlockedTimingChange\(\)/)
+  assert.match(eventChangeBody, /if \(!pausedForTiming\) resetCandidatesForInputChange\(\)/)
+  assert.ok(
+    scheduleBody.indexOf('pauseMultiAngleForBlockedTimingChange()')
+      < scheduleBody.indexOf("verifyPendingEvidence('', '',"),
+  )
+})
+
+test('keeps Stop available while blocked work is still active', () => {
+  const timingBody = app.slice(
+    app.indexOf('function renderMarketTimingGate()'),
+    app.indexOf('\nfunction ', app.indexOf('function renderMarketTimingGate()') + 1),
+  )
+  assert.match(timingBody, /const canStopActiveResearch/)
+  assert.match(timingBody, /disabled = blocked && !canStopActiveResearch/)
+})
+
+test('derives angle completion from the exploration cursor rather than shared provenance', () => {
+  const angleStateBody = app.slice(
+    app.indexOf('function explorationAngleState('),
+    app.indexOf('\nfunction ', app.indexOf('function explorationAngleState(') + 1),
+  )
+  assert.match(angleStateBody, /automation\.angleIndex/)
+  assert.match(angleStateBody, /automation\.currentAngleId/)
+  assert.match(angleStateBody, /automation\.exhaustedAngles/)
+  assert.doesNotMatch(angleStateBody, /automation\.provenance|automation\.evidenceKeys/)
+})
+
+test('has no hidden all-seasonal save control or dead all-handler branch', () => {
+  assert.doesNotMatch(html, /data-save-seasonal-reference="all"/)
+  assert.doesNotMatch(app, /saveSeasonalReference === 'all'/)
 })
