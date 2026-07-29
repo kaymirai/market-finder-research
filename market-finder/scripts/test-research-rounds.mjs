@@ -66,6 +66,19 @@ test('preserves unbounded continuous niche rounds without overwriting earlier ba
   assert.equal(restored.activeRoundId, 'continuous-niche-5')
 })
 
+test('preserves the exploration angle for a multi-angle round', () => {
+  const state = startResearchRound(createResearchRoundsState(), {
+    type: 'multi-angle',
+    angleId: 'recent-sales',
+    depth: 1,
+    status: 'pending-everbee',
+    candidateKeywords: ['ghost gardener shirt'],
+  })
+
+  assert.equal(state.rounds[0].angleId, 'recent-sales')
+  assert.equal(createResearchRoundsState(JSON.parse(JSON.stringify(state))).rounds[0].angleId, 'recent-sales')
+})
+
 test('updates one round without replacing earlier round results', () => {
   let state = startResearchRound(createResearchRoundsState(), {
     type: 'initial',

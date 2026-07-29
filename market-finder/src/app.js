@@ -25,6 +25,7 @@ import {
   scoreErankOpportunity,
   suggestBuyerIdentities,
   classifyCandidateKeyword,
+  classifyProductionWindow,
   detectRiskTerms,
   clusterKeywordCandidates,
   getMarketTiming,
@@ -70,7 +71,7 @@ import {
   startResearchRound,
   summarizeOpportunityCounts,
   updateResearchRound,
-} from './research-rounds.js?v=20260726-1'
+} from './research-rounds.js?v=20260730-1'
 import {
   EVENT_MARKET_TRACKS,
   buildResearchMarketHistory,
@@ -136,19 +137,23 @@ import {
   listingOutcomesDomReady,
 } from './listing-outcomes-ui.js?v=20260726-3'
 import {
-  buildNextWinningNicheBatch,
   createWinningNicheAutomation,
-  evaluateWinningNicheRows,
-  pauseWinningNicheAutomation,
-  resetWinningNicheCycle,
-  resumeWinningNicheAutomation,
-  startWinningNicheAutomation,
-  stopWinningNicheAutomation,
+  migrateWinningNicheState,
 } from './winning-niche-automation.js?v=20260727-2'
 import {
-  NICHE_AXIS_ORDER,
-  NICHE_TAXONOMY,
-} from './niche-taxonomy.js?v=20260726-1'
+  EXPLORATION_ANGLE_ORDER,
+  buildMultiAngleCandidatePools,
+} from './multi-angle-candidates.js?v=20260730-1'
+import {
+  createMultiAngleExplorationState,
+  nextMultiAngleBatch,
+  pauseMultiAngleExploration,
+  recordMultiAngleBatch,
+  recordMultiAngleFailure,
+  resumeMultiAngleExploration,
+  startMultiAngleExploration,
+  stopMultiAngleExploration,
+} from './multi-angle-exploration.js?v=20260730-1'
 import {
   calculateMonthlyProfitTarget,
 } from './monthly-profit-target.js?v=20260726-1'
@@ -280,6 +285,7 @@ const state = {
   },
   marketplaceRetryState: normalizeMarketplaceRetryState(),
   restoredAutomationPending: false,
+  multiAngleExploration: createMultiAngleExplorationState(),
   winningNicheAutomation: createWinningNicheAutomation(),
   listingResearchTargetSettings: normalizeListingResearchTarget(),
   recentTrendKeywords: new Set(),
@@ -713,6 +719,7 @@ function persistMarketFinderState() {
       selectedResultKey: state.selectedResultKey,
       profitInputsByKeyword: state.profitInputsByKeyword,
       finalEvidenceFilter: state.finalEvidenceFilter,
+      multiAngleExploration: state.multiAngleExploration,
       winningNicheAutomation: state.winningNicheAutomation,
       pendingEvidenceAutomation: {
         ...state.pendingEvidenceAutomation,
@@ -838,32 +845,41 @@ function restorePersistedState() {
     ...savedState.winningNicheAutomation,
     targetWinnerCount: restoredWinnerTarget,
   })
+  state.multiAngleExploration = savedState.multiAngleExploration
+    ? createMultiAngleExplorationState({
+        ...savedState.multiAngleExploration,
+        targetWinnerCount: restoredWinnerTarget,
+      })
+    : createMultiAngleExplorationState({
+        ...migrateWinningNicheState(savedState.winningNicheAutomation),
+        targetWinnerCount: restoredWinnerTarget,
+      })
   state.pendingEvidenceAutomation = restorePendingEvidenceAutomation({
     saved: savedState.pendingEvidenceAutomation,
-    winningNicheAutomation: state.winningNicheAutomation,
+    winningNicheAutomation: {
+      status: state.multiAngleExploration.status,
+      queuedKeywords: savedState.pendingEvidenceAutomation?.targetKeywords ?? [],
+    },
     marketplaceInsightPlan: state.marketplaceInsightPlan,
   })
   state.marketplaceRetryState = normalizeMarketplaceRetryState(savedState.marketplaceRetryState)
   if (
-    state.winningNicheAutomation.status === 'winner-found'
-    && state.winningNicheAutomation.winnerKeywords.length < restoredWinnerTarget
+    state.multiAngleExploration.status === 'winner-found'
+    && state.multiAngleExploration.winnerKeywords.length < restoredWinnerTarget
   ) {
-    state.winningNicheAutomation = pauseWinningNicheAutomation({
-      ...state.winningNicheAutomation,
+    state.multiAngleExploration = pauseMultiAngleExploration({
+      ...state.multiAngleExploration,
       status: 'running',
       completedAt: '',
-    }, `保存済みA/B候補は${state.winningNicheAutomation.winnerKeywords.length}/${restoredWinnerTarget}件です。目標まで探索を再開できます。`)
+    }, `保存済みA/B候補は${state.multiAngleExploration.winnerKeywords.length}/${restoredWinnerTarget}件です。目標まで探索を再開できます。`)
   }
   state.restoredAutomationPending = shouldAutoResumeEvidenceAutomation({
-    winningNicheAutomation: state.winningNicheAutomation,
+    winningNicheAutomation: state.multiAngleExploration,
     pendingEvidenceAutomation: state.pendingEvidenceAutomation,
-  })
-  if (state.winningNicheAutomation.status === 'running' && !state.restoredAutomationPending) {
-    state.winningNicheAutomation = pauseWinningNicheAutomation(
-      state.winningNicheAutomation,
-      '前回の連続探索を復元しました。「探索を再開」を押すと続きから進みます。',
-    )
-  }
+  }) || (
+    state.multiAngleExploration.status === 'running'
+    && state.multiAngleExploration.retryQueue.length > 0
+  )
   state.seoPlan = savedState.seoPlan ?? null
   state.consoleUi = restoreResearchConsoleUiFromPayload(savedState)
 
@@ -1409,6 +1425,8 @@ function evidenceArchiveRecord() {
       title: String(row.title ?? '').trim(),
       monthlySales: parseOptionalNumber(row.monthlySales),
     })),
+    multiAngleExploration: createMultiAngleExplorationState(state.multiAngleExploration),
+    explorationProvenance: state.multiAngleExploration.provenance,
     drilldownNodes: mergeNicheDrilldownNodes(previousNodes, buildNicheDrilldownGraph({
       rows: state.researchRows,
       candidates: [...state.candidateCatalog, ...drilldown.candidates],
@@ -1455,6 +1473,8 @@ function evidenceRecordFingerprint(record = {}) {
       .sort(),
     demandKeywords,
     supplyListings,
+    multiAngleExploration: createMultiAngleExplorationState(record.multiAngleExploration),
+    explorationProvenance: record.explorationProvenance ?? {},
     drilldownNodes,
   })
 }
@@ -3634,7 +3654,7 @@ function renderListingResearchTarget() {
     || !elements.listingResearchTargetProgress
   ) return
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
-  const winnerCount = state.winningNicheAutomation.winnerKeywords.length
+  const winnerCount = state.multiAngleExploration.winnerKeywords.length
   const remaining = Math.max(0, target.targetWinnerCount - winnerCount)
   elements.listingResearchTargetSummary.textContent = `月${target.monthlyListingTarget}商品 ÷ ${target.researchRunsPerMonth}回 ÷ ${target.listingsPerWinner}商品 = 今回A/Bを${target.targetWinnerCount}件確保（1回${target.listingsPerRun}商品）`
   elements.listingResearchTargetProgress.textContent = `A/B候補 ${winnerCount} / ${target.targetWinnerCount}件・残り${remaining}件`
@@ -3663,22 +3683,22 @@ function saveListingResearchTargetSettings() {
 
   state.listingResearchTargetSettings = result.settings
   const target = calculateListingResearchTarget(result.settings)
-  const winnerCount = state.winningNicheAutomation.winnerKeywords.length
+  const winnerCount = state.multiAngleExploration.winnerKeywords.length
   const targetReached = winnerCount >= target.targetWinnerCount
-  state.winningNicheAutomation = createWinningNicheAutomation({
-    ...state.winningNicheAutomation,
+  state.multiAngleExploration = createMultiAngleExplorationState({
+    ...state.multiAngleExploration,
     status: targetReached
       ? 'winner-found'
-      : state.winningNicheAutomation.status === 'winner-found'
+      : state.multiAngleExploration.status === 'winner-found'
         ? 'paused'
-        : state.winningNicheAutomation.status,
+        : state.multiAngleExploration.status,
     targetWinnerCount: target.targetWinnerCount,
-    completedAt: targetReached ? state.winningNicheAutomation.completedAt : '',
+    completedAt: targetReached ? state.multiAngleExploration.completedAt : '',
     pauseReason: targetReached
       ? ''
-      : state.winningNicheAutomation.status === 'winner-found'
+      : state.multiAngleExploration.status === 'winner-found'
         ? `A/B候補は${winnerCount}/${target.targetWinnerCount}件です。残り${target.targetWinnerCount - winnerCount}件を探索できます。`
-        : state.winningNicheAutomation.pauseReason,
+        : state.multiAngleExploration.pauseReason,
   })
   setInputValue(elements.monthlyListingTargetInput, result.settings.monthlyListingTarget)
   setInputValue(elements.researchRunsPerMonthInput, result.settings.researchRunsPerMonth)
@@ -3697,18 +3717,30 @@ function renderWinningNicheAutomation() {
     || !elements.winningNicheAutomationToggle
   ) return
 
-  const automation = state.winningNicheAutomation
+  const automation = state.multiAngleExploration
   const status = automation.status || 'idle'
-  const axisLabel = NICHE_TAXONOMY[automation.currentAxis]?.label || '未開始'
-  const nextAxisLabel = NICHE_TAXONOMY[automation.nextAxis]?.label || NICHE_TAXONOMY[NICHE_AXIS_ORDER[0]]?.label || '職業'
-  const researchedCount = automation.researchedKeywords.length
-  const queuedCount = automation.queuedKeywords.length
+  const angleLabels = {
+    'demand-neighborhood': '需要周辺',
+    'attribute-combination': '属性組合せ',
+    'recent-sales': '直近販売',
+    'adjacent-product': '隣接商品',
+    'market-gap': '市場ギャップ',
+    evergreen: '通年需要',
+  }
+  const axisLabel = angleLabels[automation.currentAngleId] || '未開始'
+  const nextAngleId = EXPLORATION_ANGLE_ORDER[Math.min(
+    automation.angleIndex + (automation.currentAngleId ? 1 : 0),
+    EXPLORATION_ANGLE_ORDER.length - 1,
+  )]
+  const nextAxisLabel = angleLabels[nextAngleId] || '需要周辺'
+  const researchedCount = automation.evidenceKeys.length
+  const queuedCount = automation.queuedEvidenceKeys.length
   const targetWinnerCount = automation.targetWinnerCount
   const winnerCount = automation.winnerKeywords.length
   const remainingWinnerCount = Math.max(0, targetWinnerCount - winnerCount)
   const statusCopy = {
     idle: `未開始です。A/B候補${targetWinnerCount}件を目標に、最初の未調査カテゴリ「${nextAxisLabel}」から始めます。`,
-    running: `勝ち候補を探索中（${winnerCount}/${targetWinnerCount}件）。第${Math.max(automation.round, 1)}回は「${axisLabel}」を検証し、残り${remainingWinnerCount}件へ向けて「${nextAxisLabel}」へ進みます。`,
+    running: `勝ち候補を探索中（${winnerCount}/${targetWinnerCount}件）。「${axisLabel}」を検証し、残り${remainingWinnerCount}件へ向けて「${nextAxisLabel}」へ進みます。`,
     paused: `一時停止中: ${automation.pauseReason || '外部確認を再開できる状態になるまで待機します。'}`,
     stopped: `停止中。調査済み${researchedCount}件、待機${queuedCount}件を保持しています。次の未調査カテゴリから再開できます。`,
     'winner-found': `A/Bの勝ち候補を${winnerCount}/${targetWinnerCount}件確保し、今回の出品目標を達成しました。`,
@@ -3734,10 +3766,10 @@ function renderWinningNicheAutomation() {
   elements.winningNicheAutomationToggle.dataset.winningNicheAction = action
   elements.winningNicheAutomationToggle.textContent = buttonLabel
   renderListingResearchTarget()
-  renderHtmlIfChanged(elements.winningNicheAutomationRail, NICHE_AXIS_ORDER.map((axisId, index) => {
-    const label = NICHE_TAXONOMY[axisId]?.label || axisId
-    const active = axisId === automation.currentAxis
-    const next = axisId === automation.nextAxis || (status === 'idle' && index === 0)
+  renderHtmlIfChanged(elements.winningNicheAutomationRail, EXPLORATION_ANGLE_ORDER.map((axisId, index) => {
+    const label = angleLabels[axisId] || axisId
+    const active = axisId === automation.currentAngleId
+    const next = axisId === nextAngleId || (status === 'idle' && index === 0)
     const className = active ? 'is-active' : next ? 'is-next' : ''
     return `<span data-winning-niche-axis="${escapeHtml(axisId)}" class="${className}"><small>${String(index + 1).padStart(2, '0')}</small><strong>${escapeHtml(label)}</strong></span>`
   }).join('<i aria-hidden="true">→</i>'))
@@ -4602,24 +4634,6 @@ function syncCrossNicheWorkflow({ announce = false } = {}) {
       parentKeywords: [...new Set(result.queuedCandidates.map((candidate) => candidate.parentKeyword).filter(Boolean))],
       createdAt: new Date().toISOString(),
     }
-    if (winningNicheSearchIsRunning()) {
-      const continuousKeywords = state.crossNicheProposal.candidates.map((candidate) => candidate.keyword)
-      state.winningNicheAutomation = createWinningNicheAutomation({
-        ...state.winningNicheAutomation,
-        queuedKeywords: [...state.winningNicheAutomation.queuedKeywords, ...continuousKeywords],
-      })
-      applyCrossNicheProposal()
-      state.pendingEvidenceAutomation = {
-        active: true,
-        scheduled: false,
-        initialCount: continuousKeywords.length,
-        completedBatches: 0,
-        currentStage: '',
-        targetKeywords: continuousKeywords,
-      }
-      schedulePendingEvidenceAutomation(0)
-      return { didQueue: true, queuedCandidates: result.queuedCandidates, proposed: false }
-    }
     if (announce) setSimpleStatus(crossNicheProposalMessage())
     return { didQueue: false, queuedCandidates: [], proposed: true }
   }
@@ -4912,91 +4926,235 @@ function renderNextResearchAction() {
   }
 }
 
-function winningNicheSearchIsRunning() {
-  return state.winningNicheAutomation?.status === 'running'
+function multiAngleSearchIsRunning() {
+  return state.multiAngleExploration?.status === 'running'
 }
 
-function continuousDiscoveryLane(axisId) {
-  if (axisId === 'style') return 'aesthetic'
-  if (['career', 'relationship', 'buyer-context'].includes(axisId)) return 'audience'
-  if (axisId === 'hobby') return 'moment'
-  return 'adjacent'
+function marketplaceRelatedTerms() {
+  const plan = state.marketplaceInsightPlan
+  return cleanKeywordList([
+    ...(plan?.relatedKeywordMetrics ?? []).map((row) => row.keyword),
+    ...(plan?.items ?? [])
+      .filter((item) => item.status === 'completed')
+      .flatMap((item) => [
+        ...(item.result?.etsyRelatedTerms ?? []),
+        ...(item.result?.etsyRelatedKeywordMetrics ?? []).map((row) => row.keyword),
+      ]),
+  ])
 }
 
-function continuousCandidateForResearch(candidate) {
-  const event = selectedEvent()
-  const category = selectedCategory()
+function evidenceLearningRecords() {
+  return state.evidenceArchives.map(normalizeLearningRecord)
+}
+
+function nextTaxonomyCandidates() {
+  return finalEvidenceRows()
+    .filter((row) => row.drilldownNode?.specificityAxis)
+    .map((row) => ({
+      keyword: row.keyword,
+      source: 'measured-taxonomy',
+      priorityScore: row.scoreState.score ?? row.scoreState.explorationPriority,
+      sourceKeywords: [row.drilldownNode.parentKeyword].filter(Boolean),
+    }))
+}
+
+function measuredEventlessCandidates() {
+  return finalEvidenceRows()
+    .filter((row) => row.evidenceState.status === 'verified')
+    .filter((row) => !String(row.raw?.researchEventId ?? '').trim() || row.raw?.intentTrack === 'evergreen')
+    .map((row) => ({
+      keyword: row.keyword,
+      source: 'measured-evergreen',
+      priorityScore: row.scoreState.score,
+    }))
+}
+
+function currentSeasonalReferenceCandidates() {
+  const activeEventId = state.multiAngleExploration.activeEventId || selectedEvent().id
+  return evidenceLearningRecords().flatMap((record) => {
+    const eventId = String(record.eventId ?? '').trim()
+    if (!eventId || eventId === activeEventId) return []
+    const event = resolveMarketEvent({ eventId })
+    const timingStatus = classifyProductionWindow(event).status
+    return (record.demandKeywords ?? []).map((row) => ({
+      keyword: row.keyword,
+      categoryId: record.categoryId,
+      eventId,
+      timingStatus,
+      source: 'seasonal-evidence-archive',
+    }))
+  })
+}
+
+function currentMultiAnglePools() {
+  const activeEventId = state.multiAngleExploration.activeEventId || selectedEvent().id
+  const event = resolveMarketEvent({ eventId: activeEventId })
+  const category = PRODUCT_CATEGORIES.find(
+    (item) => item.id === (state.multiAngleExploration.categoryId || selectedCategory().id),
+  ) ?? selectedCategory()
+  const measuredRows = finalEvidenceRows()
+  return buildMultiAngleCandidatePools({
+    event,
+    category,
+    timingStatus: classifyProductionWindow(event).status,
+    relatedTerms: marketplaceRelatedTerms(),
+    taxonomyCandidates: nextTaxonomyCandidates(),
+    drilldownCandidates: currentCrossNicheDrilldown().candidates,
+    adjacentProductListings: evidenceLearningRecords()
+      .flatMap((record) => (record.supplyListings ?? []).map((listing) => ({
+        ...listing,
+        categoryId: listing.categoryId ?? record.categoryId,
+        sales: listing.sales ?? listing.monthlySales,
+      })))
+      .filter((listing) => listing.categoryId !== category.id),
+    measuredRows,
+    marketGapCandidates: measuredRows.map((row) => ({
+      ...row.raw,
+      ...row.normalized,
+      keyword: row.keyword,
+      comparison: row.drilldownNode?.comparison,
+      priorityScore: row.scoreState.score ?? row.scoreState.explorationPriority,
+      source: 'measured-market-gap',
+    })),
+    evergreenCandidates: measuredEventlessCandidates(),
+    seasonalReferenceCandidates: currentSeasonalReferenceCandidates(),
+  })
+}
+
+function multiAngleCandidateForResearch(candidate) {
+  const event = resolveMarketEvent({
+    eventId: candidate.eventId || state.multiAngleExploration.activeEventId,
+  })
+  const category = PRODUCT_CATEGORIES.find(
+    (item) => item.id === candidate.categoryId,
+  ) ?? selectedCategory()
   const keyword = normalizePhrase(candidate.keyword)
+  const riskTerms = detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/))
   return {
+    ...candidate,
     keyword,
     categoryId: category.id,
-    categoryLabel: `連続探索 / ${candidate.axisLabel}`,
-    eventId: event.id,
-    eventLabel: event.jpLabel,
+    categoryLabel: category.label,
+    eventId: candidate.resultLane === 'evergreen' ? '' : event.id,
+    eventLabel: candidate.resultLane === 'evergreen' ? 'Evergreen' : event.jpLabel,
     year: selectedYearOption(),
     targets: selectedTargets(),
     wordCount: keyword.split(' ').filter(Boolean).length,
-    score: 70,
-    reasons: [`${candidate.axisLabel}辞書から未調査の切り口を選択`],
-    riskTerms: [],
-    status: 'ready',
-    source: candidate.source,
+    score: candidate.priorityScore ?? 70,
+    reasons: [`${candidate.angleId}から既存エビデンス候補を選択`],
+    riskTerms,
+    status: riskTerms.length > 0 ? 'review' : 'ready',
     queryStrategy: 'cross-niche',
-    discoveryLane: continuousDiscoveryLane(candidate.axisId),
-    intentTrack: classifyEventMarketTrack(keyword, currentOptions()),
-    specificityAxis: candidate.axisId,
-    axisTerms: [candidate.axisTerm],
-    buyerIntentAxes: [candidate.axisLabel],
-    crossNicheDepth: candidate.depth,
-    crossNicheRoot: normalizePhrase(`${event.searchTerm} ${category.searchTerm}`),
+    discoveryLane: candidate.angleId === 'demand-neighborhood' ? 'adjacent' : 'aesthetic',
+    specificityAxis: candidate.angleId,
+    intentTrack: candidate.resultLane === 'evergreen'
+      ? 'evergreen'
+      : classifyEventMarketTrack(keyword, {
+          ...currentOptions(),
+          eventId: event.id,
+          categoryId: category.id,
+        }),
+    timing: getMarketTiming(event),
+    candidateStage: 'idea',
   }
 }
 
-function queueNextWinningNicheBatch() {
-  if (!winningNicheSearchIsRunning()) return false
-  const result = buildNextWinningNicheBatch({
-    automation: state.winningNicheAutomation,
-    batchSize: 8,
-    customRiskTerms: elements.riskInput.value.split(/\r?\n|,/),
+function nextAppMultiAngleBatch() {
+  const pools = currentMultiAnglePools()
+  const retryQueue = state.multiAngleExploration.retryQueue
+  if (retryQueue.length === 0) {
+    return nextMultiAngleBatch({
+      state: state.multiAngleExploration,
+      pools,
+      limit: 8,
+    })
+  }
+
+  const failedEvidenceKeys = state.multiAngleExploration.failedEvidenceKeys
+  const retryEvidenceKeys = retryQueue.map((entry) => entry.evidenceKey)
+  const normal = nextMultiAngleBatch({
+    state: {
+      ...state.multiAngleExploration,
+      retryQueue: [],
+      failedEvidenceKeys: [...new Set([...failedEvidenceKeys, ...retryEvidenceKeys])],
+      status: 'running',
+    },
+    pools,
+    limit: 8,
   })
-  state.winningNicheAutomation = result.automation
+  if (normal.candidates.length > 0) {
+    return {
+      ...normal,
+      state: {
+        ...normal.state,
+        status: 'running',
+        retryQueue,
+        failedEvidenceKeys,
+      },
+    }
+  }
+  return nextMultiAngleBatch({
+    state: {
+      ...normal.state,
+      status: 'running',
+      retryQueue,
+      failedEvidenceKeys,
+    },
+    pools,
+    limit: 8,
+  })
+}
+
+function queueNextMultiAngleBatch() {
+  if (!multiAngleSearchIsRunning()) return false
+  const result = nextAppMultiAngleBatch()
+  state.multiAngleExploration = result.state
   if (result.candidates.length === 0) {
     state.pendingEvidenceAutomation.active = false
     state.pendingEvidenceAutomation.scheduled = false
     state.pendingEvidenceAutomation.currentStage = ''
     state.pendingEvidenceAutomation.targetKeywords = []
-    setSimpleStatus(result.reason === 'candidate-pool-exhausted'
-      ? '安全な未調査候補を使い切ったため、連続探索を一時停止しました。'
-      : state.winningNicheAutomation.pauseReason)
+    if (result.reason === 'retry-wait') {
+      const nextRetryAt = state.multiAngleExploration.retryQueue
+        .map((entry) => Date.parse(entry.retryAt))
+        .filter(Number.isFinite)
+        .sort((left, right) => left - right)[0]
+      const delayMs = Math.max(250, (nextRetryAt ?? Date.now()) - Date.now())
+      setSimpleStatus('通常候補を確認しました。時間切れ候補は再試行時刻になったら続けます。')
+      window.setTimeout(() => queueNextMultiAngleBatch(), delayMs)
+    } else {
+      setSimpleStatus(result.reason === 'all-angles-exhausted'
+        ? 'すべての探索角度を確認しました。'
+        : state.multiAngleExploration.pauseReason)
+    }
     renderAll()
     persistMarketFinderState()
-    return false
+    return result.reason === 'retry-wait'
   }
 
-  const candidates = result.candidates.map(continuousCandidateForResearch)
+  const candidates = result.candidates.map(multiAngleCandidateForResearch)
   const previousRound = currentResearchRound()
   if (previousRound && previousRound.status !== 'complete') {
     state.researchRounds = updateResearchRound(state.researchRounds, previousRound.id, {
       status: 'complete',
       completedAt: new Date().toISOString(),
-      stopReason: 'A/B候補がなかったため、次の探索カテゴリへ移行',
+      stopReason: '現在角度のバッチを完了し、次の探索へ移行',
     })
   }
   state.candidates = candidates
   mergeCandidateCatalog(candidates)
   state.researchRounds = startResearchRound(state.researchRounds, {
-    type: 'continuous-niche',
-    depth: state.winningNicheAutomation.round,
+    type: 'multi-angle',
+    angleId: state.multiAngleExploration.currentAngleId || candidates[0].angleId,
+    depth: state.multiAngleExploration.angleIndex + 1,
     candidateKeywords: candidates.map((candidate) => candidate.keyword),
     status: 'pending-everbee',
     startedAt: new Date().toISOString(),
-    startReason: `${candidates[0].categoryLabel}から未調査候補を自動生成`,
+    startReason: `${candidates[0].angleId}の既存エビデンスから候補を選択`,
   })
   state.candidateRoundId = state.researchRounds.activeRoundId
   state.researchRounds.selectedRoundId = 'all'
   state.activeDiscoveryLane = 'all'
-  state.marketplaceInsightPlan = null
-  state.marketplaceInsightMessage = ''
   state.selectedResultKey = ''
   state.seoPlan = null
   state.erankQueryPlan = []
@@ -5010,132 +5168,189 @@ function queueNextWinningNicheBatch() {
     targetKeywords: candidates.map((candidate) => candidate.keyword),
   }
   state.finalEvidenceFilter = 'pending'
-  state.candidateMessage = `連続探索${state.winningNicheAutomation.round}: ${candidates[0].categoryLabel}を調査します。`
+  state.candidateMessage = `${candidates[0].angleId}: ${candidates.length}件を調査します。`
   setFlowMode('auto', { persist: false })
-  setSimpleStatus(`${candidates[0].categoryLabel}から${candidates.length}件を作成しました。EverBeeで実売候補を絞ってからEtsy公式で確認します。`)
+  setSimpleStatus(`${candidates[0].angleId}から${candidates.length}件を既存の検証パイプラインへ追加しました。`)
   renderAll()
   persistMarketFinderState()
   schedulePendingEvidenceAutomation(0)
   return true
 }
 
-async function startWinningNicheSearch() {
+async function startMultiAngleSearch() {
   if (!await confirmExtensionConnection()) return false
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
-  state.winningNicheAutomation = startWinningNicheAutomation(
-    state.winningNicheAutomation,
+  state.multiAngleExploration = startMultiAngleExploration(
+    state.multiAngleExploration,
     {
-      eventId: selectedEvent().id,
-      eventTerm: selectedEvent().searchTerm,
+      activeEventId: selectedEvent().id,
       categoryId: selectedCategory().id,
-      productTerm: selectedCategory().searchTerm,
       targetWinnerCount: target.targetWinnerCount,
     },
   )
-  return queueNextWinningNicheBatch()
+  return queueNextMultiAngleBatch()
 }
 
-async function startNewWinningNicheCycle() {
+async function startNewMultiAngleCycle() {
   if (!await confirmExtensionConnection()) return false
-  state.winningNicheAutomation = resetWinningNicheCycle(state.winningNicheAutomation)
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
-  state.winningNicheAutomation = startWinningNicheAutomation(
-    state.winningNicheAutomation,
+  state.multiAngleExploration = startMultiAngleExploration(
+    createMultiAngleExplorationState(),
     {
-      eventId: selectedEvent().id,
-      eventTerm: selectedEvent().searchTerm,
+      activeEventId: selectedEvent().id,
       categoryId: selectedCategory().id,
-      productTerm: selectedCategory().searchTerm,
       targetWinnerCount: target.targetWinnerCount,
     },
   )
-  return queueNextWinningNicheBatch()
+  return queueNextMultiAngleBatch()
 }
 
-function pauseWinningNicheSearch(reason = '') {
-  if (!winningNicheSearchIsRunning()) return
-  state.winningNicheAutomation = pauseWinningNicheAutomation(state.winningNicheAutomation, reason)
+function pauseMultiAngleSearch(reason = '', failureCode = '') {
+  if (!multiAngleSearchIsRunning()) return
+  const candidate = state.candidates.find((item) => (
+    state.pendingEvidenceAutomation.targetKeywords.includes(item.keyword)
+  ))
+  const globalFailure = ['service-unavailable', 'login-required', 'rate-limited'].includes(failureCode)
+  state.multiAngleExploration = globalFailure && candidate
+    ? recordMultiAngleFailure(state.multiAngleExploration, candidate, { code: failureCode })
+    : pauseMultiAngleExploration(state.multiAngleExploration, reason)
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
   state.pendingEvidenceAutomation.currentStage = ''
-  setSimpleStatus(state.winningNicheAutomation.pauseReason)
+  setSimpleStatus(reason || state.multiAngleExploration.pauseReason)
   renderAll()
   persistMarketFinderState()
 }
 
-async function stopWinningNicheSearch() {
-  state.winningNicheAutomation = stopWinningNicheAutomation(state.winningNicheAutomation)
+async function stopMultiAngleSearch() {
+  state.multiAngleExploration = stopMultiAngleExploration(state.multiAngleExploration)
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
   state.pendingEvidenceAutomation.currentStage = ''
   if (state.marketplaceInsightAutoRunning) stopMarketplaceInsightAutomation()
   else if (state.extensionState?.active) await stopExtensionResearch()
-  setSimpleStatus('勝ち候補の連続探索を停止しました。取得済み結果と待機候補は保持しています。')
+  setSimpleStatus('複数角度の探索を停止しました。取得済み結果と現在バッチは保持しています。')
   renderAll()
   persistMarketFinderState()
 }
 
-async function resumeWinningNicheSearch() {
+async function resumeMultiAngleSearch() {
   if (!await confirmExtensionConnection()) return false
-  state.winningNicheAutomation = resumeWinningNicheAutomation(state.winningNicheAutomation)
-  const queuedKeywords = state.winningNicheAutomation.queuedKeywords
+  state.multiAngleExploration = resumeMultiAngleExploration(state.multiAngleExploration)
+  const queuedKeywords = state.pendingEvidenceAutomation.targetKeywords
   if (queuedKeywords.length > 0) {
     state.pendingEvidenceAutomation = {
+      ...state.pendingEvidenceAutomation,
       active: true,
       scheduled: false,
-      initialCount: queuedKeywords.length,
-      completedBatches: 0,
+      initialCount: Math.max(queuedKeywords.length, state.pendingEvidenceAutomation.initialCount),
       currentStage: '',
-      targetKeywords: [...queuedKeywords],
     }
-    setSimpleStatus(`${queuedKeywords.length}件の待機候補から連続探索を再開します。`)
+    setSimpleStatus(`${queuedKeywords.length}件の現在バッチから探索を再開します。`)
     renderAll()
     persistMarketFinderState()
     schedulePendingEvidenceAutomation(0)
     return true
   }
-  return queueNextWinningNicheBatch()
+  return queueNextMultiAngleBatch()
 }
 
-function completeWinningNicheBatch() {
-  if (!winningNicheSearchIsRunning()) return false
+function multiAngleFailureCode(value = '') {
+  const message = String(value ?? '')
+  if (isExtensionResponseTimeout(message) || /timeout|time out|時間切れ/i.test(message)) return 'page-timeout'
+  if (/rate.?limit|429|検索上限|アクセス制限/i.test(message)) return 'rate-limited'
+  if (/login|sign.?in|ログイン/i.test(message)) return 'login-required'
+  if (/unavailable|connection|接続|service/i.test(message)) return 'service-unavailable'
+  return 'unknown'
+}
+
+function continueAfterMultiAnglePageTimeout(message = '') {
   const targetKeys = new Set(state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase))
-  const batchRows = finalEvidenceRows().filter((row) => targetKeys.has(normalizePhrase(row.keyword)))
-  state.winningNicheAutomation = evaluateWinningNicheRows(state.winningNicheAutomation, batchRows)
+  const activeKeyword = normalizePhrase(state.extensionState?.currentKeyword)
+  const candidate = state.candidates.find((item) => (
+    targetKeys.has(normalizePhrase(item.keyword))
+    && (!activeKeyword || normalizePhrase(item.keyword) === activeKeyword)
+  )) ?? state.candidates.find((item) => targetKeys.has(normalizePhrase(item.keyword)))
+  if (!candidate) return false
 
-  if (state.winningNicheAutomation.status === 'winner-found') {
-    state.pendingEvidenceAutomation.active = false
-    state.pendingEvidenceAutomation.scheduled = false
-    state.pendingEvidenceAutomation.currentStage = ''
-    state.pendingEvidenceAutomation.targetKeywords = []
-    setSimpleStatus(`A/B候補を${state.winningNicheAutomation.winnerKeywords.length}/${state.winningNicheAutomation.targetWinnerCount}件確保しました。今回の探索を停止します。`)
-    renderAll()
-    persistMarketFinderState()
-    return true
-  }
-
-  const etsyConfirmationRows = pendingEvidenceBatch(
-    finalEvidenceRows(),
-    'pending-etsy',
-    8,
+  state.multiAngleExploration = recordMultiAngleFailure(
+    state.multiAngleExploration,
+    candidate,
+    { code: 'page-timeout', retryAfterMs: 60_000 },
   )
-  if (etsyConfirmationRows.length > 0) {
-    state.pendingEvidenceAutomation = {
-      active: true,
-      scheduled: false,
-      initialCount: etsyConfirmationRows.length,
-      completedBatches: 0,
-      currentStage: 'pending-etsy',
-      targetKeywords: etsyConfirmationRows.map((row) => row.keyword),
-    }
-    setSimpleStatus(`保存済みEverBee結果から有望な${etsyConfirmationRows.length}件をEtsy公式で確認します。`)
-    renderAll()
+  state.pendingEvidenceAutomation.targetKeywords = state.pendingEvidenceAutomation.targetKeywords
+    .filter((keyword) => normalizePhrase(keyword) !== normalizePhrase(candidate.keyword))
+  state.pendingEvidenceAutomation.scheduled = false
+  setSimpleStatus(`${candidate.keyword}はページ応答待ちで再試行へ移しました。ほかの通常候補を続けます。${message}`)
+  if (state.pendingEvidenceAutomation.targetKeywords.length > 0) {
+    state.pendingEvidenceAutomation.active = true
     persistMarketFinderState()
     schedulePendingEvidenceAutomation(0)
     return true
   }
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  persistMarketFinderState()
+  return queueNextMultiAngleBatch()
+}
 
-  return queueNextWinningNicheBatch()
+function completeMultiAngleBatch() {
+  if (!multiAngleSearchIsRunning()) return false
+  const targetKeys = new Set(state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase))
+  const rowsByKeyword = new Map(
+    finalEvidenceRows()
+      .filter((row) => targetKeys.has(normalizePhrase(row.keyword)))
+      .map((row) => [normalizePhrase(row.keyword), row]),
+  )
+  const successfulRows = []
+  for (const candidate of state.candidates.filter((item) => targetKeys.has(normalizePhrase(item.keyword)))) {
+    const row = rowsByKeyword.get(normalizePhrase(candidate.keyword))
+    if (!row) {
+      state.multiAngleExploration = recordMultiAngleFailure(
+        state.multiAngleExploration,
+        candidate,
+        { code: 'page-timeout', retryAfterMs: 60_000 },
+      )
+      continue
+    }
+    if (row.evidenceState.status === 'failed') {
+      state.multiAngleExploration = recordMultiAngleFailure(
+        state.multiAngleExploration,
+        candidate,
+        {
+          code: multiAngleFailureCode(row.raw?.error),
+          retryAfterMs: 60_000,
+        },
+      )
+      if (state.multiAngleExploration.status === 'paused') break
+      continue
+    }
+    successfulRows.push({ ...candidate, ...row })
+  }
+  if (successfulRows.length > 0) {
+    state.multiAngleExploration = recordMultiAngleBatch(
+      state.multiAngleExploration,
+      successfulRows,
+    )
+  }
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.scheduled = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  state.pendingEvidenceAutomation.targetKeywords = []
+
+  if (state.multiAngleExploration.status === 'paused') {
+    setSimpleStatus(`探索を一時停止しました: ${state.multiAngleExploration.pauseReason}`)
+    renderAll()
+    persistMarketFinderState()
+    return false
+  }
+  if (state.multiAngleExploration.status === 'winner-found') {
+    setSimpleStatus(`A/B候補を${state.multiAngleExploration.winnerKeywords.length}/${state.multiAngleExploration.targetWinnerCount}件確保しました。今回の探索を停止します。`)
+    renderAll()
+    persistMarketFinderState()
+    return true
+  }
+  return queueNextMultiAngleBatch()
 }
 
 function renderPendingEvidenceAutomationButton(pendingCount = pendingEvidenceRows().length) {
@@ -5194,8 +5409,8 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
       state.pendingEvidenceAutomation.targetKeywords,
     )
     if (remainingRows.length === 0) {
-      if (winningNicheSearchIsRunning() && state.pendingEvidenceAutomation.targetKeywords.length > 0) {
-        completeWinningNicheBatch()
+      if (multiAngleSearchIsRunning() && state.pendingEvidenceAutomation.targetKeywords.length > 0) {
+        completeMultiAngleBatch()
         return
       }
       const checked = Math.max(0, state.pendingEvidenceAutomation.initialCount)
@@ -5214,12 +5429,27 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
         allowedKeywords: state.pendingEvidenceAutomation.targetKeywords,
       })
       if (!started && state.pendingEvidenceAutomation.active) {
-        pauseWinningNicheSearch('次に開始できる検証がないため、連続探索を一時停止しました。')
-        stopPendingEvidenceAutomation('次に開始できる検証がないため、自動検証を停止しました。')
+        const failureCode = multiAngleFailureCode(state.progress.message)
+        if (failureCode === 'page-timeout' && multiAngleSearchIsRunning()) {
+          continueAfterMultiAnglePageTimeout()
+        } else {
+          pauseMultiAngleSearch(
+            '次に開始できる検証がないため、複数角度の探索を一時停止しました。',
+            failureCode,
+          )
+        }
       }
     } catch (error) {
-      pauseWinningNicheSearch(`連続探索を一時停止しました。${friendlyExtensionError(error)}`)
-      stopPendingEvidenceAutomation(`自動検証を停止しました。${friendlyExtensionError(error)}`)
+      const message = friendlyExtensionError(error)
+      const failureCode = multiAngleFailureCode(message)
+      if (failureCode === 'page-timeout' && multiAngleSearchIsRunning()) {
+        continueAfterMultiAnglePageTimeout(message)
+      } else {
+        pauseMultiAngleSearch(
+          `複数角度の探索を一時停止しました。${message}`,
+          failureCode,
+        )
+      }
     }
   }, delayMs)
 }
@@ -5230,7 +5460,9 @@ function resumePersistedEvidenceAutomationIfReady() {
   state.pendingEvidenceAutomation = normalizePendingEvidenceAutomation(
     state.pendingEvidenceAutomation,
   )
-  if (!state.pendingEvidenceAutomation.active) return false
+  if (!state.pendingEvidenceAutomation.active) {
+    return multiAngleSearchIsRunning() ? queueNextMultiAngleBatch() : false
+  }
 
   const delayMs = marketplaceRetryDelay(state.marketplaceRetryState)
   if (delayMs > 0) {
@@ -5246,7 +5478,6 @@ function resumePersistedEvidenceAutomationIfReady() {
 
 async function togglePendingEvidenceAutomation() {
   if (state.pendingEvidenceAutomation.active) {
-    state.winningNicheAutomation = stopWinningNicheAutomation(state.winningNicheAutomation)
     stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
     if (state.marketplaceInsightAutoRunning) {
       stopMarketplaceInsightAutomation()
@@ -5265,22 +5496,6 @@ async function togglePendingEvidenceAutomation() {
   }
   if (!await confirmExtensionConnection()) return
 
-  state.winningNicheAutomation = startWinningNicheAutomation(
-    state.winningNicheAutomation,
-    {
-      eventId: selectedEvent().id,
-      eventTerm: selectedEvent().searchTerm,
-      categoryId: selectedCategory().id,
-      productTerm: selectedCategory().searchTerm,
-    },
-  )
-  state.winningNicheAutomation = createWinningNicheAutomation({
-    ...state.winningNicheAutomation,
-    queuedKeywords: [
-      ...state.winningNicheAutomation.queuedKeywords,
-      ...initialPendingRows.map((row) => row.keyword),
-    ],
-  })
   state.pendingEvidenceAutomation = {
     active: true,
     scheduled: false,
@@ -7587,8 +7802,10 @@ function handleExtensionMessage(event) {
     resumePersistedEvidenceAutomationIfReady()
     if (state.pendingEvidenceAutomation?.active && wasActive && !data.state?.active) {
       if (erankDailyLimitReached) {
-        pauseWinningNicheSearch('eRankの1日あたりの検索上限に達しました。翌日のリセット後に探索を再開してください。')
-        stopPendingEvidenceAutomation('eRankの1日あたりの検索上限に達したため停止しました。未検証は残しています。翌日のリセット後に再開してください。')
+        pauseMultiAngleSearch(
+          'eRankの1日あたりの検索上限に達しました。翌日のリセット後に探索を再開してください。',
+          'rate-limited',
+        )
       } else {
         schedulePendingEvidenceAutomation()
       }
@@ -7669,7 +7886,7 @@ async function pollExtensionState() {
     const message = friendlyExtensionError(error)
     state.extensionPollFailureCount = 0
     state.extensionConnected = false
-    pauseWinningNicheSearch(`Chrome拡張との接続が切れました。${message}`)
+    pauseMultiAngleSearch(`Chrome拡張との接続が切れました。${message}`, 'service-unavailable')
     releaseRunningControls()
     renderExtensionStateUpdate()
     elements.extensionStatus.textContent = message
@@ -8034,9 +8251,13 @@ async function runMarketplaceInsightAutomation() {
     if (state.pendingEvidenceAutomation.active) {
       if (stoppedByError || stoppedByUser) {
         if (stoppedByError) {
-          pauseWinningNicheSearch('Etsy公式確認でエラーが発生したため、連続探索を一時停止しました。')
+          pauseMultiAngleSearch(
+            'Etsy公式確認でエラーが発生したため、複数角度の探索を一時停止しました。',
+            multiAngleFailureCode(state.marketplaceInsightMessage),
+          )
+        } else {
+          stopPendingEvidenceAutomation('Etsy公式確認が停止したため、未検証の自動検証も停止しました。')
         }
-        stopPendingEvidenceAutomation('Etsy公式確認が停止したため、未検証の自動検証も停止しました。')
       } else {
         schedulePendingEvidenceAutomation()
       }
@@ -8394,18 +8615,18 @@ function bindEvents() {
   elements.winningNicheAutomationToggle?.addEventListener('click', (event) => {
     const action = event.currentTarget.dataset.winningNicheAction
     if (action === 'stop') {
-      stopWinningNicheSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      stopMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
     if (action === 'resume') {
-      resumeWinningNicheSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      resumeMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
     if (action === 'new-cycle') {
-      startNewWinningNicheCycle().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      startNewMultiAngleCycle().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
-    startWinningNicheSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+    startMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
   })
   elements.finalEvidenceScrollProxy.addEventListener('scroll', () => {
     if (elements.finalEvidenceTable.scrollLeft !== elements.finalEvidenceScrollProxy.scrollLeft) {

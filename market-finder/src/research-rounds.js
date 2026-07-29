@@ -21,22 +21,29 @@ function emptyCounts(value = {}) {
   return Object.fromEntries(GRADES.map((grade) => [grade, Math.max(0, Number(value?.[grade]) || 0)]))
 }
 
-function roundId(type, depth) {
+function roundId(type, depth, angleId = '') {
   if (type === 'initial') return 'initial'
   if (type === 'continuous-niche') return `continuous-niche-${Math.max(1, Number(depth) || 1)}`
+  if (type === 'multi-angle') {
+    return `multi-angle-${String(angleId || 'unknown').trim()}-${Math.max(1, Number(depth) || 1)}`
+  }
   return `cross-niche-${Math.max(1, Math.min(3, Number(depth) || 1))}`
 }
 
 function sanitizeRound(value = {}) {
-  const type = ['cross-niche', 'continuous-niche'].includes(value.type) ? value.type : 'initial'
+  const type = ['cross-niche', 'continuous-niche', 'multi-angle'].includes(value.type)
+    ? value.type
+    : 'initial'
   const depth = type === 'initial'
     ? 0
-    : type === 'continuous-niche'
+    : ['continuous-niche', 'multi-angle'].includes(type)
       ? Math.max(1, Number(value.depth) || 1)
       : Math.max(1, Math.min(3, Number(value.depth) || 1))
+  const angleId = type === 'multi-angle' ? String(value.angleId ?? '').trim() : ''
   return {
-    id: roundId(type, depth),
+    id: roundId(type, depth, angleId),
     type,
+    angleId,
     depth,
     status: ROUND_STATUSES.has(value.status) ? value.status : 'pending-erank',
     candidateKeywords: uniqueKeywords(value.candidateKeywords),

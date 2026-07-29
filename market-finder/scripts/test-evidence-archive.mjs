@@ -53,6 +53,12 @@ test('stores research evidence on disk and lists it back', async (t) => {
     eventId: 'halloween',
     demandKeywords: [{ keyword: 'halloween nurse shirt', etsySearches30d: 1300 }],
     supplyListings: [{ title: 'NICU Nurse Halloween Sweatshirt', monthlySales: 4 }],
+    multiAngleExploration: {
+      exhaustedAngles: ['demand-neighborhood', 'attribute-combination'],
+    },
+    explorationProvenance: {
+      'spooky nurse shirt|shirt|halloween': ['demand-neighborhood', 'recent-sales'],
+    },
   }
   const saved = await fetch(`http://127.0.0.1:${port}/market-finder/archive`, {
     method: 'POST',
@@ -66,6 +72,14 @@ test('stores research evidence on disk and lists it back', async (t) => {
   // The stored file has to be readable back through the same static route the app fetches.
   const fetched = await (await fetch(`http://127.0.0.1:${port}/market-finder/archive/${name}`)).json()
   assert.deepEqual(fetched.demandKeywords, record.demandKeywords)
+  assert.deepEqual(record.multiAngleExploration.exhaustedAngles, [
+    'demand-neighborhood',
+    'attribute-combination',
+  ])
+  assert.deepEqual(
+    record.explorationProvenance['spooky nurse shirt|shirt|halloween'],
+    ['demand-neighborhood', 'recent-sales'],
+  )
 
   const relisted = await (await fetch(`http://127.0.0.1:${port}/market-finder/archive`)).json()
   assert.deepEqual(relisted.files, [name])
@@ -172,6 +186,8 @@ test('feeds versioned contextual archives into the next candidate search', () =>
   assert.match(app, /learnedSignals: learnedSignalsForGeneration\(\)/)
   assert.match(app, /version: 3/)
   assert.match(app, /drilldownNodes:/)
+  assert.match(app, /multiAngleExploration:\s*createMultiAngleExplorationState\(state\.multiAngleExploration\)/)
+  assert.match(app, /explorationProvenance:\s*state\.multiAngleExploration\.provenance/)
   assert.match(app, /function currentEvidenceRunId\(\)/)
   assert.match(app, /`\$\{round\.id\}:\$\{startedAt\}`/)
   assert.match(app, /const runId = currentEvidenceRunId\(\)/)
