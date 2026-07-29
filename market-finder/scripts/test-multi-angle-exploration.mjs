@@ -107,6 +107,8 @@ test('separates a researched demand angle from a later attribute angle with no c
     evidenceState: { status: 'verified' },
     opportunityLabel: 'C',
   }])
+  assert.deepEqual(recorded.attemptedAngles, ['demand-neighborhood'])
+  assert.deepEqual(recorded.completedAngles, [])
   const advanced = nextMultiAngleBatch({ state: recorded, pools })
 
   const restored = createMultiAngleExplorationState(
@@ -117,7 +119,40 @@ test('separates a researched demand angle from a later attribute angle with no c
   assert.equal(restored.currentAngleId, 'recent-sales')
 })
 
-test('records a definitively failed angle as processed instead of candidate-none', () => {
+test('keeps a ninth candidate in the same angle after recording a limit-eight batch', () => {
+  const demandCandidates = Array.from({ length: 9 }, (_, index) => ({
+    keyword: `spooky niche ${index + 1} shirt`,
+    categoryId: 'shirt',
+    eventId: 'halloween',
+  }))
+  const pools = { 'demand-neighborhood': demandCandidates }
+  const first = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, context),
+    pools,
+    limit: 8,
+  })
+  const recorded = recordMultiAngleBatch(first.state, first.candidates.map((candidate) => ({
+    ...candidate,
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  })))
+  const ninth = nextMultiAngleBatch({
+    state: recorded,
+    pools,
+    limit: 8,
+  })
+
+  assert.equal(first.candidates.length, 8)
+  assert.deepEqual(recorded.attemptedAngles, ['demand-neighborhood'])
+  assert.deepEqual(recorded.completedAngles, [])
+  assert.deepEqual(ninth.candidates.map((candidate) => candidate.keyword), [
+    'spooky niche 9 shirt',
+  ])
+  assert.equal(ninth.state.currentAngleId, 'demand-neighborhood')
+  assert.deepEqual(ninth.state.completedAngles, [])
+})
+
+test('promotes a definitively failed angle only after no unseen or retry work remains', () => {
   const batch = nextMultiAngleBatch({
     state: startMultiAngleExploration({}, context),
     pools: {
@@ -133,9 +168,97 @@ test('records a definitively failed angle as processed instead of candidate-none
     batch.candidates[0],
     { code: 'invalid-page' },
   )
+  const advanced = nextMultiAngleBatch({
+    state: failed,
+    pools: {
+      'demand-neighborhood': [{
+        keyword: 'spooky nurse shirt',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+      }],
+    },
+  })
 
-  assert.deepEqual(failed.completedAngles, ['demand-neighborhood'])
+  assert.deepEqual(failed.attemptedAngles, ['demand-neighborhood'])
+  assert.deepEqual(failed.completedAngles, [])
   assert.deepEqual(failed.emptyAngles, [])
+  assert.deepEqual(advanced.state.completedAngles, ['demand-neighborhood'])
+})
+
+test('keeps attempted timeout work incomplete until its retry is definitively resolved', () => {
+  const pools = {
+    'demand-neighborhood': [{
+      keyword: 'spooky nurse shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+    }],
+  }
+  const batch = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, context),
+    pools,
+    angleOrder: ['demand-neighborhood'],
+  })
+  const once = recordMultiAngleFailure(
+    batch.state,
+    batch.candidates[0],
+    { code: 'page-timeout', retryAfterMs: 60_000 },
+    '2026-07-30T00:00:00Z',
+  )
+  const waiting = nextMultiAngleBatch({
+    state: once,
+    pools,
+    angleOrder: ['demand-neighborhood'],
+    now: '2026-07-30T00:00:30Z',
+  })
+  const due = nextMultiAngleBatch({
+    state: waiting.state,
+    pools,
+    angleOrder: ['demand-neighborhood'],
+    now: '2026-07-30T00:01:00Z',
+  })
+  const failed = recordMultiAngleFailure(
+    due.state,
+    due.candidates[0],
+    { code: 'page-timeout', retryAfterMs: 60_000 },
+    '2026-07-30T00:01:01Z',
+  )
+  const finished = nextMultiAngleBatch({
+    state: failed,
+    pools,
+    angleOrder: ['demand-neighborhood'],
+    now: '2026-07-30T00:02:00Z',
+  })
+
+  assert.deepEqual(once.attemptedAngles, ['demand-neighborhood'])
+  assert.deepEqual(once.completedAngles, [])
+  assert.equal(waiting.reason, 'retry-wait')
+  assert.deepEqual(waiting.state.completedAngles, [])
+  assert.equal(due.reason, 'retry-ready')
+  assert.deepEqual(failed.completedAngles, [])
+  assert.deepEqual(finished.state.completedAngles, ['demand-neighborhood'])
+})
+
+test('keeps a paused unresolved batch attempted and incomplete across reload', () => {
+  const batch = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, context),
+    pools: {
+      'demand-neighborhood': [{
+        keyword: 'spooky nurse shirt',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+      }],
+    },
+  })
+  const paused = pauseMultiAngleExploration(batch.state, 'service-unavailable')
+  const restored = createMultiAngleExplorationState(
+    JSON.parse(JSON.stringify(paused)),
+  )
+
+  assert.deepEqual(restored.currentBatchCandidates.map((candidate) => candidate.keyword), [
+    'spooky nurse shirt',
+  ])
+  assert.deepEqual(restored.attemptedAngles, [])
+  assert.deepEqual(restored.completedAngles, [])
 })
 
 test('normalizes legacy exhausted angles as empty without inferring completion from provenance', () => {
@@ -146,6 +269,7 @@ test('normalizes legacy exhausted angles as empty without inferring completion f
     },
   })
 
+  assert.deepEqual(restored.attemptedAngles, [])
   assert.deepEqual(restored.completedAngles, [])
   assert.deepEqual(restored.emptyAngles, ['attribute-combination'])
   assert.deepEqual(restored.exhaustedAngles, ['attribute-combination'])
@@ -154,8 +278,18 @@ test('normalizes legacy exhausted angles as empty without inferring completion f
     completedAngles: ['demand-neighborhood'],
     exhaustedAngles: ['demand-neighborhood', 'attribute-combination'],
   })
-  assert.deepEqual(partiallyMigrated.completedAngles, ['demand-neighborhood'])
+  assert.deepEqual(partiallyMigrated.attemptedAngles, ['demand-neighborhood'])
+  assert.deepEqual(partiallyMigrated.completedAngles, [])
   assert.deepEqual(partiallyMigrated.emptyAngles, ['attribute-combination'])
+
+  const currentFormat = createMultiAngleExplorationState({
+    attemptedAngles: ['demand-neighborhood'],
+    completedAngles: ['demand-neighborhood'],
+    emptyAngles: ['attribute-combination'],
+  })
+  assert.deepEqual(currentFormat.attemptedAngles, ['demand-neighborhood'])
+  assert.deepEqual(currentFormat.completedAngles, ['demand-neighborhood'])
+  assert.deepEqual(currentFormat.emptyAngles, ['attribute-combination'])
 })
 
 test('treats winner-found and exhausted as completed cycles with one new-cycle action', () => {
@@ -268,6 +402,7 @@ test('prepares an exhausted cycle as fresh idle work while preserving saved refe
     'retryQueue',
     'failedEvidenceKeys',
     'winnerKeywords',
+    'attemptedAngles',
     'completedAngles',
     'emptyAngles',
     'exhaustedAngles',

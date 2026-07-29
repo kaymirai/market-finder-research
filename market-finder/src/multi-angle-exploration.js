@@ -222,10 +222,15 @@ export function createMultiAngleExplorationState(saved = {}) {
       categoryId,
     }, currentAngleId))
     .filter(Boolean)
-  const completedAngles = uniqueStrings(saved?.completedAngles)
+  const legacyCompletedAngles = uniqueStrings(saved?.completedAngles)
+  const hasAttemptedAngleState = Array.isArray(saved?.attemptedAngles)
+  const attemptedAngles = hasAttemptedAngleState
+    ? uniqueStrings([...saved.attemptedAngles, ...legacyCompletedAngles])
+    : legacyCompletedAngles
+  const completedAngles = hasAttemptedAngleState ? legacyCompletedAngles : []
   const emptyAngles = uniqueStrings(
     Array.isArray(saved?.emptyAngles) ? saved.emptyAngles : saved?.exhaustedAngles,
-  ).filter((angleId) => !completedAngles.includes(angleId))
+  ).filter((angleId) => !attemptedAngles.includes(angleId))
   return {
     status,
     activeEventId,
@@ -243,6 +248,7 @@ export function createMultiAngleExplorationState(saved = {}) {
     winnerKeywords: uniqueStrings(saved?.winnerKeywords),
     targetWinnerCount: positiveInteger(saved?.targetWinnerCount, 1),
     resultLanes: normalizedResultLanes(saved?.resultLanes),
+    attemptedAngles,
     completedAngles,
     emptyAngles,
     exhaustedAngles: uniqueStrings([...completedAngles, ...emptyAngles]),
@@ -652,10 +658,24 @@ export function nextMultiAngleBatch({
     ...current.retryQueue.map((entry) => entry.evidenceKey),
     ...current.failedEvidenceKeys,
   ])
+  const attempted = new Set(current.attemptedAngles)
   const completed = new Set(current.completedAngles)
   const empty = new Set(current.emptyAngles)
-  for (let index = current.angleIndex; index < angleOrder.length; index += 1) {
-    const angleId = String(angleOrder[index] ?? '').trim()
+  const pendingRetryAngles = new Set(current.retryQueue.map((entry) => (
+    String(entry.candidate?.angleId ?? current.currentAngleId).trim()
+  )).filter(Boolean))
+  const anglesToReview = uniqueStrings([
+    ...angleOrder.filter((angleId, index) => (
+      index < current.angleIndex
+      && attempted.has(angleId)
+      && !completed.has(angleId)
+      && !empty.has(angleId)
+    )),
+    ...angleOrder.slice(current.angleIndex),
+  ])
+  for (const angleId of anglesToReview) {
+    const index = angleOrder.indexOf(angleId)
+    if (completed.has(angleId) || empty.has(angleId)) continue
     const unseen = []
     for (const rawCandidate of pools[angleId] ?? []) {
       const candidate = hydrateCandidate(rawCandidate, current, angleId)
@@ -667,7 +687,12 @@ export function nextMultiAngleBatch({
       if (unseen.length >= batchLimit) break
     }
     if (unseen.length === 0) {
-      if (!completed.has(angleId)) empty.add(angleId)
+      if (pendingRetryAngles.has(angleId)) continue
+      if (attempted.has(angleId)) {
+        completed.add(angleId)
+      } else {
+        empty.add(angleId)
+      }
       continue
     }
     empty.delete(angleId)
@@ -680,6 +705,7 @@ export function nextMultiAngleBatch({
         angleIndex: index,
         queuedEvidenceKeys: unseen.map(candidateEvidenceKey),
         currentBatchCandidates: unseen,
+        attemptedAngles: [...attempted],
         completedAngles: [...completed],
         emptyAngles: [...empty],
         exhaustedAngles: [...new Set([...completed, ...empty])],
@@ -694,6 +720,7 @@ export function nextMultiAngleBatch({
       state: {
         ...current,
         status: 'running',
+        attemptedAngles: [...attempted],
         completedAngles: [...completed],
         emptyAngles: [...empty],
         exhaustedAngles: [...new Set([...completed, ...empty])],
@@ -708,6 +735,7 @@ export function nextMultiAngleBatch({
     status: 'exhausted',
     queuedEvidenceKeys: [],
     currentBatchCandidates: [],
+    attemptedAngles: [...attempted],
     completedAngles: [...completed],
     emptyAngles: [...empty],
     exhaustedAngles: [...new Set([...completed, ...empty])],
@@ -722,6 +750,7 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
   let provenance = current.provenance
   let resultLanes = current.resultLanes
   const recordedKeys = []
+  const attemptedAngleIds = []
   const winners = []
 
   for (const row of Array.isArray(rows) ? rows : []) {
@@ -729,6 +758,7 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
     if (!candidate) continue
     const evidenceKey = candidateEvidenceKey(candidate)
     recordedKeys.push(evidenceKey)
+    attemptedAngleIds.push(candidate.angleId || current.currentAngleId)
     provenance = withProvenance(provenance, candidate, current.currentAngleId)
     resultLanes = appendLane(resultLanes, candidate.resultLane, candidate)
     const grade = String(
@@ -748,11 +778,13 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
   const targetReached = winnerKeywords.length >= current.targetWinnerCount
   const wasPaused = current.status === 'paused'
   const updatedAt = timestamp(now)
-  const completedAngles = recordedKeys.length > 0 && current.currentAngleId
-    ? uniqueStrings([...current.completedAngles, current.currentAngleId])
-    : current.completedAngles
+  const attemptedAngles = uniqueStrings([
+    ...current.attemptedAngles,
+    ...attemptedAngleIds,
+  ])
+  const completedAngles = current.completedAngles
   const emptyAngles = current.emptyAngles
-    .filter((angleId) => !completedAngles.includes(angleId))
+    .filter((angleId) => !attemptedAngles.includes(angleId))
   return {
     ...current,
     status: wasPaused ? 'paused' : targetReached ? 'winner-found' : 'running',
@@ -764,6 +796,7 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
     retryQueue: current.retryQueue.filter((entry) => !recorded.has(entry.evidenceKey)),
     winnerKeywords,
     resultLanes,
+    attemptedAngles,
     completedAngles,
     emptyAngles,
     exhaustedAngles: uniqueStrings([...completedAngles, ...emptyAngles]),
@@ -788,6 +821,14 @@ export function recordMultiAngleFailure(
   }
 
   const evidenceKey = candidateEvidenceKey(candidate)
+  const candidateAngleId = candidate.angleId || current.currentAngleId
+  const attemptedAngles = candidateAngleId
+    ? uniqueStrings([...current.attemptedAngles, candidateAngleId])
+    : current.attemptedAngles
+  const completedAngles = current.completedAngles
+    .filter((angleId) => angleId !== candidateAngleId)
+  const emptyAngles = current.emptyAngles
+    .filter((angleId) => angleId !== candidateAngleId)
   const previousRetry = current.retryQueue.find((entry) => entry.evidenceKey === evidenceKey)
   const otherRetries = current.retryQueue.filter((entry) => entry.evidenceKey !== evidenceKey)
   const queuedEvidenceKeys = current.queuedEvidenceKeys.filter((key) => key !== evidenceKey)
@@ -806,6 +847,10 @@ export function recordMultiAngleFailure(
         status: 'running',
         queuedEvidenceKeys,
         currentBatchCandidates,
+        attemptedAngles,
+        completedAngles,
+        emptyAngles,
+        exhaustedAngles: uniqueStrings([...completedAngles, ...emptyAngles]),
         retryQueue: [...otherRetries, {
           evidenceKey,
           candidate,
@@ -817,11 +862,6 @@ export function recordMultiAngleFailure(
     }
   }
 
-  const completedAngles = current.currentAngleId
-    ? uniqueStrings([...current.completedAngles, current.currentAngleId])
-    : current.completedAngles
-  const emptyAngles = current.emptyAngles
-    .filter((angleId) => !completedAngles.includes(angleId))
   return {
     ...current,
     status: 'running',
@@ -829,6 +869,7 @@ export function recordMultiAngleFailure(
     currentBatchCandidates,
     retryQueue: otherRetries,
     failedEvidenceKeys: uniqueStrings([...current.failedEvidenceKeys, evidenceKey]),
+    attemptedAngles,
     completedAngles,
     emptyAngles,
     exhaustedAngles: uniqueStrings([...completedAngles, ...emptyAngles]),

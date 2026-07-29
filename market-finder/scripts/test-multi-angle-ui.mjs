@@ -158,6 +158,26 @@ test('renders researched and candidate-none angles from explicit state without s
   assert.doesNotMatch(angleStateBody, /automation\.provenance|automation\.evidenceKeys/)
 })
 
+test('keeps a paused current angle active even if restored terminal markers disagree', () => {
+  const angleStateBody = app.slice(
+    app.indexOf('function explorationAngleState('),
+    app.indexOf('\nfunction ', app.indexOf('function explorationAngleState(') + 1),
+  )
+  const angleState = new Function(
+    `${angleStateBody}; return explorationAngleState`,
+  )()
+  const automation = {
+    status: 'paused',
+    currentAngleId: 'demand-neighborhood',
+    currentBatchCandidates: [{ keyword: 'unresolved' }],
+    retryQueue: [],
+    completedAngles: ['demand-neighborhood'],
+    emptyAngles: ['demand-neighborhood'],
+  }
+
+  assert.equal(angleState(automation, 'demand-neighborhood', 0), 'active')
+})
+
 test('treats the last evergreen angle as final instead of repeating it as next', () => {
   const progressBody = app.slice(
     app.indexOf('function explorationRouteProgress('),
@@ -184,6 +204,42 @@ test('treats the last evergreen angle as final instead of repeating it as next',
   assert.equal(progress.nextAngleId, '')
   assert.equal(progress.isFinal, true)
   assert.match(app, /最終角度です。完了後は今回の探索を終了します。/)
+})
+
+test('uses terminal route copy without promising another angle', () => {
+  const copyBody = app.slice(
+    app.indexOf('function explorationRouteCopy('),
+    app.indexOf('\nfunction ', app.indexOf('function explorationRouteCopy(') + 1),
+  )
+  const explorationRouteCopy = new Function(
+    'EXPLORATION_ANGLE_LABELS',
+    'EXPLORATION_ANGLE_ORDER',
+    `${copyBody}; return explorationRouteCopy`,
+  )({
+    'demand-neighborhood': '需要周辺',
+    'attribute-combination': '属性掛け合わせ',
+  }, [
+    'demand-neighborhood',
+    'attribute-combination',
+  ])
+
+  const winnerCopy = explorationRouteCopy({
+    status: 'winner-found',
+    currentAngleId: 'demand-neighborhood',
+    completedAngles: [],
+    emptyAngles: [],
+  })
+  const exhaustedCopy = explorationRouteCopy({
+    status: 'exhausted',
+    currentAngleId: '',
+    completedAngles: [],
+    emptyAngles: ['demand-neighborhood', 'attribute-combination'],
+  })
+
+  assert.match(winnerCopy, /探索完了|目標達成/)
+  assert.match(exhaustedCopy, /探索完了|候補.*確認/)
+  assert.doesNotMatch(winnerCopy, /完了後|へ進/)
+  assert.doesNotMatch(exhaustedCopy, /未開始|最終角度|完了後|へ進/)
 })
 
 test('has no hidden all-seasonal save control or dead all-handler branch', () => {

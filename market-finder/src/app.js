@@ -3912,6 +3912,16 @@ function renderMarketTimingGate() {
 
 function explorationAngleState(automation, angleId, index) {
   const isCurrent = automation.currentAngleId === angleId
+  const hasCurrentBatch = (automation.currentBatchCandidates ?? [])
+    .some((candidate) => !candidate.angleId || candidate.angleId === angleId)
+  const hasCurrentRetry = (automation.retryQueue ?? [])
+    .some((entry) => !entry.candidate?.angleId || entry.candidate.angleId === angleId)
+  const isCurrentInProgress = isCurrent && (
+    hasCurrentBatch
+    || hasCurrentRetry
+    || ['running', 'paused'].includes(automation.status)
+  )
+  if (isCurrentInProgress) return 'active'
   if ((automation.completedAngles ?? []).includes(angleId)) return 'complete'
   if ((automation.emptyAngles ?? []).includes(angleId)) return 'empty'
   if (isCurrent) return 'active'
@@ -3936,18 +3946,37 @@ function explorationRouteProgress(automation) {
   }
 }
 
+function explorationRouteCopy(automation) {
+  if (automation.status === 'winner-found') {
+    return '探索完了: A/B目標を達成しました。「新しい調査を始める」から別のサイクルを開始できます。'
+  }
+  if (automation.status === 'exhausted') {
+    return '探索完了: 安全な未調査候補を確認し終えました。「新しい調査を始める」から別のサイクルを開始できます。'
+  }
+  const currentAngleId = String(automation?.currentAngleId ?? '')
+  const currentIndex = EXPLORATION_ANGLE_ORDER.indexOf(currentAngleId)
+  const finishedAngles = new Set([
+    ...(automation?.completedAngles ?? []),
+    ...(automation?.emptyAngles ?? []),
+  ])
+  const nextAngleId = EXPLORATION_ANGLE_ORDER
+    .slice(currentIndex >= 0 ? currentIndex + 1 : 0)
+    .find((angleId) => !finishedAngles.has(angleId)) ?? ''
+  const currentLabel = EXPLORATION_ANGLE_LABELS[currentAngleId] || '未開始'
+  const nextLabel = EXPLORATION_ANGLE_LABELS[nextAngleId] || ''
+  if (automation.status === 'idle') {
+    return `現在: 未開始。最初に「${EXPLORATION_ANGLE_LABELS[EXPLORATION_ANGLE_ORDER[0]]}」から需要の近い候補を確認します。`
+  }
+  if (nextLabel) {
+    return `現在: ${currentLabel}。未確認の切り口を広げるため、完了後は「${nextLabel}」へ進みます。`
+  }
+  return `現在: ${currentLabel}。最終角度です。完了後は今回の探索を終了します。`
+}
+
 function renderExplorationAngleRail() {
   if (!elements.multiAngleRail || !elements.explorationAngleStatus) return
   const automation = state.multiAngleExploration
-  const routeProgress = explorationRouteProgress(automation)
-  const nextAngleId = routeProgress.nextAngleId
-  const currentLabel = EXPLORATION_ANGLE_LABELS[automation.currentAngleId] || '未開始'
-  const nextLabel = EXPLORATION_ANGLE_LABELS[nextAngleId] || ''
-  const routeCopy = automation.status === 'idle'
-    ? `現在: 未開始。最初に「${EXPLORATION_ANGLE_LABELS[EXPLORATION_ANGLE_ORDER[0]]}」から需要の近い候補を確認します。`
-    : nextLabel
-      ? `現在: ${currentLabel}。未確認の切り口を広げるため、完了後は「${nextLabel}」へ進みます。`
-      : `現在: ${currentLabel}。最終角度です。完了後は今回の探索を終了します。`
+  const routeCopy = explorationRouteCopy(automation)
   const stateLabels = {
     idle: '未開始',
     active: '調査中',
