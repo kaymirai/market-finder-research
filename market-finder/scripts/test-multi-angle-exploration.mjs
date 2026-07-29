@@ -908,6 +908,99 @@ test('matches researched evidence to a multi-angle candidate by keyword event ca
   )
 })
 
+test('rejects contradictory and seasonal evidence for event and evergreen candidates', () => {
+  const christmasCandidate = {
+    keyword: 'nurse life shirt',
+    eventId: 'christmas',
+    categoryId: 'shirt',
+    resultLane: 'event',
+  }
+  const evergreenCandidate = {
+    keyword: 'nurse life shirt',
+    eventId: '',
+    categoryId: 'shirt',
+    resultLane: 'evergreen',
+  }
+  const christmasMarkedEvergreen = {
+    keyword: 'nurse life shirt',
+    researchEventId: 'christmas',
+    researchCategoryId: 'shirt',
+    intentTrack: 'evergreen',
+    resultLane: 'evergreen',
+  }
+  const eventlessEventLane = {
+    keyword: 'nurse life shirt',
+    researchEventId: '',
+    researchCategoryId: 'shirt',
+    intentTrack: 'event-specific',
+    resultLane: 'event',
+  }
+  const christmasSeasonalReference = {
+    keyword: 'nurse life shirt',
+    researchEventId: 'christmas',
+    researchCategoryId: 'shirt',
+    intentTrack: 'event-specific',
+    resultLane: 'seasonal-reference',
+  }
+  const exactChristmasEvent = {
+    keyword: 'nurse life shirt',
+    researchEventId: 'christmas',
+    researchCategoryId: 'shirt',
+    intentTrack: 'event-specific',
+    resultLane: 'event',
+  }
+  const explicitEventlessEvergreen = {
+    keyword: 'nurse life shirt',
+    researchEventId: '',
+    researchCategoryId: 'shirt',
+    intentTrack: 'evergreen',
+    resultLane: 'evergreen',
+  }
+
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [christmasMarkedEvergreen],
+      evergreenCandidate,
+    ),
+    null,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [christmasMarkedEvergreen],
+      christmasCandidate,
+    ),
+    null,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [eventlessEventLane],
+      christmasCandidate,
+    ),
+    null,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [christmasSeasonalReference],
+      christmasCandidate,
+    ),
+    null,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [exactChristmasEvent],
+      christmasCandidate,
+    ),
+    exactChristmasEvent,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [explicitEventlessEvergreen],
+      evergreenCandidate,
+    ),
+    explicitEventlessEvergreen,
+  )
+})
+
 test('reload leaves idle and terminal multi-angle states terminal', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 

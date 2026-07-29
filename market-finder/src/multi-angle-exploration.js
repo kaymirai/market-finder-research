@@ -366,8 +366,8 @@ function researchRowContext(row = {}) {
     categoryId: String(categoryOwner?.researchCategoryId ?? '').trim(),
     hasEventContext: Object.hasOwn(eventOwner ?? {}, 'researchEventId'),
     hasCategoryContext: Object.hasOwn(categoryOwner ?? {}, 'researchCategoryId'),
-    intentTrack: String(raw?.intentTrack ?? row?.intentTrack ?? '').trim(),
-    resultLane: String(raw?.resultLane ?? row?.resultLane ?? '').trim(),
+    intentTrack: String(raw?.intentTrack ?? row?.intentTrack ?? '').trim().toLowerCase(),
+    resultLane: String(raw?.resultLane ?? row?.resultLane ?? '').trim().toLowerCase(),
   }
 }
 
@@ -385,17 +385,22 @@ export function researchRowForMultiAngleCandidate(rows = [], candidate = {}) {
       || !context.hasCategoryContext
       || context.categoryId !== candidateCategoryId
     ) return false
+    const rowIsEvergreen = context.intentTrack === 'evergreen'
+      || context.resultLane === 'evergreen'
+    const rowIsSeasonalReference = context.intentTrack === 'seasonal-reference'
+      || context.resultLane === 'seasonal-reference'
     if (evergreen) {
-      const explicitlyEventless = context.hasEventContext && !context.eventId
-      const explicitlyEvergreen = context.intentTrack === 'evergreen'
-        || context.resultLane === 'evergreen'
-      return explicitlyEventless || explicitlyEvergreen
+      return context.hasEventContext
+        && !context.eventId
+        && !rowIsSeasonalReference
     }
     const candidateEventId = String(candidate.eventId ?? '').trim()
     return Boolean(
       candidateEventId
       && context.hasEventContext
       && context.eventId === candidateEventId
+      && !rowIsEvergreen
+      && !rowIsSeasonalReference
     )
   }) ?? null
 }
