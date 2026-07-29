@@ -150,9 +150,11 @@ import {
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
+  multiAngleAutomationControl,
   nextMultiAngleBatch,
   pauseMultiAngleForContextChange,
   pauseMultiAngleExploration,
+  prepareNewMultiAngleCycle,
   recordMultiAngleBatch,
   recordMultiAngleFailure,
   resolveMultiAngleCandidateResearchContext,
@@ -163,7 +165,7 @@ import {
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-5'
+} from './multi-angle-exploration.js?v=20260730-6'
 import {
   calculateMonthlyProfitTarget,
 } from './monthly-profit-target.js?v=20260726-1'
@@ -3846,25 +3848,12 @@ function renderWinningNicheAutomation() {
     'winner-found': `A/Bの勝ち候補を${winnerCount}/${targetWinnerCount}件確保し、今回の出品目標を達成しました。`,
     exhausted: `安全な未調査候補を使い切りました。A/B候補は${winnerCount}/${targetWinnerCount}件で、残り${remainingWinnerCount}件です。`,
   }
-  const action = automationWorkActive
-    ? 'stop'
-    : status === 'idle'
-      ? 'start'
-      : status === 'winner-found'
-        ? 'new-cycle'
-      : 'resume'
-  const buttonLabel = automationWorkActive
-    ? '探索を停止'
-    : status === 'idle'
-      ? '目標まで勝ち候補を探す'
-      : status === 'winner-found'
-        ? '次週の探索を始める'
-        : '目標まで探索を再開'
+  const control = multiAngleAutomationControl(automation, automationWorkActive)
 
   elements.winningNicheAutomationPanel.className = `winning-niche-automation-panel is-${status}`
   elements.winningNicheAutomationStatus.textContent = statusCopy[status] || statusCopy.idle
-  elements.winningNicheAutomationToggle.dataset.winningNicheAction = action
-  elements.winningNicheAutomationToggle.textContent = buttonLabel
+  elements.winningNicheAutomationToggle.dataset.winningNicheAction = control.action
+  elements.winningNicheAutomationToggle.textContent = control.label
   renderListingResearchTarget()
   renderMarketTimingGate()
   renderExplorationAngleRail()
@@ -5552,6 +5541,26 @@ async function startNewMultiAngleCycle() {
     event: selectedEvent(),
     category: selectedCategory(),
   }
+  const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
+  const cycleContext = {
+    activeEventId: nextCycleContext.event.id,
+    categoryId: nextCycleContext.category.id,
+    eventSnapshot: researchEventSnapshot(nextCycleContext.event),
+    categorySnapshot: nextCycleContext.category,
+    targetWinnerCount: target.targetWinnerCount,
+  }
+  const prepared = prepareNewMultiAngleCycle({
+    exploration: state.multiAngleExploration,
+    pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+    savedSeasonalReferenceKeys: state.savedSeasonalReferenceKeys,
+    savedSeasonalReferences: state.savedSeasonalReferences,
+    evidenceArchives: state.evidenceArchives,
+  }, cycleContext)
+  state.multiAngleExploration = prepared.exploration
+  state.pendingEvidenceAutomation = prepared.pendingEvidenceAutomation
+  renderAll()
+  persistMarketFinderState()
+
   const timing = classifyProductionWindow(nextCycleContext.event)
   if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
     setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は開始しません。')
@@ -5559,16 +5568,9 @@ async function startNewMultiAngleCycle() {
     return false
   }
   if (!await confirmExtensionConnection()) return false
-  const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
   state.multiAngleExploration = startMultiAngleExploration(
-    createMultiAngleExplorationState(),
-    {
-      activeEventId: nextCycleContext.event.id,
-      categoryId: nextCycleContext.category.id,
-      eventSnapshot: researchEventSnapshot(nextCycleContext.event),
-      categorySnapshot: nextCycleContext.category,
-      targetWinnerCount: target.targetWinnerCount,
-    },
+    state.multiAngleExploration,
+    cycleContext,
   )
   return queueNextMultiAngleBatch()
 }

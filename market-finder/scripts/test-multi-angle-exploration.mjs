@@ -76,6 +76,141 @@ test('finishes as exhausted after every angle has no unseen candidates', () => {
   assert.equal(result.reason, 'all-angles-exhausted')
 })
 
+test('treats winner-found and exhausted as completed cycles with one new-cycle action', () => {
+  assert.equal(typeof multiAngleApi.multiAngleAutomationControl, 'function')
+
+  assert.deepEqual(
+    multiAngleApi.multiAngleAutomationControl({ status: 'winner-found' }),
+    {
+      action: 'new-cycle',
+      label: '新しい調査を始める',
+    },
+  )
+  assert.deepEqual(
+    multiAngleApi.multiAngleAutomationControl({ status: 'exhausted' }),
+    {
+      action: 'new-cycle',
+      label: '新しい調査を始める',
+    },
+  )
+})
+
+test('prepares an exhausted cycle as fresh idle work while preserving saved references and archives', () => {
+  assert.equal(typeof multiAngleApi.prepareNewMultiAngleCycle, 'function')
+
+  const savedSeasonalReferences = [{
+    keyword: 'saved thanksgiving nurse shirt',
+    eventId: 'thanksgiving',
+    categoryId: 'shirt',
+  }]
+  const evidenceArchives = [{
+    runId: 'prior-cycle',
+    multiAngleExploration: { status: 'exhausted' },
+  }]
+  const prepared = multiAngleApi.prepareNewMultiAngleCycle({
+    exploration: createMultiAngleExplorationState({
+      status: 'exhausted',
+      activeEventId: 'halloween',
+      categoryId: 'shirt',
+      currentAngleId: 'evergreen',
+      angleIndex: 5,
+      evidenceKeys: ['old|shirt|halloween'],
+      provenance: { 'old|shirt|halloween': ['evergreen'] },
+      queuedEvidenceKeys: ['queued|shirt|halloween'],
+      currentBatchCandidates: [{
+        keyword: 'queued',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+      }],
+      retryQueue: [{
+        keyword: 'retry',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+        attempts: 1,
+        retryAt: '2026-08-01T00:00:00Z',
+      }],
+      failedEvidenceKeys: ['failed|shirt|halloween'],
+      winnerKeywords: ['old winner'],
+      resultLanes: {
+        event: [{ keyword: 'old winner' }],
+        evergreen: [{ keyword: 'old evergreen' }],
+        seasonalReference: [{ keyword: 'old seasonal lead' }],
+      },
+      exhaustedAngles: [
+        'demand-neighborhood',
+        'attribute-combination',
+        'recent-sales',
+        'adjacent-product',
+        'market-gap',
+        'evergreen',
+      ],
+      startedAt: '2026-07-30T00:00:00Z',
+      updatedAt: '2026-07-30T01:00:00Z',
+      completedAt: '2026-07-30T01:00:00Z',
+    }),
+    pendingEvidenceAutomation: {
+      active: false,
+      scheduled: false,
+      initialCount: 3,
+      completedBatches: 2,
+      currentStage: 'pending-everbee',
+      targetKeywords: ['queued'],
+    },
+    savedSeasonalReferenceKeys: ['saved|shirt|thanksgiving'],
+    savedSeasonalReferences,
+    evidenceArchives,
+  }, {
+    activeEventId: 'christmas',
+    categoryId: 'mug',
+    eventSnapshot: {
+      id: 'christmas',
+      label: 'Christmas',
+      searchTerm: 'christmas',
+    },
+    categorySnapshot: {
+      id: 'mug',
+      label: 'Mug',
+      searchTerm: 'mug',
+    },
+    targetWinnerCount: 5,
+  })
+
+  assert.equal(prepared.exploration.status, 'idle')
+  assert.equal(prepared.exploration.activeEventId, 'christmas')
+  assert.equal(prepared.exploration.categoryId, 'mug')
+  assert.equal(prepared.exploration.targetWinnerCount, 5)
+  for (const key of [
+    'evidenceKeys',
+    'queuedEvidenceKeys',
+    'currentBatchCandidates',
+    'retryQueue',
+    'failedEvidenceKeys',
+    'winnerKeywords',
+    'exhaustedAngles',
+  ]) {
+    assert.deepEqual(prepared.exploration[key], [])
+  }
+  assert.deepEqual(prepared.exploration.provenance, {})
+  assert.deepEqual(prepared.exploration.resultLanes, {
+    event: [],
+    evergreen: [],
+    seasonalReference: [],
+  })
+  assert.equal(prepared.exploration.startedAt, '')
+  assert.equal(prepared.exploration.completedAt, '')
+  assert.deepEqual(prepared.pendingEvidenceAutomation, {
+    active: false,
+    scheduled: false,
+    initialCount: 0,
+    completedBatches: 0,
+    currentStage: '',
+    targetKeywords: [],
+  })
+  assert.deepEqual(prepared.savedSeasonalReferenceKeys, ['saved|shirt|thanksgiving'])
+  assert.deepEqual(prepared.savedSeasonalReferences, savedSeasonalReferences)
+  assert.deepEqual(prepared.evidenceArchives, evidenceArchives)
+})
+
 test('moves one timed-out keyword to retry wait and continues other candidates', () => {
   const started = startMultiAngleExploration({}, context)
   const candidate = {

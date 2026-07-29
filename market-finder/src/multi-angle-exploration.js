@@ -237,6 +237,57 @@ export function createMultiAngleExplorationState(saved = {}) {
   }
 }
 
+export function multiAngleAutomationControl(state = {}, workActive = false) {
+  const status = createMultiAngleExplorationState(state).status
+  if (workActive) {
+    return {
+      action: 'stop',
+      label: '探索を停止',
+    }
+  }
+  if (status === 'idle') {
+    return {
+      action: 'start',
+      label: '目標まで勝ち候補を探す',
+    }
+  }
+  if (['winner-found', 'exhausted'].includes(status)) {
+    return {
+      action: 'new-cycle',
+      label: '新しい調査を始める',
+    }
+  }
+  return {
+    action: 'resume',
+    label: '目標まで探索を再開',
+  }
+}
+
+export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
+  const pending = snapshot?.pendingEvidenceAutomation ?? {}
+  const exploration = createMultiAngleExplorationState({
+    status: 'idle',
+    activeEventId: String(context?.activeEventId ?? context?.eventId ?? '').trim(),
+    categoryId: String(context?.categoryId ?? '').trim(),
+    eventSnapshot: context?.eventSnapshot,
+    categorySnapshot: context?.categorySnapshot,
+    targetWinnerCount: positiveInteger(context?.targetWinnerCount, 1),
+  })
+  return {
+    ...snapshot,
+    exploration,
+    pendingEvidenceAutomation: {
+      ...pending,
+      active: false,
+      scheduled: false,
+      initialCount: 0,
+      completedBatches: 0,
+      currentStage: '',
+      targetKeywords: [],
+    },
+  }
+}
+
 export function resolveMultiAngleResearchContext(state = {}, selected = {}) {
   const current = createMultiAngleExplorationState(state)
   const hasFixedContext = FIXED_CONTEXT_STATUSES.has(current.status)
