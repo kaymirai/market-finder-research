@@ -834,6 +834,80 @@ test('keeps terminal exploration intact when its archive cannot be persisted', a
   assert.deepEqual(exploration, before)
 })
 
+test('matches researched evidence to a multi-angle candidate by keyword event category and lane', () => {
+  assert.equal(typeof multiAngleApi.researchRowForMultiAngleCandidate, 'function')
+  const halloween = {
+    keyword: 'nurse life shirt',
+    researchEventId: 'halloween',
+    researchCategoryId: 'shirt',
+    opportunityLabel: 'A',
+  }
+  const christmas = {
+    keyword: 'nurse life shirt',
+    researchEventId: 'christmas',
+    researchCategoryId: 'shirt',
+    opportunityLabel: 'B',
+  }
+  const legacy = {
+    keyword: 'nurse life shirt',
+    opportunityLabel: 'A',
+  }
+  const explicitEvergreen = {
+    keyword: 'nurse life shirt',
+    researchEventId: '',
+    researchCategoryId: 'shirt',
+    intentTrack: 'evergreen',
+  }
+  const christmasCandidate = {
+    keyword: 'nurse life shirt',
+    eventId: 'christmas',
+    categoryId: 'shirt',
+    resultLane: 'event',
+  }
+  const evergreenCandidate = {
+    keyword: 'nurse life shirt',
+    eventId: '',
+    categoryId: 'shirt',
+    resultLane: 'evergreen',
+  }
+
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [halloween, legacy],
+      christmasCandidate,
+    ),
+    null,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [halloween, christmas],
+      christmasCandidate,
+    ),
+    christmas,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [halloween, legacy],
+      evergreenCandidate,
+    ),
+    null,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [halloween, explicitEvergreen],
+      evergreenCandidate,
+    ),
+    explicitEvergreen,
+  )
+  assert.equal(
+    multiAngleApi.researchRowForMultiAngleCandidate(
+      [explicitEvergreen],
+      { ...christmasCandidate, resultLane: 'seasonal-reference' },
+    ),
+    null,
+  )
+})
+
 test('reload leaves idle and terminal multi-angle states terminal', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 

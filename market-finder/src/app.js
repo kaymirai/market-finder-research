@@ -167,6 +167,7 @@ import {
   prepareNewMultiAngleCycle,
   recordMultiAngleBatch,
   recordMultiAngleFailure,
+  researchRowForMultiAngleCandidate,
   resolveMultiAngleCandidateResearchContext,
   resolveMultiAngleExportResearchContext,
   resolveMultiAngleImportedResearchContext,
@@ -177,7 +178,7 @@ import {
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-12'
+} from './multi-angle-exploration.js?v=20260730-13'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -4529,13 +4530,23 @@ function finalEvidenceRows() {
   const analysis = currentResearchAnalysis()
   const scoredByKeyword = new Map(analysis.scoredRows.map((row) => [normalizePhrase(row.keyword), row]))
   const everbeeByKeyword = new Map(everbeeResultRows().map((row) => [normalizePhrase(row.score.normalized.keyword), row]))
+  const currentMultiAngleCandidates = currentMultiAngleBatchCandidates()
+    .filter((candidate) => candidate.resultLane !== 'seasonal-reference')
+  const multiAngleCandidateByKeyword = new Map(
+    currentMultiAngleCandidates.map((candidate) => [normalizePhrase(candidate.keyword), candidate]),
+  )
   const captureByKeyword = new Map(
     erankCaptureStateRows()
       .filter((row) => hasCollectedEvidence({ ...row, erankCaptureStatus: row.status }))
       .map((row) => [normalizePhrase(row.query), row])
   )
   const candidateByKeyword = new Map()
-  ;[...state.candidateCatalog, ...state.candidates, ...currentCrossNicheDrilldown().candidates].forEach((candidate) => {
+  ;[
+    ...state.candidateCatalog,
+    ...state.candidates,
+    ...currentCrossNicheDrilldown().candidates,
+    ...currentMultiAngleCandidates,
+  ].forEach((candidate) => {
     const keyword = normalizePhrase(candidate?.keyword)
     if (keyword) candidateByKeyword.set(keyword, { ...candidateByKeyword.get(keyword), ...candidate, keyword })
   })
@@ -4571,7 +4582,18 @@ function finalEvidenceRows() {
   const etsyConfirmationKeywords = new Set(selectEtsyConfirmationKeywords(
     [...keywords].map((keyword) => {
       const candidate = candidateByKeyword.get(keyword) ?? {}
-      const raw = scoredByKeyword.get(keyword) ?? findResearchRow(keyword) ?? { keyword }
+      const multiAngleCandidate = multiAngleCandidateByKeyword.get(keyword)
+      const raw = multiAngleCandidate
+        ? researchRowForMultiAngleCandidate(analysis.scoredRows, multiAngleCandidate)
+          ?? researchRowForMultiAngleCandidate(state.researchRows, multiAngleCandidate)
+          ?? {
+            keyword,
+            researchEventId: multiAngleCandidate.eventId,
+            researchCategoryId: multiAngleCandidate.categoryId,
+            intentTrack: multiAngleCandidate.resultLane === 'evergreen' ? 'evergreen' : 'event-specific',
+            resultLane: multiAngleCandidate.resultLane,
+          }
+        : scoredByKeyword.get(keyword) ?? findResearchRow(keyword) ?? { keyword }
       return {
         keyword,
         queryStrategy: candidate.queryStrategy ?? raw.queryStrategy,
@@ -4582,11 +4604,26 @@ function finalEvidenceRows() {
   ))
 
   const rows = [...keywords].map((keyword) => {
-    const scoredRow = scoredByKeyword.get(keyword)
-    const everbeeRow = everbeeByKeyword.get(keyword)
-    const candidate = candidateByKeyword.get(keyword) ?? {}
+    const multiAngleCandidate = multiAngleCandidateByKeyword.get(keyword)
+    const scoredRow = multiAngleCandidate
+      ? researchRowForMultiAngleCandidate(analysis.scoredRows, multiAngleCandidate)
+      : scoredByKeyword.get(keyword)
+    const everbeeRow = multiAngleCandidate
+      ? researchRowForMultiAngleCandidate(everbeeResultRows(), multiAngleCandidate)
+      : everbeeByKeyword.get(keyword)
+    const candidate = multiAngleCandidate ?? candidateByKeyword.get(keyword) ?? {}
     const capture = captureByKeyword.get(keyword) ?? {}
-    const raw = scoredRow ?? findResearchRow(keyword) ?? { keyword }
+    const raw = scoredRow
+      ?? (multiAngleCandidate
+        ? researchRowForMultiAngleCandidate(state.researchRows, multiAngleCandidate)
+          ?? {
+            keyword,
+            researchEventId: multiAngleCandidate.eventId,
+            researchCategoryId: multiAngleCandidate.categoryId,
+            intentTrack: multiAngleCandidate.resultLane === 'evergreen' ? 'evergreen' : 'event-specific',
+            resultLane: multiAngleCandidate.resultLane,
+          }
+        : findResearchRow(keyword) ?? { keyword })
     const normalized = scoredRow?.score?.normalized ?? raw
     const captureUi = deriveErankCaptureUiState(raw, {
       active: Boolean(state.extensionState?.active && normalizePhrase(state.extensionState.currentKeyword) === keyword),
@@ -5678,6 +5715,8 @@ async function startMultiAngleSearch() {
 }
 
 async function startNewMultiAngleCycle() {
+  const terminalEvidencePersisted = await preserveTerminalMultiAngleEvidenceForNewDiscovery()
+  if (!terminalEvidencePersisted) return false
   invalidateMultiAngleRetrySchedule()
   const nextCycleContext = {
     event: selectedEvent(),
@@ -5861,15 +5900,12 @@ function completeMultiAngleBatch() {
     pauseMultiAngleSearch('現在バッチの候補情報を復元できないため、対象ワードを保持して一時停止しました。')
     return false
   }
-  const rowsByKeyword = new Map(
-    finalEvidenceRows()
-      .filter((row) => targetKeys.has(normalizePhrase(row.keyword)))
-      .map((row) => [normalizePhrase(row.keyword), row]),
-  )
+  const evidenceRows = finalEvidenceRows()
+    .filter((row) => targetKeys.has(normalizePhrase(row.keyword)))
   const successfulRows = []
   for (const candidate of batchCandidates
     .filter((item) => targetKeys.has(normalizePhrase(item.keyword)))) {
-    const row = rowsByKeyword.get(normalizePhrase(candidate.keyword))
+    const row = researchRowForMultiAngleCandidate(evidenceRows, candidate)
     if (!row) {
       state.multiAngleExploration = recordMultiAngleFailure(
         state.multiAngleExploration,
@@ -9437,21 +9473,21 @@ function bindEvents() {
     handleResultListClick(event)
   })
   elements.listingResearchTargetSaveBtn?.addEventListener('click', saveListingResearchTargetSettings)
-  elements.winningNicheAutomationToggle?.addEventListener('click', (event) => {
+  elements.winningNicheAutomationToggle?.addEventListener('click', async (event) => {
     const action = event.currentTarget.dataset.winningNicheAction
     if (action === 'stop') {
-      stopMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      await stopMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
     if (action === 'resume') {
-      resumeMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      await resumeMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
     if (action === 'new-cycle') {
-      startNewMultiAngleCycle().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      await startNewMultiAngleCycle().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
-    startMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+    await startMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
   })
   elements.finalEvidenceScrollProxy.addEventListener('scroll', () => {
     if (elements.finalEvidenceTable.scrollLeft !== elements.finalEvidenceScrollProxy.scrollLeft) {

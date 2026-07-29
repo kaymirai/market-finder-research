@@ -527,6 +527,23 @@ test('explicit normal candidate discovery persists terminal work before resettin
   assert.match(applyBody, /await prepareForNewCandidateDiscovery\(\)/)
 })
 
+test('new-cycle button persists terminal evidence before resetting or starting work', () => {
+  const newCycleBody = app.match(/async function startNewMultiAngleCycle\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const clickBody = app.match(/elements\.winningNicheAutomationToggle\?\.addEventListener\('click', async \(event\) => \{([\s\S]*?)\n  \}\)/)?.[1] ?? ''
+
+  assert.match(newCycleBody, /await preserveTerminalMultiAngleEvidenceForNewDiscovery\(\)/)
+  assert.match(newCycleBody, /if \(!terminalEvidencePersisted\) return false/)
+  assert.ok(
+    newCycleBody.indexOf('await preserveTerminalMultiAngleEvidenceForNewDiscovery()')
+      < newCycleBody.indexOf('prepareNewMultiAngleCycle('),
+  )
+  assert.ok(
+    newCycleBody.indexOf('if (!terminalEvidencePersisted) return false')
+      < newCycleBody.indexOf('state.multiAngleExploration = prepared.exploration'),
+  )
+  assert.match(clickBody, /await startNewMultiAngleCycle\(\)/)
+})
+
 test('completes a restored batch from persisted multi-angle candidates', () => {
   const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
   const timeoutBody = app.match(/function continueAfterMultiAnglePageTimeout\(message = ''\) \{([\s\S]*?)\n\}\n\nfunction completeMultiAngleBatch/)?.[1] ?? ''
@@ -535,7 +552,17 @@ test('completes a restored batch from persisted multi-angle candidates', () => {
   assert.match(app, /const restoredMultiAngleTargets = restoredMultiAngleTargetKeywords\(/)
   assert.match(app, /queuedKeywords:\s*restoredMultiAngleTargets/)
   assert.match(completeBody, /currentMultiAngleBatchCandidates\(\)/)
+  assert.match(completeBody, /researchRowForMultiAngleCandidate\(/)
   assert.match(timeoutBody, /currentMultiAngleBatchCandidates\(\)/)
+})
+
+test('scopes current multi-angle evidence rows before pending and completion decisions', () => {
+  const finalRowsBody = app.match(/function finalEvidenceRows\(\) \{([\s\S]*?)\n\}\n\nfunction finalEvidenceMetric/)?.[1] ?? ''
+  const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
+
+  assert.match(finalRowsBody, /currentMultiAngleBatchCandidates\(\)/)
+  assert.match(finalRowsBody, /researchRowForMultiAngleCandidate\(/)
+  assert.match(completeBody, /researchRowForMultiAngleCandidate\(/)
 })
 
 test('uses one fixed research context for gates pools resume results and archives', () => {

@@ -354,6 +354,52 @@ export async function persistTerminalMultiAngleEvidenceBeforeReset({
   }
 }
 
+function researchRowContext(row = {}) {
+  const raw = row?.raw && typeof row.raw === 'object' ? row.raw : row
+  const eventOwner = Object.hasOwn(raw, 'researchEventId') ? raw : row
+  const categoryOwner = Object.hasOwn(raw, 'researchCategoryId') ? raw : row
+  return {
+    keyword: normalizeExplorationCandidate({
+      keyword: row?.keyword ?? raw?.keyword ?? row?.score?.normalized?.keyword,
+    })?.keyword ?? '',
+    eventId: String(eventOwner?.researchEventId ?? '').trim(),
+    categoryId: String(categoryOwner?.researchCategoryId ?? '').trim(),
+    hasEventContext: Object.hasOwn(eventOwner ?? {}, 'researchEventId'),
+    hasCategoryContext: Object.hasOwn(categoryOwner ?? {}, 'researchCategoryId'),
+    intentTrack: String(raw?.intentTrack ?? row?.intentTrack ?? '').trim(),
+    resultLane: String(raw?.resultLane ?? row?.resultLane ?? '').trim(),
+  }
+}
+
+export function researchRowForMultiAngleCandidate(rows = [], candidate = {}) {
+  const normalizedCandidate = normalizeExplorationCandidate(candidate)
+  if (!normalizedCandidate || normalizedCandidate.resultLane === 'seasonal-reference') return null
+  const candidateCategoryId = String(candidate.categoryId ?? '').trim()
+  if (!candidateCategoryId) return null
+  const evergreen = normalizedCandidate.resultLane === 'evergreen'
+    || normalizedCandidate.angleId === 'evergreen'
+  return (Array.isArray(rows) ? rows : []).find((row) => {
+    const context = researchRowContext(row)
+    if (
+      context.keyword !== normalizedCandidate.keyword
+      || !context.hasCategoryContext
+      || context.categoryId !== candidateCategoryId
+    ) return false
+    if (evergreen) {
+      const explicitlyEventless = context.hasEventContext && !context.eventId
+      const explicitlyEvergreen = context.intentTrack === 'evergreen'
+        || context.resultLane === 'evergreen'
+      return explicitlyEventless || explicitlyEvergreen
+    }
+    const candidateEventId = String(candidate.eventId ?? '').trim()
+    return Boolean(
+      candidateEventId
+      && context.hasEventContext
+      && context.eventId === candidateEventId
+    )
+  }) ?? null
+}
+
 export function pauseMultiAngleWorkAfterReload(snapshot = {}, now = '') {
   const exploration = createMultiAngleExplorationState(snapshot?.exploration)
   const pending = snapshot?.pendingEvidenceAutomation ?? {}
