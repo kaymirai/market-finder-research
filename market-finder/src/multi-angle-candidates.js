@@ -14,6 +14,19 @@ function normalizedList(value) {
   return [...new Set(values.map(normalizePhrase).filter(Boolean))]
 }
 
+function categoryMatchTerms(category = {}) {
+  const terms = normalizedList([category.searchTerm, ...(category.tags ?? [])])
+  if (String(category.id ?? '').trim() === 'shirt' || terms.includes('shirt')) {
+    terms.push('shirts', 'tshirt', 'tshirts', 't shirt', 't shirts', 'tee', 'tees')
+  }
+  return [...new Set(terms)]
+}
+
+function matchesCategory(keyword, category) {
+  const phrase = ` ${normalizePhrase(keyword)} `
+  return categoryMatchTerms(category).some((term) => phrase.includes(` ${term} `))
+}
+
 function optionalNumber(value) {
   const number = Number(value)
   return Number.isFinite(number) ? number : null
@@ -204,7 +217,9 @@ export function buildMultiAngleCandidatePools(input = {}) {
     ...common,
     angleId: 'demand-neighborhood',
   })
-  addCandidates(byEvidence, normalizedList(input.relatedTerms).map((keyword) => ({ keyword, source: 'marketplace-insights' })), {
+  addCandidates(byEvidence, normalizedList(input.relatedTerms)
+    .filter((keyword) => matchesCategory(keyword, category))
+    .map((keyword) => ({ keyword, source: 'marketplace-insights' })), {
     ...common,
     angleId: 'demand-neighborhood',
   })
@@ -212,7 +227,8 @@ export function buildMultiAngleCandidatePools(input = {}) {
     ...common,
     angleId: 'attribute-combination',
   })
-  addCandidates(byEvidence, input.drilldownCandidates ?? [], {
+  addCandidates(byEvidence, (input.drilldownCandidates ?? [])
+    .filter((candidate) => candidate?.source === 'everbee-title'), {
     ...common,
     angleId: 'recent-sales',
   })

@@ -34,6 +34,39 @@ test('creates separate pools from demand, taxonomy, recent sales and adjacent pr
   assert.equal(pools['adjacent-product'][0].keyword, 'witchy gardener shirt')
 })
 
+test('keeps only current-category Marketplace terms in demand neighborhood', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    relatedTerms: [
+      'halloween mug',
+      'halloween tee',
+      'halloween tshirt',
+      'halloween shirt',
+      'halloween shirtless costume',
+    ],
+  })
+
+  assert.deepEqual(
+    pools['demand-neighborhood'].map((candidate) => candidate.keyword),
+    ['halloween tee', 'halloween tshirt', 'halloween shirt'],
+  )
+})
+
+test('keeps only everbee-title drilldowns in recent sales', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    drilldownCandidates: [
+      { keyword: 'halloween teacher shirt', source: 'etsy-related' },
+      { keyword: 'halloween librarian shirt', source: 'everbee-title' },
+    ],
+  })
+
+  assert.deepEqual(
+    pools['recent-sales'].map((candidate) => candidate.keyword),
+    ['halloween librarian shirt'],
+  )
+})
+
 test('keeps provenance separate while deduping external evidence lookups', () => {
   const demand = {
     keyword: 'spooky nurse shirt',
