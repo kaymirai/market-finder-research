@@ -73,6 +73,12 @@ function eventSnapshotIdentity(snapshot = {}) {
   ].join('|')
 }
 
+export function eventSnapshotsMatch(left, right) {
+  const leftIdentity = eventSnapshotIdentity(left)
+  return leftIdentity !== '|||'
+    && leftIdentity === eventSnapshotIdentity(right)
+}
+
 export function marketplaceInsightPlanForContext(plan, context = {}) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return null
   const planContext = candidateContext(plan)
@@ -85,10 +91,7 @@ export function marketplaceInsightPlanForContext(plan, context = {}) {
     || planContext.categoryId !== activeCategoryId
   ) return null
   if (activeEventId !== 'custom-event') return plan
-  const planSnapshotKey = eventSnapshotIdentity(plan.eventSnapshot)
-  const activeSnapshotKey = eventSnapshotIdentity(context.eventSnapshot)
-  return planSnapshotKey !== '|||'
-    && planSnapshotKey === activeSnapshotKey
+  return eventSnapshotsMatch(plan.eventSnapshot, context.eventSnapshot)
     ? plan
     : null
 }
@@ -151,13 +154,23 @@ export function normalizeArchivedSupplyListings(rows = []) {
 
 export function adjacentProductListingsFromLearningRecords(records = [], context = {}) {
   const activeCategoryId = String(context.categoryId ?? '').trim()
+  const activeEventId = String(context.eventId ?? context.activeEventId ?? '').trim()
+  const activeEventSnapshot = context.eventSnapshot
   return (Array.isArray(records) ? records : []).flatMap((record) => {
     const categoryId = String(record?.categoryId ?? record?.context?.categoryId ?? '').trim()
     if (!categoryId || categoryId === activeCategoryId) return []
+    const eventId = String(record?.eventId ?? record?.context?.eventId ?? '').trim()
+    const eventSnapshot = record?.eventSnapshot ?? record?.context?.eventSnapshot
+    if (
+      activeEventId === 'custom-event'
+      && eventId === 'custom-event'
+      && !eventSnapshotsMatch(eventSnapshot, activeEventSnapshot)
+    ) return []
     return normalizeArchivedSupplyListings(record?.supplyListings).map((listing) => ({
       ...listing,
       categoryId,
-      eventId: String(record?.eventId ?? record?.context?.eventId ?? '').trim(),
+      eventId,
+      ...(eventSnapshot ? { eventSnapshot } : {}),
       timingStatus: String(record?.timingStatus ?? record?.context?.timingStatus ?? '').trim(),
       sales: listing.monthlySales,
     }))

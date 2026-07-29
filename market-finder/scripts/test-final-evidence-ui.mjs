@@ -501,6 +501,22 @@ test('ordinary Marketplace reload keeps compatible and legacy plans outside mult
   )
 })
 
+test('explicit normal candidate discovery archives terminal work before resetting its fixed context', () => {
+  const prepareBody = app.match(/function prepareForNewCandidateDiscovery\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const autoBody = app.match(/async function collectTrendScoutTerms\(\) \{([\s\S]*?)\n\}\n\nfunction/)?.[1] ?? ''
+
+  assert.match(prepareBody, /preserveTerminalMultiAngleEvidenceForNewDiscovery\(\)/)
+  assert.match(prepareBody, /prepareNewMultiAngleCycle\(/)
+  assert.ok(
+    prepareBody.indexOf('preserveTerminalMultiAngleEvidenceForNewDiscovery()')
+      < prepareBody.indexOf('prepareNewMultiAngleCycle('),
+  )
+  assert.ok(
+    autoBody.indexOf('prepareForNewCandidateDiscovery()')
+      < autoBody.indexOf('generateCandidates()'),
+  )
+})
+
 test('completes a restored batch from persisted multi-angle candidates', () => {
   const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
   const timeoutBody = app.match(/function continueAfterMultiAnglePageTimeout\(message = ''\) \{([\s\S]*?)\n\}\n\nfunction completeMultiAngleBatch/)?.[1] ?? ''

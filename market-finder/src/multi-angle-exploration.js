@@ -387,9 +387,38 @@ export function restoreMarketplaceInsightPlanForResearchFlow(
     String(plan.eventId ?? plan.researchEventId ?? '').trim()
     || String(plan.categoryId ?? plan.researchCategoryId ?? '').trim()
   )
-  return hasPlanContextMetadata
-    ? marketplaceInsightPlanForContext(plan, ordinaryContext)
-    : plan
+  if (!hasPlanContextMetadata) return plan
+  const planEventId = String(plan.eventId ?? plan.researchEventId ?? '').trim()
+  const planCategoryId = String(plan.categoryId ?? plan.researchCategoryId ?? '').trim()
+  const ordinaryEventId = String(
+    ordinaryContext.eventId ?? ordinaryContext.activeEventId ?? '',
+  ).trim()
+  const ordinaryCategoryId = String(ordinaryContext.categoryId ?? '').trim()
+  const ordinaryCustomSnapshot = ordinaryContext.eventSnapshot
+  const hasUsableCustomSnapshot = ordinaryEventId === 'custom-event'
+    && String(ordinaryCustomSnapshot?.id ?? '').trim() === 'custom-event'
+    && Boolean(String(
+      ordinaryCustomSnapshot?.searchTerm
+      || ordinaryCustomSnapshot?.label
+      || ordinaryCustomSnapshot?.displayTerm
+      || '',
+    ).trim())
+  if (
+    planEventId === 'custom-event'
+    && !plan.eventSnapshot
+    && planEventId === ordinaryEventId
+    && planCategoryId === ordinaryCategoryId
+    && hasUsableCustomSnapshot
+  ) {
+    return {
+      ...plan,
+      eventSnapshot: ordinaryCustomSnapshot,
+      ...(ordinaryContext.categorySnapshot
+        ? { categorySnapshot: ordinaryContext.categorySnapshot }
+        : {}),
+    }
+  }
+  return marketplaceInsightPlanForContext(plan, ordinaryContext)
 }
 
 export function resolveMultiAngleResearchContext(state = {}, selected = {}) {

@@ -620,6 +620,145 @@ test('distinguishes ordinary Marketplace restore from meaningful multi-angle con
   )
 })
 
+test('migrates a legacy custom-event Marketplace plan only for the matching ordinary form context', () => {
+  const ordinaryExploration = createMultiAngleExplorationState({ status: 'idle' })
+  const customEventSnapshot = {
+    id: 'custom-event',
+    label: 'Alpha Launch',
+    searchTerm: 'alpha launch',
+  }
+  const categorySnapshot = {
+    id: 'shirt',
+    label: 'Shirt',
+  }
+  const legacyCustomPlan = {
+    eventId: 'custom-event',
+    categoryId: 'shirt',
+    items: [{ query: 'alpha launch shirt', status: 'planned' }],
+  }
+
+  assert.deepEqual(
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(
+      legacyCustomPlan,
+      {
+        exploration: ordinaryExploration,
+        ordinaryContext: {
+          eventId: 'custom-event',
+          categoryId: 'shirt',
+          eventSnapshot: customEventSnapshot,
+          categorySnapshot,
+        },
+      },
+    ),
+    {
+      ...legacyCustomPlan,
+      eventSnapshot: customEventSnapshot,
+      categorySnapshot,
+    },
+  )
+  assert.equal(
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(
+      legacyCustomPlan,
+      {
+        exploration: ordinaryExploration,
+        ordinaryContext: {
+          eventId: 'custom-event',
+          categoryId: 'mug',
+          eventSnapshot: customEventSnapshot,
+        },
+      },
+    ),
+    null,
+  )
+
+  const activeCustomExploration = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'custom-event',
+    categoryId: 'shirt',
+    eventSnapshot: customEventSnapshot,
+    categorySnapshot,
+    currentBatchCandidates: [{
+      keyword: 'alpha launch shirt',
+      eventId: 'custom-event',
+      categoryId: 'shirt',
+    }],
+  })
+  assert.equal(
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(
+      legacyCustomPlan,
+      {
+        exploration: activeCustomExploration,
+        ordinaryContext: {
+          eventId: 'custom-event',
+          categoryId: 'shirt',
+          eventSnapshot: customEventSnapshot,
+          categorySnapshot,
+        },
+      },
+    ),
+    null,
+  )
+})
+
+test('explicit normal discovery releases terminal context while selector changes alone do not', () => {
+  const terminal = createMultiAngleExplorationState({
+    status: 'winner-found',
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'halloween',
+      label: 'Halloween',
+      searchTerm: 'halloween',
+    },
+    categorySnapshot: {
+      id: 'shirt',
+      label: 'Shirt',
+      searchTerm: 'shirt',
+    },
+    winnerKeywords: ['halloween nurse shirt'],
+  })
+  const selected = {
+    eventId: 'christmas',
+    categoryId: 'mug',
+    eventSnapshot: {
+      id: 'christmas',
+      label: 'Christmas',
+      searchTerm: 'christmas',
+    },
+    categorySnapshot: {
+      id: 'mug',
+      label: 'Mug',
+      searchTerm: 'mug',
+    },
+  }
+  const beforeAction = multiAngleApi.resolveMultiAngleResearchOptions(
+    terminal,
+    selected,
+  )
+  const archived = [{ runId: 'halloween-terminal' }]
+  const afterAction = multiAngleApi.prepareNewMultiAngleCycle({
+    exploration: terminal,
+    pendingEvidenceAutomation: {},
+    evidenceArchives: archived,
+  }, {
+    activeEventId: selected.eventId,
+    categoryId: selected.categoryId,
+    eventSnapshot: selected.eventSnapshot,
+    categorySnapshot: selected.categorySnapshot,
+  })
+  const afterActionOptions = multiAngleApi.resolveMultiAngleResearchOptions(
+    afterAction.exploration,
+    selected,
+  )
+
+  assert.equal(beforeAction.eventId, 'halloween')
+  assert.equal(beforeAction.categoryId, 'shirt')
+  assert.equal(afterAction.exploration.status, 'idle')
+  assert.equal(afterActionOptions.eventId, 'christmas')
+  assert.equal(afterActionOptions.categoryId, 'mug')
+  assert.deepEqual(afterAction.evidenceArchives, archived)
+})
+
 test('reload leaves idle and terminal multi-angle states terminal', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 

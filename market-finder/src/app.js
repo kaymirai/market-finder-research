@@ -153,7 +153,7 @@ import {
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260730-6'
+} from './multi-angle-candidates.js?v=20260730-7'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
@@ -176,7 +176,7 @@ import {
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-10'
+} from './multi-angle-exploration.js?v=20260730-11'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -1575,10 +1575,12 @@ function evidenceArchiveRecord() {
     locale: 'en-US',
     categoryId: researchContext.categoryId,
     eventId: researchContext.eventId,
+    eventSnapshot: researchContext.event,
     identitySeeds: buyerIdentityLines(),
     context: {
       categoryId: researchContext.categoryId,
       eventId: researchContext.eventId,
+      eventSnapshot: researchContext.event,
       eventTerm: normalizePhrase(researchContext.event.searchTerm),
       buyerIdentities: buyerIdentityLines(),
     },
@@ -1632,6 +1634,20 @@ function evidenceRecordFingerprint(record = {}) {
     runId: String(record.runId ?? '').trim(),
     categoryId: record.categoryId ?? '',
     eventId: record.eventId ?? '',
+    eventSnapshot: [
+      String(record.eventSnapshot?.id ?? record.context?.eventSnapshot?.id ?? '').trim(),
+      normalizePhrase(
+        record.eventSnapshot?.searchTerm
+        ?? record.context?.eventSnapshot?.searchTerm
+        ?? '',
+      ),
+      String(record.eventSnapshot?.label ?? record.context?.eventSnapshot?.label ?? '').trim(),
+      String(
+        record.eventSnapshot?.displayTerm
+        ?? record.context?.eventSnapshot?.displayTerm
+        ?? '',
+      ).trim(),
+    ],
     identitySeeds: String(record.identitySeeds ?? '')
       .split(/[\n,;]+/)
       .map(normalizePhrase)
@@ -2429,6 +2445,7 @@ function applyBroadHintsToSeeds() {
     return
   }
 
+  if (!prepareForNewCandidateDiscovery()) return
   const merged = cleanKeywordList([
     ...elements.seedInput.value.split(/\r?\n|,/),
     ...selected,
@@ -5463,7 +5480,11 @@ function currentMultiAnglePools() {
     drilldownCandidates: currentCrossNicheDrilldown().candidates,
     adjacentProductListings: adjacentProductListingsFromLearningRecords(
       evidenceLearningRecords(),
-      { categoryId: category.id },
+      {
+        categoryId: category.id,
+        eventId: event.id,
+        eventSnapshot: event,
+      },
     ),
     measuredRows,
     evergreenCandidates: measuredEventlessCandidates(),
@@ -7881,11 +7902,54 @@ function applyTrendScoutTerms() {
     : `流行語なしで調査候補を${made}件作りました。次は「Etsy公式確認を自動実行」です。`, 'ready')
 }
 
+function preserveTerminalMultiAngleEvidenceForNewDiscovery() {
+  const exploration = createMultiAngleExplorationState(state.multiAngleExploration)
+  if (!['winner-found', 'exhausted', 'stopped'].includes(exploration.status)) return
+  const record = evidenceArchiveRecord()
+  if (hasArchivedEvidenceRecord(record)) return
+  state.evidenceArchives = [...state.evidenceArchives, record]
+}
+
 function prepareForNewCandidateDiscovery() {
   state.acceptExtensionResults = false
-  if (state.researchRows.length === 0) return true
-  if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回のeRank・Etsy・EverBee結果' })) return false
-  clearResearchResults('all')
+  if (state.researchRows.length > 0) {
+    if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回のeRank・Etsy・EverBee結果' })) return false
+    preserveTerminalMultiAngleEvidenceForNewDiscovery()
+    clearResearchResults('all')
+  } else {
+    preserveTerminalMultiAngleEvidenceForNewDiscovery()
+  }
+  const event = selectedEvent()
+  const category = selectedCategory()
+  const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
+  const prepared = prepareNewMultiAngleCycle({
+    exploration: state.multiAngleExploration,
+    pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+    savedSeasonalReferenceKeys: state.savedSeasonalReferenceKeys,
+    savedSeasonalReferences: state.savedSeasonalReferences,
+    evidenceArchives: state.evidenceArchives,
+    marketplaceInsightPlan: state.marketplaceInsightPlan,
+    marketplaceInsightMessage: state.marketplaceInsightMessage,
+    candidates: state.candidates,
+    candidateCatalog: state.candidateCatalog,
+    crossNicheProposal: state.crossNicheProposal,
+  }, {
+    activeEventId: event.id,
+    categoryId: category.id,
+    eventSnapshot: researchEventSnapshot(event),
+    categorySnapshot: category,
+    targetWinnerCount: target.targetWinnerCount,
+  })
+  state.multiAngleExploration = prepared.exploration
+  state.pendingEvidenceAutomation = prepared.pendingEvidenceAutomation
+  state.evidenceArchives = prepared.evidenceArchives
+  state.marketplaceInsightPlan = prepared.marketplaceInsightPlan
+  state.marketplaceInsightMessage = prepared.marketplaceInsightMessage
+  state.candidates = prepared.candidates
+  state.candidateCatalog = prepared.candidateCatalog
+  state.crossNicheProposal = prepared.crossNicheProposal
+  state.crossNicheWorkflow = createCrossNicheWorkflowState()
+  state.erankQueryPlan = []
   return true
 }
 

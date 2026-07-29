@@ -307,6 +307,87 @@ test('requires the saved custom-event snapshot to match the fixed exploration sn
   }, active), null)
 })
 
+test('keeps adjacent custom-event listings inside the same saved custom snapshot', () => {
+  const betaSnapshot = {
+    id: 'custom-event',
+    label: 'Beta Launch',
+    searchTerm: 'beta launch',
+  }
+  const records = [
+    {
+      eventId: 'custom-event',
+      categoryId: 'mug',
+      eventSnapshot: {
+        id: 'custom-event',
+        label: 'Alpha Launch',
+        searchTerm: 'alpha launch',
+      },
+      supplyListings: [{
+        title: 'Alpha Gardener Mug',
+        monthlySales: 8,
+        listingAgeMonths: 4,
+      }],
+    },
+    {
+      eventId: 'custom-event',
+      categoryId: 'shirt',
+      context: { eventSnapshot: betaSnapshot },
+      supplyListings: [{
+        title: 'Beta Gardener Shirt',
+        monthlySales: 7,
+        listingAgeMonths: 5,
+      }],
+    },
+    {
+      eventId: 'custom-event',
+      categoryId: 'poster',
+      supplyListings: [{
+        title: 'Legacy Gardener Poster',
+        monthlySales: 6,
+        listingAgeMonths: 3,
+      }],
+    },
+    {
+      eventId: 'halloween',
+      categoryId: 'mug',
+      timingStatus: 'timely',
+      supplyListings: [{
+        title: 'Halloween Gardener Mug',
+        monthlySales: 5,
+        listingAgeMonths: 6,
+      }],
+    },
+  ]
+  const adjacent = candidateApi.adjacentProductListingsFromLearningRecords(
+    JSON.parse(JSON.stringify(records)),
+    {
+      eventId: 'custom-event',
+      eventSnapshot: betaSnapshot,
+      categoryId: 'tote',
+    },
+  )
+
+  assert.deepEqual(
+    adjacent.map((listing) => listing.title),
+    ['Beta Gardener Shirt', 'Halloween Gardener Mug'],
+  )
+  assert.deepEqual(adjacent[0].eventSnapshot, betaSnapshot)
+  const pools = buildMultiAngleCandidatePools({
+    event: betaSnapshot,
+    category: { id: 'tote', searchTerm: 'tote', tags: [] },
+    timingStatus: 'timely',
+    adjacentProductListings: adjacent,
+  })
+  assert.deepEqual(
+    pools['adjacent-product'].map((candidate) => candidate.keyword),
+    ['beta gardener tote'],
+  )
+  assert.deepEqual(
+    pools['seasonal-reference'].map((candidate) => candidate.keyword),
+    ['halloween gardener tote'],
+  )
+})
+
 test('keeps provenance separate while deduping external evidence lookups', () => {
   const demand = {
     keyword: 'spooky nurse shirt',
