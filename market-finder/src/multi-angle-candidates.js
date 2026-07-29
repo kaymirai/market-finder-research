@@ -158,6 +158,7 @@ export function adjacentProductListingsFromLearningRecords(records = [], context
       ...listing,
       categoryId,
       eventId: String(record?.eventId ?? record?.context?.eventId ?? '').trim(),
+      timingStatus: String(record?.timingStatus ?? record?.context?.timingStatus ?? '').trim(),
       sales: listing.monthlySales,
     }))
   })
@@ -302,6 +303,29 @@ function listingCandidate(listing, category) {
   return normalizePhrase(`${withoutSourceCategory} ${productTerm}`)
 }
 
+function adjacentExplorationCandidate(listing, category, context) {
+  const keyword = listingCandidate(listing, category)
+  if (!keyword) return null
+
+  const eventId = String(listing?.eventId ?? '').trim()
+  const timingStatus = String(listing?.timingStatus ?? '').trim()
+  const isOtherEvent = Boolean(eventId && eventId !== context.activeEventId)
+  if (isOtherEvent && timingStatus !== 'timely') return null
+
+  const listingSources = Array.isArray(listing?.sources) ? listing.sources : []
+  const sourceKeywords = Array.isArray(listing?.sourceKeywords) ? listing.sourceKeywords : []
+  return {
+    keyword,
+    eventId: eventId || context.eventId,
+    timingStatus: timingStatus || context.timingStatus,
+    angleId: isOtherEvent ? 'seasonal-reference' : 'adjacent-product',
+    ...(isOtherEvent ? { angleIds: ['adjacent-product'] } : {}),
+    source: 'adjacent-product-title',
+    sources: [listing?.source, ...listingSources].filter(Boolean),
+    sourceKeywords: [...sourceKeywords, listing?.title].filter(Boolean),
+  }
+}
+
 function isMarketGap(candidate) {
   const demand = optionalNumber(
     candidate.searchDemand
@@ -389,12 +413,8 @@ export function buildMultiAngleCandidatePools(input = {}) {
     angleId: 'recent-sales',
   })
   addCandidates(byEvidence, (input.adjacentProductListings ?? [])
-    .map((listing) => ({
-      keyword: listingCandidate(listing, category),
-      source: 'adjacent-product-title',
-      sourceKeywords: [listing.title],
-    }))
-    .filter((candidate) => candidate.keyword), {
+    .map((listing) => adjacentExplorationCandidate(listing, category, common))
+    .filter(Boolean), {
     ...common,
     angleId: 'adjacent-product',
   })

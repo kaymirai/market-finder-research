@@ -40,6 +40,78 @@ test('creates separate pools from demand, taxonomy, recent sales and adjacent pr
   assert.equal(pools['adjacent-product'][0].keyword, 'witchy gardener shirt')
 })
 
+test('excludes non-timely adjacent evidence from another event', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    adjacentProductListings: [{
+      title: 'Christmas Nurse Mug',
+      categoryId: 'mug',
+      eventId: 'christmas',
+      timingStatus: 'prepare',
+      sales: 6,
+      listingAgeMonths: 4,
+    }],
+  })
+
+  assert.deepEqual(pools['adjacent-product'], [])
+  assert.deepEqual(pools['seasonal-reference'], [])
+  assert.equal(
+    Object.values(pools).flat().some((candidate) => candidate.keyword === 'christmas nurse shirt'),
+    false,
+  )
+})
+
+test('routes timely adjacent evidence from another event only to seasonal references', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    adjacentProductListings: [{
+      title: 'Christmas Nurse Mug',
+      categoryId: 'mug',
+      eventId: 'christmas',
+      timingStatus: 'timely',
+      sales: 6,
+      listingAgeMonths: 4,
+    }],
+  })
+
+  assert.deepEqual(pools['adjacent-product'], [])
+  assert.equal(pools['seasonal-reference'].length, 1)
+  assert.deepEqual(pools['seasonal-reference'][0], {
+    keyword: 'christmas nurse shirt',
+    categoryId: 'shirt',
+    eventId: 'christmas',
+    angleId: 'seasonal-reference',
+    angleIds: ['seasonal-reference', 'adjacent-product'],
+    source: 'adjacent-product-title',
+    sources: ['adjacent-product-title'],
+    sourceKeywords: ['christmas nurse mug'],
+    resultLane: 'seasonal-reference',
+    priorityScore: null,
+    timingStatus: 'timely',
+    activeEventId: 'halloween',
+  })
+})
+
+test('transforms valid same-event adjacent evidence into the active product category', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    adjacentProductListings: [{
+      title: 'Halloween Nurse Mug',
+      categoryId: 'mug',
+      eventId: 'halloween',
+      timingStatus: 'prepare',
+      sales: 1,
+      listingAgeMonths: 12,
+    }],
+  })
+
+  assert.equal(pools['adjacent-product'].length, 1)
+  assert.equal(pools['adjacent-product'][0].keyword, 'halloween nurse shirt')
+  assert.equal(pools['adjacent-product'][0].eventId, 'halloween')
+  assert.equal(pools['adjacent-product'][0].timingStatus, 'prepare')
+  assert.equal(pools['adjacent-product'][0].resultLane, 'event')
+})
+
 test('keeps only current-category Marketplace terms in demand neighborhood', () => {
   const pools = buildMultiAngleCandidatePools({
     ...base,
@@ -369,6 +441,7 @@ test('round-trips listing age through archives and excludes unknown or stale adj
   const persisted = JSON.parse(JSON.stringify([{
     eventId: 'halloween',
     categoryId: 'mug',
+    timingStatus: 'prepare',
     supplyListings: archived,
   }]))
   const adjacent = candidateApi.adjacentProductListingsFromLearningRecords(
@@ -401,6 +474,8 @@ test('round-trips listing age through archives and excludes unknown or stale adj
     pools['adjacent-product'].map((candidate) => candidate.keyword),
     ['fresh witchy gardener shirt'],
   )
+  assert.equal(adjacent[0].timingStatus, 'prepare')
+  assert.equal(pools['adjacent-product'][0].timingStatus, 'prepare')
 })
 
 test('saved seasonal references persist as useful objects and enter only a compatible later cycle', () => {
