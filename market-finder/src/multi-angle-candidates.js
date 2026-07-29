@@ -20,10 +20,9 @@ function optionalNumber(value) {
 }
 
 function resultLaneFor(candidate, activeEventId) {
-  if (candidate.resultLane) return String(candidate.resultLane)
   if (candidate.angleId === 'evergreen') return 'evergreen'
-  if (candidate.angleId === 'seasonal-reference') return 'seasonal-reference'
   if (candidate.eventId && candidate.eventId !== activeEventId) return 'seasonal-reference'
+  if (candidate.angleId === 'seasonal-reference') return 'seasonal-reference'
   return 'event'
 }
 

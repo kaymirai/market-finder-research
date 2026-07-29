@@ -59,6 +59,21 @@ test('places evergreen and timely other events outside the active-event lane', (
   assert.equal(pools['seasonal-reference'][0].resultLane, 'seasonal-reference')
 })
 
+test('does not allow a raw event lane to promote a timely other-event reference', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    seasonalReferenceCandidates: [{
+      keyword: 'thanksgiving nurse shirt',
+      eventId: 'thanksgiving',
+      timingStatus: 'timely',
+      resultLane: 'event',
+    }],
+  })
+
+  assert.equal(pools['seasonal-reference'][0].resultLane, 'seasonal-reference')
+  assert.equal(pools.event, undefined)
+})
+
 test('keeps measured market gaps separate from source-angle candidates', () => {
   const pools = buildMultiAngleCandidatePools({
     ...base,
