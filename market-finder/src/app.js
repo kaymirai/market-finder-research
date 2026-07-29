@@ -154,12 +154,14 @@ import {
   pauseMultiAngleExploration,
   recordMultiAngleBatch,
   recordMultiAngleFailure,
+  resolveMultiAngleCandidateResearchContext,
+  resolveMultiAngleImportedResearchContext,
   resolveMultiAngleResearchContext,
   resolveMultiAngleResearchOptions,
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-3'
+} from './multi-angle-exploration.js?v=20260730-4'
 import {
   calculateMonthlyProfitTarget,
 } from './monthly-profit-target.js?v=20260726-1'
@@ -1488,7 +1490,7 @@ function marketplaceLearningRecords() {
 
 function currentModifierAnalysis() {
   return analyzeMarketplaceVocabulary(marketplaceLearningRecords(), {
-    ...currentOptions(),
+    ...activeResearchOptions(),
     identitySeeds: elements.buyerIdentityInput?.value ?? '',
     now: new Date().toISOString(),
   })
@@ -1779,7 +1781,7 @@ function learnedBuyerIdentitySuggestions(exclude = []) {
 
 function automaticBuyerIdentityAnalysis() {
   return analyzeMarketplaceVocabulary(marketplaceLearningRecords(), {
-    ...currentOptions(),
+    ...activeResearchOptions(),
     identitySeeds: '',
     now: new Date().toISOString(),
   })
@@ -2142,8 +2144,7 @@ function uniqueRowsByKeyword(rows) {
 }
 
 function buildEverbeeKeywordsFromErankRows(rows) {
-  const event = selectedEvent()
-  const category = selectedCategory()
+  const { event, category } = activeResearchContext()
   const product = normalizePhrase(category.searchTerm)
   const eventTerm = normalizePhrase(event.searchTerm)
   const eventSignals = event.searchTerm
@@ -2153,7 +2154,7 @@ function buildEverbeeKeywordsFromErankRows(rows) {
   const year = selectedYearOption()
   const seedKeywords = rows.map((row) => row.keyword).join('\n')
   const generated = generateKeywordCandidates({
-    ...currentOptions(),
+    ...activeResearchOptions(),
     seedKeywords,
     limit: Math.max(40, Math.min(Number(elements.limitInput.value) || 80, 120)),
   })
@@ -2660,7 +2661,7 @@ function marketplaceNextBatchState(plan = state.marketplaceInsightPlan) {
 function releaseMarketplaceInsightBatch() {
   const plan = state.marketplaceInsightPlan
   if (!plan || state.marketplaceInsightMode !== 'plus') return
-  const result = advanceMarketplaceInsightResearch(plan, currentOptions())
+  const result = advanceMarketplaceInsightResearch(plan, activeResearchOptions())
   const items = (result.plan.items ?? []).map((item, index) => ({ ...item, id: `etsy-insight-${index + 1}` }))
   const counts = ['discovery', 'validation', 'reserve', 'followup'].reduce((summary, stage) => ({
     ...summary,
@@ -2917,7 +2918,7 @@ function renderCandidates() {
 
   elements.candidateList.innerHTML = visibleCandidates.map((candidate) => {
     const researched = findResearchRow(candidate.keyword)
-    const resultScore = researched ? scoreEverbeeResult(researched, currentOptions()) : null
+    const resultScore = researched ? scoreEverbeeResult(researched, activeResearchOptions()) : null
     const erankCheckedAt = formatDateTime(researched?.erankCheckedAt)
     const erankTitle = `eRankの検索数・クリック・競合・KDを取得済みです。人気確定ではありません。${erankCheckedAt ? ` 確認: ${erankCheckedAt}` : ''}`
     const resultPill = resultScore?.validation.hasEverbeeData
@@ -3632,7 +3633,7 @@ function selectedRoundEverbeeRows() {
   if (!selected || selected === 'all') return everbeeResultRows()
   const round = state.researchRounds.rounds.find((item) => item.id === selected)
   if (!round) return everbeeResultRows()
-  return analyzeResearchRows(researchRowsForRound(state.researchRows, round), currentOptions()).everbeeRows
+  return analyzeResearchRows(researchRowsForRound(state.researchRows, round), activeResearchOptions()).everbeeRows
 }
 
 function researchRoundLabel(round) {
@@ -3641,6 +3642,7 @@ function researchRoundLabel(round) {
 
 function renderResearchRoundControls() {
   const rounds = state.researchRounds.rounds
+  const researchOptions = activeResearchOptions()
   elements.researchRoundTabs.innerHTML = [
     { id: 'all', label: '総合' },
     ...rounds.map((round) => ({ id: round.id, label: researchRoundLabel(round) })),
@@ -3649,7 +3651,7 @@ function renderResearchRoundControls() {
   `).join('')
 
   const summaries = rounds.map((round) => {
-    const rows = analyzeResearchRows(researchRowsForRound(state.researchRows, round), currentOptions()).everbeeRows
+    const rows = analyzeResearchRows(researchRowsForRound(state.researchRows, round), researchOptions).everbeeRows
     const counts = summarizeOpportunityCounts(rows)
     state.researchRounds = updateResearchRound(state.researchRounds, round.id, {
       resultKeywords: rows.map((row) => row.keyword),
@@ -4859,10 +4861,11 @@ function crossNicheSourceLabel(source) {
 }
 
 function currentCrossNicheDrilldown() {
-  return buildCrossNicheDrilldown(state.researchRows, currentOptions())
+  return buildCrossNicheDrilldown(state.researchRows, activeResearchOptions())
 }
 
 function currentNicheDrilldownNodes() {
+  const researchContext = activeResearchContext()
   const drilldown = currentCrossNicheDrilldown()
   const runId = currentEvidenceRunId()
   const previousNodes = state.evidenceArchives
@@ -4872,8 +4875,8 @@ function currentNicheDrilldownNodes() {
     rows: state.researchRows,
     candidates: [...state.candidateCatalog, ...drilldown.candidates],
     previousNodes,
-    categoryId: selectedCategory().id,
-    eventId: selectedEvent().id,
+    categoryId: researchContext.categoryId,
+    eventId: researchContext.eventId,
   })
 }
 
@@ -4992,7 +4995,7 @@ function applyCrossNicheProposal() {
   if (previousRound) {
     const previousRows = analyzeResearchRows(
       researchRowsForRound(state.researchRows, previousRound),
-      currentOptions(),
+      activeResearchOptions(),
     ).everbeeRows
     state.researchRounds = updateResearchRound(state.researchRounds, previousRound.id, {
       status: 'complete',
@@ -5370,11 +5373,21 @@ function currentMultiAnglePools() {
 
 function multiAngleCandidateForResearch(candidate) {
   const context = activeResearchContext()
-  const event = resolveMarketEvent({
-    eventId: candidate.eventId || context.eventId,
+  const candidateContext = resolveMultiAngleCandidateResearchContext(
+    state.multiAngleExploration,
+    candidate,
+    {
+      eventId: context.eventId,
+      categoryId: context.categoryId,
+      eventSnapshot: context.event,
+      categorySnapshot: context.category,
+    },
+  )
+  const event = candidateContext.eventSnapshot ?? resolveMarketEvent({
+    eventId: candidateContext.eventId,
   })
-  const category = PRODUCT_CATEGORIES.find(
-    (item) => item.id === candidate.categoryId,
+  const category = candidateContext.categorySnapshot ?? PRODUCT_CATEGORIES.find(
+    (item) => item.id === candidateContext.categoryId,
   ) ?? context.category
   const keyword = normalizePhrase(candidate.keyword)
   const riskTerms = detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/))
@@ -5383,8 +5396,10 @@ function multiAngleCandidateForResearch(candidate) {
     keyword,
     categoryId: category.id,
     categoryLabel: category.label,
+    categorySearchTerm: category.searchTerm,
     eventId: candidate.resultLane === 'evergreen' ? '' : event.id,
     eventLabel: candidate.resultLane === 'evergreen' ? 'Evergreen' : event.jpLabel,
+    eventSearchTerm: candidate.resultLane === 'evergreen' ? '' : event.searchTerm,
     year: selectedYearOption(),
     targets: selectedTargets(),
     wordCount: keyword.split(' ').filter(Boolean).length,
@@ -5398,7 +5413,7 @@ function multiAngleCandidateForResearch(candidate) {
     intentTrack: candidate.resultLane === 'evergreen'
       ? 'evergreen'
       : classifyEventMarketTrack(keyword, {
-          ...currentOptions(),
+          ...activeResearchOptions(),
           eventId: event.id,
           categoryId: category.id,
         }),
@@ -6159,7 +6174,7 @@ function bucketInputsAreEmpty() {
 }
 
 function autoBucketKeywords(showStatus = true) {
-  const options = currentOptions()
+  const options = activeResearchOptions()
   const allRanked = currentResearchAnalysis().scoredRows
   const everbeeRanked = allRanked.filter((row) => row.score.validation.hasEverbeeData)
   const ranked = everbeeRanked.length > 0 ? everbeeRanked : allRanked
@@ -6222,7 +6237,7 @@ function buildSeoPlan() {
     visibility: elements.visibilityBucketInput.value,
     reach: elements.reachBucketInput.value,
     bestSeller: elements.bestSellerBucketInput.value,
-  }, currentOptions())
+  }, activeResearchOptions())
 
   renderSeoPlan()
   elements.seoStatus.textContent = `SEO案を作成しました。タイトル ${state.seoPlan.titleLength}文字 / タグ ${state.seoPlan.tags.length}個`
@@ -6803,8 +6818,7 @@ function resetCandidatesForInputChange(message = '条件を変更しました。
 }
 
 function crossNicheCandidateForResearch(candidate) {
-  const event = selectedEvent()
-  const category = selectedCategory()
+  const { event, category } = activeResearchContext()
   const riskTerms = detectRiskTerms(candidate.keyword, elements.riskInput.value.split(/\r?\n|,/))
   const parentRow = findResearchRow(candidate.parentKeyword)
   const sourceAt = parentRow?.everbeeCheckedAt || parentRow?.etsyCheckedAt || parentRow?.erankCheckedAt || ''
@@ -6846,7 +6860,7 @@ function crossNicheCandidateForResearch(candidate) {
   return prioritizeEventCandidates(
     [researchCandidate],
     state.researchedMarketHistory,
-    currentOptions(),
+    activeResearchOptions(),
   )[0]
 }
 
@@ -6880,9 +6894,22 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     || existingRow?.sourceKeyword
     || erankSourceKeyword(existingRow ?? {})
   const candidate = state.candidates.find((item) => normalizePhrase(item.keyword) === keyword)
-  const researchEvent = researchContext.event
-  const researchEventId = String(row.researchEventId ?? existingRow?.researchEventId ?? candidate?.eventId ?? researchEvent.id)
-  const researchCategoryId = String(row.researchCategoryId ?? existingRow?.researchCategoryId ?? candidate?.categoryId ?? researchContext.categoryId)
+  const importedResearchContext = resolveMultiAngleImportedResearchContext(
+    state.multiAngleExploration,
+    {
+      row,
+      existingRow,
+      candidate,
+      selected: {
+        eventId: researchContext.eventId,
+        categoryId: researchContext.categoryId,
+        eventSnapshot: researchContext.event,
+        categorySnapshot: researchContext.category,
+      },
+    },
+  )
+  const researchEventId = importedResearchContext.eventId
+  const researchCategoryId = importedResearchContext.categoryId
   const intentTrack = classifyEventMarketTrack(keyword, {
     ...researchOptions,
     eventId: researchEventId,
@@ -6909,8 +6936,11 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     researchRoundDepth: String(row.researchRoundDepth ?? existingRow?.researchRoundDepth ?? currentResearchRound()?.depth ?? ''),
     researchRoundStatus: String(row.researchRoundStatus ?? existingRow?.researchRoundStatus ?? currentResearchRound()?.status ?? ''),
     researchEventId,
-    researchEventLabel: String(row.researchEventLabel ?? existingRow?.researchEventLabel ?? candidate?.eventLabel ?? researchEvent.jpLabel),
+    researchEventLabel: importedResearchContext.eventLabel,
+    researchEventSearchTerm: importedResearchContext.eventSearchTerm,
     researchCategoryId,
+    researchCategoryLabel: importedResearchContext.categoryLabel,
+    researchCategorySearchTerm: importedResearchContext.categorySearchTerm,
     discoveryLane: String(row.discoveryLane ?? existingRow?.discoveryLane ?? candidate?.discoveryLane ?? ''),
     queryStrategy: String(row.queryStrategy ?? existingRow?.queryStrategy ?? candidate?.queryStrategy ?? ''),
     buyerIntentAxes: Array.isArray(row.buyerIntentAxes)
@@ -7215,7 +7245,7 @@ async function copySeoTags() {
 }
 
 async function downloadJob() {
-  const options = currentOptions()
+  const options = activeResearchOptions()
   const job = {
     app: 'Market Finder',
     version: 2,
@@ -7286,7 +7316,7 @@ function researchRoundForRow(row) {
 function researchMetadataCsvValues(row) {
   const round = researchRoundForRow(row)
   const roundRows = round
-    ? analyzeResearchRows(researchRowsForRound(state.researchRows, round), currentOptions()).everbeeRows
+    ? analyzeResearchRows(researchRowsForRound(state.researchRows, round), activeResearchOptions()).everbeeRows
     : []
   const counts = round ? summarizeOpportunityCounts(roundRows) : { A: 0, B: 0, C: 0, D: 0 }
   const overallStatus = state.researchRounds.rounds.length > 0
@@ -7647,7 +7677,7 @@ function confirmExportBeforeClearingResults({ scope = 'all', label = '前回結�
 
 function clearResearchResults(scope = 'all') {
   if (scope === 'everbee') {
-    state.researchRows = state.researchRows.filter((row) => !scoreEverbeeResult(row, currentOptions()).validation.hasEverbeeData)
+    state.researchRows = state.researchRows.filter((row) => !scoreEverbeeResult(row, activeResearchOptions()).validation.hasEverbeeData)
   } else {
     state.researchRows = []
     state.crossNicheWorkflow = createCrossNicheWorkflowState()
@@ -8176,7 +8206,7 @@ function renderProgressModal(extensionState = state.extensionState) {
     } else if (state.progress.mode === 'keyword') {
       const round = currentResearchRound()
       if (round?.type === 'initial' && !isCrossNicheWorkflowPending(state.crossNicheWorkflow)) {
-        const rows = analyzeResearchRows(researchRowsForRound(state.researchRows, round), currentOptions()).everbeeRows
+        const rows = analyzeResearchRows(researchRowsForRound(state.researchRows, round), activeResearchOptions()).everbeeRows
         syncActiveRoundStatus('complete', {
           resultKeywords: rows.map((row) => row.keyword),
           opportunityCounts: summarizeOpportunityCounts(rows),

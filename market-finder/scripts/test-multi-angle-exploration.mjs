@@ -487,6 +487,88 @@ test('custom event snapshot survives Alpha to Beta input changes and reload', ()
   assert.equal(options.categoryId, 'shirt')
 })
 
+test('custom event candidate and imported row keep the frozen Alpha metadata after selector changes', () => {
+  assert.equal(typeof multiAngleApi.resolveMultiAngleCandidateResearchContext, 'function')
+  assert.equal(typeof multiAngleApi.resolveMultiAngleImportedResearchContext, 'function')
+
+  const alphaEvent = {
+    id: 'custom-event',
+    label: 'Alpha Launch',
+    jpLabel: 'Alpha Launch',
+    searchTerm: 'alpha launch',
+    displayTerm: 'Alpha Launch',
+    month: 0,
+  }
+  const shirt = {
+    id: 'shirt',
+    label: 'Shirt',
+    searchTerm: 'shirt',
+    tags: ['shirt'],
+  }
+  const started = startMultiAngleExploration({}, {
+    activeEventId: alphaEvent.id,
+    categoryId: shirt.id,
+    eventSnapshot: alphaEvent,
+    categorySnapshot: shirt,
+  })
+  const betaMugSelection = {
+    eventId: 'custom-event',
+    categoryId: 'mug',
+    eventSnapshot: {
+      ...alphaEvent,
+      label: 'Beta Launch',
+      jpLabel: 'Beta Launch',
+      searchTerm: 'beta launch',
+      displayTerm: 'Beta Launch',
+    },
+    categorySnapshot: {
+      id: 'mug',
+      label: 'Mug',
+      searchTerm: 'mug',
+      tags: ['mug'],
+    },
+  }
+  const candidateContext = multiAngleApi.resolveMultiAngleCandidateResearchContext(
+    started,
+    {
+      keyword: 'alpha launch teacher shirt',
+      eventId: 'custom-event',
+      categoryId: 'shirt',
+    },
+    betaMugSelection,
+  )
+  const candidate = {
+    keyword: 'alpha launch teacher shirt',
+    eventId: candidateContext.eventId,
+    eventLabel: candidateContext.eventSnapshot.jpLabel,
+    eventSearchTerm: candidateContext.eventSnapshot.searchTerm,
+    categoryId: candidateContext.categoryId,
+    categoryLabel: candidateContext.categorySnapshot.label,
+    categorySearchTerm: candidateContext.categorySnapshot.searchTerm,
+  }
+  const imported = multiAngleApi.resolveMultiAngleImportedResearchContext(
+    started,
+    {
+      row: {},
+      existingRow: {},
+      candidate,
+      selected: betaMugSelection,
+    },
+  )
+
+  assert.equal(candidateContext.eventSnapshot.label, 'Alpha Launch')
+  assert.equal(candidateContext.eventSnapshot.searchTerm, 'alpha launch')
+  assert.equal(candidateContext.categorySnapshot.id, 'shirt')
+  assert.deepEqual(imported, {
+    eventId: 'custom-event',
+    eventLabel: 'Alpha Launch',
+    eventSearchTerm: 'alpha launch',
+    categoryId: 'shirt',
+    categoryLabel: 'Shirt',
+    categorySearchTerm: 'shirt',
+  })
+})
+
 test('backfills snapshots when safely migrating an older fixed-context state', () => {
   assert.equal(typeof multiAngleApi.backfillMultiAngleResearchSnapshots, 'function')
   const legacy = createMultiAngleExplorationState({

@@ -282,6 +282,100 @@ export function resolveMultiAngleResearchOptions(state = {}, selectedOptions = {
   }
 }
 
+export function resolveMultiAngleCandidateResearchContext(
+  state = {},
+  candidate = {},
+  selected = {},
+) {
+  const context = resolveMultiAngleResearchContext(state, selected)
+  const candidateEventId = String(candidate?.eventId ?? '').trim()
+  const candidateCategoryId = String(candidate?.categoryId ?? '').trim()
+  const usesActiveEvent = !candidateEventId || candidateEventId === context.eventId
+  const usesActiveCategory = !candidateCategoryId || candidateCategoryId === context.categoryId
+  return {
+    eventId: usesActiveEvent ? context.eventId : candidateEventId,
+    categoryId: usesActiveCategory ? context.categoryId : candidateCategoryId,
+    ...(usesActiveEvent && context.eventSnapshot
+      ? { eventSnapshot: context.eventSnapshot }
+      : {}),
+    ...(usesActiveCategory && context.categorySnapshot
+      ? { categorySnapshot: context.categorySnapshot }
+      : {}),
+  }
+}
+
+export function resolveMultiAngleImportedResearchContext(
+  state = {},
+  {
+    row = {},
+    existingRow = {},
+    candidate = {},
+    selected = {},
+  } = {},
+) {
+  const context = resolveMultiAngleResearchContext(state, selected)
+  const eventSnapshot = context.eventSnapshot ?? {}
+  const categorySnapshot = context.categorySnapshot ?? {}
+  const isEvergreen = candidate?.resultLane === 'evergreen'
+    || candidate?.intentTrack === 'evergreen'
+  const fixedEventId = context.fixed && !isEvergreen
+    ? context.eventId
+    : candidate?.eventId ?? context.eventId
+  const fixedEventLabel = context.fixed && !isEvergreen
+    ? eventSnapshot.jpLabel || eventSnapshot.label
+    : candidate?.eventLabel ?? eventSnapshot.jpLabel ?? eventSnapshot.label
+  const fixedEventSearchTerm = context.fixed && !isEvergreen
+    ? eventSnapshot.searchTerm
+    : candidate?.eventSearchTerm ?? eventSnapshot.searchTerm
+  const fixedCategoryId = context.fixed
+    ? context.categoryId
+    : candidate?.categoryId ?? context.categoryId
+  const fixedCategoryLabel = context.fixed
+    ? categorySnapshot.label
+    : candidate?.categoryLabel ?? categorySnapshot.label
+  const fixedCategorySearchTerm = context.fixed
+    ? categorySnapshot.searchTerm
+    : candidate?.categorySearchTerm ?? categorySnapshot.searchTerm
+  return {
+    eventId: String(
+      row?.researchEventId
+      ?? existingRow?.researchEventId
+      ?? fixedEventId
+      ?? '',
+    ),
+    eventLabel: String(
+      row?.researchEventLabel
+      ?? existingRow?.researchEventLabel
+      ?? fixedEventLabel
+      ?? '',
+    ),
+    eventSearchTerm: String(
+      row?.researchEventSearchTerm
+      ?? existingRow?.researchEventSearchTerm
+      ?? fixedEventSearchTerm
+      ?? '',
+    ),
+    categoryId: String(
+      row?.researchCategoryId
+      ?? existingRow?.researchCategoryId
+      ?? fixedCategoryId
+      ?? '',
+    ),
+    categoryLabel: String(
+      row?.researchCategoryLabel
+      ?? existingRow?.researchCategoryLabel
+      ?? fixedCategoryLabel
+      ?? '',
+    ),
+    categorySearchTerm: String(
+      row?.researchCategorySearchTerm
+      ?? existingRow?.researchCategorySearchTerm
+      ?? fixedCategorySearchTerm
+      ?? '',
+    ),
+  }
+}
+
 export function backfillMultiAngleResearchSnapshots(state = {}, context = {}) {
   const current = createMultiAngleExplorationState(state)
   const suppliedEvent = normalizedEventSnapshot(

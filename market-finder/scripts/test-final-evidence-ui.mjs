@@ -168,6 +168,46 @@ test('routes analysis Marketplace planning and Etsy row metadata through fixed r
   assert.match(mergedRow, /activeResearchOptions\(\)/)
 })
 
+test('keeps multi-angle candidate conversion and imported metadata on the frozen context', () => {
+  const candidate = app.match(/function multiAngleCandidateForResearch\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const mergedRow = app.match(/function buildMergedResearchRow\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(candidate, /resolveMultiAngleCandidateResearchContext\(/)
+  assert.match(candidate, /eventSearchTerm/)
+  assert.match(candidate, /categorySearchTerm/)
+  assert.match(mergedRow, /resolveMultiAngleImportedResearchContext\(/)
+  assert.match(mergedRow, /researchEventSearchTerm/)
+  assert.match(mergedRow, /researchCategorySearchTerm/)
+})
+
+test('uses frozen options for round summaries drilldown archives and next-batch scoring', () => {
+  for (const functionName of [
+    'selectedRoundEverbeeRows',
+    'renderResearchRoundControls',
+    'currentCrossNicheDrilldown',
+    'currentNicheDrilldownNodes',
+    'applyCrossNicheProposal',
+    'crossNicheCandidateForResearch',
+    'researchMetadataCsvValues',
+  ]) {
+    const body = app.match(new RegExp(`function ${functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+    assert.match(
+      body,
+      /activeResearchOptions\(\)|activeResearchContext\(\)/,
+      `${functionName} must use the frozen research context`,
+    )
+    assert.doesNotMatch(
+      body,
+      /currentOptions\(\)|selectedEvent\(\)|selectedCategory\(\)/,
+      `${functionName} must not rescore current work from live selectors`,
+    )
+  }
+
+  const completion = app.match(/if \(round\?\.type === 'initial'[\s\S]*?syncActiveRoundStatus\('complete', \{([\s\S]*?)\n\s*\}\)/)?.[0] ?? ''
+  assert.match(completion, /activeResearchOptions\(\)/)
+  assert.doesNotMatch(completion, /currentOptions\(\)/)
+})
+
 test('routes marketplace extension and global stop controls through multi-angle orchestration', () => {
   const hasWork = app.match(/function multiAngleWorkHasCurrentBatch\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   const marketplaceStop = app.match(/function stopMarketplaceInsightAutomation\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
