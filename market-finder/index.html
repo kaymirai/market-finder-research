@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Market Finder</title>
-    <link rel="stylesheet" href="./styles.css?v=20260729-1">
+    <link rel="stylesheet" href="./styles.css?v=20260730-1">
   </head>
   <body>
     <main class="app-shell">
@@ -95,6 +95,14 @@
           </div>
           <button id="winningNicheAutomationToggle" type="button" class="primary-btn" data-winning-niche-action="start">勝ち候補を探す</button>
         </div>
+        <div id="marketTimingGate" class="market-timing-gate is-evergreen" aria-live="polite">
+          <div class="market-timing-copy">
+            <span class="market-timing-label">制作時期</span>
+            <strong id="marketTimingStatus">通年市場として調査できます</strong>
+            <small id="marketTimingDetail">選んだイベントを変えずに、調査を始められるか確認します。</small>
+          </div>
+          <button id="marketTimingOverrideBtn" type="button" class="ghost-btn" hidden>このイベントを続けて調査する</button>
+        </div>
         <div class="listing-research-target-planner">
           <div class="listing-research-target-heading">
             <div>
@@ -123,7 +131,10 @@
             <strong id="listingResearchTargetProgress">A/B候補 0 / 5件・残り5件</strong>
           </div>
         </div>
-        <div id="winningNicheAutomationRail" class="winning-niche-rail" aria-label="連続探索カテゴリ"></div>
+        <div id="winningNicheAutomationRail" class="winning-niche-rail">
+          <div id="multiAngleRail" class="multi-angle-rail" aria-label="6つの探索角度"></div>
+          <p id="explorationAngleStatus" class="exploration-angle-status">現在の角度と、次へ進む理由をここに表示します。</p>
+        </div>
       </section>
 
       <section class="simple-runner">
@@ -815,6 +826,34 @@
           </div>
           <div id="designShortlistStatus" class="inline-status">EverBeeの売上確認が終わると、次に作るテーマがここに出ます。</div>
         </section>
+        <section id="multiAngleResultLanes" class="exploration-result-lanes" aria-label="探索結果の置き場">
+          <article id="activeEventResultLane" class="exploration-result-lane is-active-event">
+            <header>
+              <p class="section-kicker">今回のイベント</p>
+              <h3>検証済み A / B / C / D</h3>
+              <small>選んだイベントを変えずに確認した結果です。</small>
+            </header>
+            <div class="exploration-result-list" data-result-lane-list="event"></div>
+          </article>
+          <article id="evergreenResultLane" class="exploration-result-lane is-evergreen">
+            <header>
+              <p class="section-kicker">イベントに頼らない</p>
+              <h3>エバーグリーン候補</h3>
+              <small>通年で積み上げられる候補を分けて残します。</small>
+            </header>
+            <div class="exploration-result-list" data-result-lane-list="evergreen"></div>
+          </article>
+          <article id="seasonalReferenceLane" class="exploration-result-lane is-seasonal-reference">
+            <header>
+              <p class="section-kicker">今作る別季節の参考</p>
+              <h3>参考候補</h3>
+              <strong>今回のA/B目標には含みません</strong>
+              <small>別イベントへ自動で移動せず、次回用に保存するだけです。</small>
+            </header>
+            <div class="exploration-result-list" data-result-lane-list="seasonal-reference"></div>
+            <button type="button" class="ghost-btn seasonal-reference-save" data-save-seasonal-reference="all" hidden>次回候補に保存</button>
+          </article>
+        </section>
         <div class="final-evidence-controls">
           <div id="finalEvidenceFilters" class="final-evidence-filters" role="group" aria-label="最終結果の表示切り替え">
             <button type="button" data-final-evidence-filter="all" aria-pressed="true">すべて</button>
@@ -990,6 +1029,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="./src/app.js?v=20260729-1"></script>
+    <script type="module" src="./src/app.js?v=20260730-1"></script>
   </body>
 </html>

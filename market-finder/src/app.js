@@ -6,6 +6,7 @@ import {
   analyzeMarketplaceVocabulary,
   buildKeywordClusterKey,
   buildCrossNicheDrilldown,
+  buildTimelySeasonalSuggestions,
   buildMarketplaceInsightPlan,
   generateBroadMarketQueries,
   generateBroadEventCandidates,
@@ -220,6 +221,14 @@ const MARKETPLACE_STOP_LABELS = {
   'candidate-pool-depleted': '有効候補が5語未満',
   'targeted-batch': '指定した候補の確認完了',
 }
+const EXPLORATION_ANGLE_LABELS = Object.freeze({
+  'demand-neighborhood': '需要周辺',
+  'attribute-combination': '属性組み合わせ',
+  'recent-sales': '新着販売',
+  'adjacent-product': '別商品種',
+  'market-gap': '市場の空白',
+  evergreen: '大市場・通年',
+})
 
 const state = {
   candidates: [],
@@ -275,6 +284,8 @@ const state = {
   selectedResultKey: '',
   finalEvidenceFilter: 'all',
   finalEvidenceCount: 0,
+  timingOverrideConfirmed: false,
+  savedSeasonalReferenceKeys: [],
   pendingEvidenceAutomation: {
     active: false,
     scheduled: false,
@@ -453,6 +464,15 @@ const elements = {
   winningNicheAutomationRail: document.querySelector('#winningNicheAutomationRail'),
   winningNicheAutomationStatus: document.querySelector('#winningNicheAutomationStatus'),
   winningNicheAutomationToggle: document.querySelector('#winningNicheAutomationToggle'),
+  marketTimingGate: document.querySelector('#marketTimingGate'),
+  marketTimingStatus: document.querySelector('#marketTimingStatus'),
+  marketTimingDetail: document.querySelector('#marketTimingDetail'),
+  marketTimingOverrideBtn: document.querySelector('#marketTimingOverrideBtn'),
+  multiAngleRail: document.querySelector('#multiAngleRail'),
+  explorationAngleStatus: document.querySelector('#explorationAngleStatus'),
+  activeEventResultLane: document.querySelector('#activeEventResultLane'),
+  evergreenResultLane: document.querySelector('#evergreenResultLane'),
+  seasonalReferenceLane: document.querySelector('#seasonalReferenceLane'),
   monthlyListingTargetInput: document.querySelector('#monthlyListingTargetInput'),
   researchRunsPerMonthInput: document.querySelector('#researchRunsPerMonthInput'),
   listingsPerWinnerInput: document.querySelector('#listingsPerWinnerInput'),
@@ -719,6 +739,7 @@ function persistMarketFinderState() {
       selectedResultKey: state.selectedResultKey,
       profitInputsByKeyword: state.profitInputsByKeyword,
       finalEvidenceFilter: state.finalEvidenceFilter,
+      savedSeasonalReferenceKeys: state.savedSeasonalReferenceKeys,
       multiAngleExploration: state.multiAngleExploration,
       winningNicheAutomation: state.winningNicheAutomation,
       pendingEvidenceAutomation: {
@@ -832,6 +853,9 @@ function restorePersistedState() {
     .includes(savedState.finalEvidenceFilter)
     ? savedState.finalEvidenceFilter
     : 'all'
+  state.savedSeasonalReferenceKeys = Array.isArray(savedState.savedSeasonalReferenceKeys)
+    ? [...new Set(savedState.savedSeasonalReferenceKeys.map((key) => String(key ?? '').trim()).filter(Boolean))]
+    : []
   state.listingResearchTargetSettings = normalizeListingResearchTarget(
     savedState.listingResearchTargetSettings,
   )
@@ -3725,14 +3749,7 @@ function renderWinningNicheAutomation() {
 
   const automation = state.multiAngleExploration
   const status = automation.status || 'idle'
-  const angleLabels = {
-    'demand-neighborhood': '需要周辺',
-    'attribute-combination': '属性組合せ',
-    'recent-sales': '直近販売',
-    'adjacent-product': '隣接商品',
-    'market-gap': '市場ギャップ',
-    evergreen: '通年需要',
-  }
+  const angleLabels = EXPLORATION_ANGLE_LABELS
   const axisLabel = angleLabels[automation.currentAngleId] || '未開始'
   const nextAngleId = EXPLORATION_ANGLE_ORDER[Math.min(
     automation.angleIndex + (automation.currentAngleId ? 1 : 0),
@@ -3772,13 +3789,166 @@ function renderWinningNicheAutomation() {
   elements.winningNicheAutomationToggle.dataset.winningNicheAction = action
   elements.winningNicheAutomationToggle.textContent = buttonLabel
   renderListingResearchTarget()
-  renderHtmlIfChanged(elements.winningNicheAutomationRail, EXPLORATION_ANGLE_ORDER.map((axisId, index) => {
-    const label = angleLabels[axisId] || axisId
-    const active = axisId === automation.currentAngleId
-    const next = axisId === nextAngleId || (status === 'idle' && index === 0)
-    const className = active ? 'is-active' : next ? 'is-next' : ''
-    return `<span data-winning-niche-axis="${escapeHtml(axisId)}" class="${className}"><small>${String(index + 1).padStart(2, '0')}</small><strong>${escapeHtml(label)}</strong></span>`
-  }).join('<i aria-hidden="true">→</i>'))
+  renderMarketTimingGate()
+  renderExplorationAngleRail()
+  renderExplorationResultLanes()
+}
+
+function renderMarketTimingGate() {
+  if (
+    !elements.marketTimingGate
+    || !elements.marketTimingStatus
+    || !elements.marketTimingDetail
+    || !elements.marketTimingOverrideBtn
+  ) return
+
+  const event = selectedEvent()
+  const timing = classifyProductionWindow(event)
+  const blocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
+  const statusCopy = {
+    timely: `今作る時期です。需要ピークまで${timing.daysUntil}日`,
+    early: state.timingOverrideConfirmed
+      ? 'まだ早い時期ですが、このイベントを続けて調査します'
+      : 'まだ早い時期です。別イベントへは移動しません',
+    late: state.timingOverrideConfirmed
+      ? '制作開始が遅い時期ですが、このイベントを続けて調査します'
+      : '制作開始が遅い時期です。別イベントへは移動しません',
+    evergreen: '通年市場として調査できます',
+  }
+  const detailCopy = {
+    timely: `${event.jpLabel}を固定したまま、自動調査を開始できます。`,
+    early: blocked
+      ? '自動調査は開始しません。続ける場合だけ、右のボタンで明示してください。'
+      : '明示的な続行を受け付けました。イベントは変更しません。',
+    late: blocked
+      ? '自動調査は開始しません。続ける場合だけ、右のボタンで明示してください。'
+      : '明示的な続行を受け付けました。イベントは変更しません。',
+    evergreen: 'イベントなしのため、制作時期の制限はありません。',
+  }
+
+  elements.marketTimingGate.className = `market-timing-gate is-${timing.status}${blocked ? ' is-blocked' : ''}`
+  elements.marketTimingStatus.textContent = statusCopy[timing.status] || statusCopy.evergreen
+  elements.marketTimingDetail.textContent = detailCopy[timing.status] || detailCopy.evergreen
+  elements.marketTimingOverrideBtn.hidden = !blocked
+  elements.winningNicheAutomationToggle.disabled = blocked
+  elements.winningNicheAutomationToggle.title = blocked
+    ? '制作時期を確認し、「このイベントを続けて調査する」を押してください。'
+    : ''
+}
+
+function explorationAngleState(automation, angleId) {
+  const wasMeasured = automation.evidenceKeys.some((evidenceKey) => (
+    (automation.provenance[evidenceKey] ?? []).includes(angleId)
+  ))
+  if (automation.status === 'running' && automation.currentAngleId === angleId) return 'active'
+  if (wasMeasured) return 'complete'
+  if (automation.exhaustedAngles.includes(angleId)) return 'empty'
+  return 'idle'
+}
+
+function renderExplorationAngleRail() {
+  if (!elements.multiAngleRail || !elements.explorationAngleStatus) return
+  const automation = state.multiAngleExploration
+  const currentIndex = Math.max(0, EXPLORATION_ANGLE_ORDER.indexOf(automation.currentAngleId))
+  const nextAngleId = EXPLORATION_ANGLE_ORDER.slice(currentIndex + (automation.currentAngleId ? 1 : 0))
+    .find((angleId) => !automation.exhaustedAngles.includes(angleId))
+  const currentLabel = EXPLORATION_ANGLE_LABELS[automation.currentAngleId] || '未開始'
+  const nextLabel = EXPLORATION_ANGLE_LABELS[nextAngleId] || ''
+  const routeCopy = automation.status === 'idle'
+    ? `現在: 未開始。最初に「${EXPLORATION_ANGLE_LABELS[EXPLORATION_ANGLE_ORDER[0]]}」から需要の近い候補を確認します。`
+    : nextLabel
+      ? `現在: ${currentLabel}。未確認の切り口を広げるため、完了後は「${nextLabel}」へ進みます。`
+      : `現在: ${currentLabel}。6つの角度を確認し終えたため、次の角度はありません。`
+  const stateLabels = {
+    idle: '未開始',
+    active: '調査中',
+    complete: '完了',
+    empty: '候補なし',
+  }
+
+  renderHtmlIfChanged(elements.multiAngleRail, EXPLORATION_ANGLE_ORDER.map((angleId, index) => {
+    const angleState = explorationAngleState(automation, angleId)
+    return `
+      <span
+        class="exploration-angle-step is-${angleState}"
+        data-exploration-angle="${escapeHtml(angleId)}"
+        data-winning-niche-axis="${escapeHtml(angleId)}"
+      >
+        <small>${index + 1} / 6</small>
+        <strong>${escapeHtml(EXPLORATION_ANGLE_LABELS[angleId])}</strong>
+        <em>${stateLabels[angleState]}</em>
+      </span>
+    `
+  }).join(''))
+  elements.explorationAngleStatus.textContent = routeCopy
+}
+
+function explorationResultKey(item = {}) {
+  const eventId = String(item.eventId ?? item.event?.id ?? '').trim()
+  const keyword = normalizePhrase(item.keyword ?? item.event?.jpLabel ?? item.event?.label)
+  return `${eventId}|${keyword}`
+}
+
+function explorationResultItemHtml(item = {}, options = {}) {
+  const event = item.event ?? (item.eventId ? resolveMarketEvent({ eventId: item.eventId }) : null)
+  const label = normalizePhrase(item.keyword) || event?.jpLabel || event?.label || '名称未設定'
+  const grade = String(item.opportunityLabel ?? '').trim().toUpperCase()
+  const detail = options.seasonalReference
+    ? item.daysUntil !== undefined && item.daysUntil !== null
+      ? `需要ピークまで${item.daysUntil}日`
+      : `${event?.jpLabel || '別季節'}の参考候補`
+    : grade
+      ? `判定 ${grade} / 検証済み`
+      : `${EXPLORATION_ANGLE_LABELS[item.angleId] || '探索候補'}から追加`
+  const key = explorationResultKey(item)
+  const saved = state.savedSeasonalReferenceKeys.includes(key)
+  const action = options.seasonalReference
+    ? `<button type="button" class="text-btn" data-save-seasonal-reference="${escapeHtml(key)}" ${saved ? 'disabled' : ''}>${saved ? '保存済み' : '次回候補に保存'}</button>`
+    : ''
+  return `
+    <div class="exploration-result-item">
+      <span>
+        <strong>${escapeHtml(label)}</strong>
+        <small>${escapeHtml(detail)}</small>
+      </span>
+      ${action}
+    </div>
+  `
+}
+
+function renderExplorationResultLane(lane, items, options = {}) {
+  const list = lane?.querySelector('[data-result-lane-list]')
+  if (!list) return
+  const html = items.length > 0
+    ? items.map((item) => explorationResultItemHtml(item, options)).join('')
+    : `<div class="exploration-result-empty">${escapeHtml(options.emptyText || '候補はまだありません。')}</div>`
+  renderHtmlIfChanged(list, html)
+}
+
+function renderExplorationResultLanes() {
+  if (!elements.activeEventResultLane || !elements.evergreenResultLane || !elements.seasonalReferenceLane) return
+  const resultLanes = state.multiAngleExploration.resultLanes
+  const activeEventRows = resultLanes.event.filter((item) => (
+    ['A', 'B', 'C', 'D'].includes(String(item.opportunityLabel ?? '').trim().toUpperCase())
+  ))
+  const timelySeasonalReferences = buildTimelySeasonalSuggestions(MARKET_EVENTS, {
+    selectedEventId: selectedEvent().id,
+  })
+  const seasonalByKey = new Map()
+  ;[...resultLanes.seasonalReference, ...timelySeasonalReferences].forEach((item) => {
+    seasonalByKey.set(explorationResultKey(item), item)
+  })
+
+  renderExplorationResultLane(elements.activeEventResultLane, activeEventRows, {
+    emptyText: '今回イベントの検証済み結果はまだありません。',
+  })
+  renderExplorationResultLane(elements.evergreenResultLane, resultLanes.evergreen, {
+    emptyText: 'エバーグリーン候補はまだありません。',
+  })
+  renderExplorationResultLane(elements.seasonalReferenceLane, [...seasonalByKey.values()], {
+    seasonalReference: true,
+    emptyText: '今作る別季節の参考候補はありません。',
+  })
 }
 
 function renderExplorationMode() {
@@ -5184,6 +5354,12 @@ function queueNextMultiAngleBatch() {
 }
 
 async function startMultiAngleSearch() {
+  const timing = classifyProductionWindow(selectedEvent())
+  if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+    setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は開始しません。')
+    renderAll()
+    return false
+  }
   if (!await confirmExtensionConnection()) return false
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
   state.multiAngleExploration = startMultiAngleExploration(
@@ -5198,6 +5374,12 @@ async function startMultiAngleSearch() {
 }
 
 async function startNewMultiAngleCycle() {
+  const timing = classifyProductionWindow(selectedEvent())
+  if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+    setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は開始しません。')
+    renderAll()
+    return false
+  }
   if (!await confirmExtensionConnection()) return false
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
   state.multiAngleExploration = startMultiAngleExploration(
@@ -5241,6 +5423,12 @@ async function stopMultiAngleSearch() {
 }
 
 async function resumeMultiAngleSearch() {
+  const timing = classifyProductionWindow(selectedEvent())
+  if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+    setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は再開しません。')
+    renderAll()
+    return false
+  }
   if (!await confirmExtensionConnection()) return false
   state.multiAngleExploration = resumeMultiAngleExploration(state.multiAngleExploration)
   const queuedKeywords = state.pendingEvidenceAutomation.targetKeywords
@@ -5472,6 +5660,12 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
 
 function resumePersistedEvidenceAutomationIfReady() {
   if (!state.restoredAutomationPending || !state.extensionConnected) return false
+  const timing = classifyProductionWindow(selectedEvent())
+  if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+    setSimpleStatus('前回の未完了調査は自動再開しません。制作時期を確認して、続行を明示してください。')
+    renderAll()
+    return false
+  }
   state.restoredAutomationPending = false
   state.pendingEvidenceAutomation = normalizePendingEvidenceAutomation(
     state.pendingEvidenceAutomation,
@@ -8466,11 +8660,13 @@ function bindEvents() {
     persistMarketFinderState()
   })
   elements.eventSelect.addEventListener('change', () => {
+    state.timingOverrideConfirmed = false
     renderTargets({ syncYear: true })
     autoSelectBuyerIdentities({ refresh: true })
     resetCandidatesForInputChange()
   })
   elements.customEventInput.addEventListener('input', () => {
+    state.timingOverrideConfirmed = false
     renderTargets({ syncYear: false })
     autoSelectBuyerIdentities({ refresh: true })
     resetCandidatesForInputChange()
@@ -8489,6 +8685,22 @@ function bindEvents() {
     resetCandidatesForInputChange()
   })
   elements.buyerActionInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.marketTimingOverrideBtn?.addEventListener('click', () => {
+    state.timingOverrideConfirmed = true
+    setSimpleStatus('このイベントを固定したまま調査を続けます。')
+    renderAll()
+    resumePersistedEvidenceAutomationIfReady()
+  })
+  elements.seasonalReferenceLane?.addEventListener('click', (event) => {
+    const button = event.target?.closest?.('[data-save-seasonal-reference]')
+    if (!button || button.dataset.saveSeasonalReference === 'all') return
+    const key = String(button.dataset.saveSeasonalReference ?? '').trim()
+    if (!key || state.savedSeasonalReferenceKeys.includes(key)) return
+    state.savedSeasonalReferenceKeys = [...state.savedSeasonalReferenceKeys, key]
+    setSimpleStatus('参考候補を次回用に保存しました。今回のA/B目標には追加していません。')
+    renderExplorationResultLanes()
+    persistMarketFinderState()
+  })
   elements.evidenceArchiveBtn?.addEventListener('click', saveEvidenceArchive)
   elements.buyerIdentityShuffleBtn?.addEventListener('click', () => {
     state.buyerIdentitySuggestOffset += 1

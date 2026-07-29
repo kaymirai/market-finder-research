@@ -142,6 +142,16 @@ test('shows a desktop exploration rail with one stop or resume control', () => {
   assert.match(css, /\.winning-niche-rail/)
 })
 
+test('keeps seasonal references outside the verified A/B result target', () => {
+  assert.match(html, /id="activeEventResultLane"/)
+  assert.match(html, /id="evergreenResultLane"/)
+  assert.match(html, /id="seasonalReferenceLane"/)
+  assert.match(html, /今回のA\/B目標には含みません/)
+  assert.match(app, /resultLanes\.seasonalReference/)
+  assert.match(app, /data-save-seasonal-reference/)
+  assert.doesNotMatch(app, /data-(?:start|search)-seasonal-reference/)
+})
+
 test('treats extension bridge silence as a global service failure, not a page timeout', () => {
   const body = app.match(/function multiAngleFailureCode\(value = ''\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   assert.match(body, /isExtensionResponseTimeout\(message\)[\s\S]*return 'service-unavailable'/)
