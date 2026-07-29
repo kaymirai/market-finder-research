@@ -283,6 +283,19 @@ test('keeps manual cross-niche confirmation while using drilldown evidence in mu
   assert.match(app, /data-cross-niche-dismiss/)
 })
 
+test('feeds unresearched fixed-context winning-niche candidates into attribute combinations', () => {
+  const taxonomy = app.match(/function nextTaxonomyCandidates\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(taxonomy, /activeResearchContext\(\)/)
+  assert.match(taxonomy, /startWinningNicheAutomation\(/)
+  assert.match(taxonomy, /buildNextWinningNicheBatch\(/)
+  assert.match(taxonomy, /state\.multiAngleExploration\.evidenceKeys/)
+  assert.match(taxonomy, /state\.multiAngleExploration\.queuedEvidenceKeys/)
+  assert.match(taxonomy, /candidateEvidenceKey\(/)
+  assert.match(taxonomy, /source:\s*candidate\.source/)
+  assert.doesNotMatch(taxonomy, /finalEvidenceRows\(\)/)
+})
+
 test('shows a desktop exploration rail with one stop or resume control', () => {
   assert.match(html, /id="winningNicheAutomationPanel"/)
   assert.match(html, /id="winningNicheAutomationRail"/)

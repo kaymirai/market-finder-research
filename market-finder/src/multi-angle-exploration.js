@@ -110,11 +110,15 @@ function normalizedRetryQueue(value) {
   return value.flatMap((entry) => {
     const candidate = normalizeExplorationCandidate(entry?.candidate ?? entry)
     if (!candidate) return []
+    const suppliedRetryAt = String(entry?.retryAt ?? '').trim()
+    const retryAtMs = Date.parse(suppliedRetryAt)
     return [{
       evidenceKey: String(entry?.evidenceKey ?? candidateEvidenceKey(candidate)).trim(),
       candidate,
       attempts: Math.max(0, Number(entry?.attempts) || 0),
-      retryAt: String(entry?.retryAt ?? '').trim(),
+      retryAt: Number.isFinite(retryAtMs)
+        ? new Date(retryAtMs).toISOString()
+        : '1970-01-01T00:00:00.000Z',
     }]
   })
 }
@@ -367,8 +371,35 @@ export function resolveMultiAngleImportedResearchContext(
   const context = resolveMultiAngleResearchContext(state, selected)
   const eventSnapshot = context.eventSnapshot ?? {}
   const categorySnapshot = context.categorySnapshot ?? {}
-  const isEvergreen = candidate?.resultLane === 'evergreen'
+  const hasExplicitEmptyEventId = (
+    Object.prototype.hasOwnProperty.call(row, 'researchEventId')
+      && !String(row?.researchEventId ?? '').trim()
+  ) || (
+    !Object.prototype.hasOwnProperty.call(row, 'researchEventId')
+      && Object.prototype.hasOwnProperty.call(existingRow, 'researchEventId')
+      && !String(existingRow?.researchEventId ?? '').trim()
+  )
+  const isEvergreen = hasExplicitEmptyEventId
+    || row?.intentTrack === 'evergreen'
+    || row?.resultLane === 'evergreen'
+    || existingRow?.intentTrack === 'evergreen'
+    || existingRow?.resultLane === 'evergreen'
+    || candidate?.resultLane === 'evergreen'
     || candidate?.intentTrack === 'evergreen'
+  if (context.fixed) {
+    return {
+      eventId: isEvergreen ? '' : String(context.eventId ?? ''),
+      eventLabel: isEvergreen
+        ? 'Evergreen'
+        : String(eventSnapshot.jpLabel ?? eventSnapshot.label ?? ''),
+      eventSearchTerm: isEvergreen
+        ? ''
+        : String(eventSnapshot.searchTerm ?? ''),
+      categoryId: String(context.categoryId ?? ''),
+      categoryLabel: String(categorySnapshot.label ?? ''),
+      categorySearchTerm: String(categorySnapshot.searchTerm ?? ''),
+    }
+  }
   const fixedEventId = context.fixed && !isEvergreen
     ? context.eventId
     : candidate?.eventId ?? context.eventId
@@ -492,6 +523,21 @@ export function pauseMultiAngleForContextChange(
 export function startMultiAngleExploration(state = {}, context = {}, now = '') {
   const restored = createMultiAngleExplorationState(state)
   const updatedAt = timestamp(now)
+  const startsFresh = restored.status === 'idle'
+  const suppliedEventId = String(
+    context?.activeEventId ?? context?.eventId ?? '',
+  ).trim()
+  const suppliedCategoryId = String(context?.categoryId ?? '').trim()
+  const suppliedEventSnapshot = normalizedEventSnapshot(
+    context?.eventSnapshot,
+    suppliedEventId,
+  )
+  const suppliedCategorySnapshot = normalizedCategorySnapshot(
+    context?.categorySnapshot,
+    suppliedCategoryId,
+  )
+  const freshEventId = suppliedEventId || restored.activeEventId
+  const freshCategoryId = suppliedCategoryId || restored.categoryId
   const targetWinnerCount = positiveInteger(
     context?.targetWinnerCount,
     restored.targetWinnerCount,
@@ -500,19 +546,22 @@ export function startMultiAngleExploration(state = {}, context = {}, now = '') {
   return {
     ...restored,
     status: targetReached ? 'winner-found' : 'running',
-    activeEventId: restored.activeEventId
-      || String(context?.activeEventId ?? context?.eventId ?? '').trim(),
-    categoryId: restored.categoryId || String(context?.categoryId ?? '').trim(),
-    eventSnapshot: restored.eventSnapshot || normalizedEventSnapshot(
-      context?.eventSnapshot,
-      context?.activeEventId ?? context?.eventId,
-    ),
-    categorySnapshot: restored.categorySnapshot || normalizedCategorySnapshot(
-      context?.categorySnapshot,
-      context?.categoryId,
-    ),
+    activeEventId: startsFresh
+      ? freshEventId
+      : restored.activeEventId || suppliedEventId,
+    categoryId: startsFresh
+      ? freshCategoryId
+      : restored.categoryId || suppliedCategoryId,
+    eventSnapshot: startsFresh
+      ? suppliedEventSnapshot
+        || (restored.eventSnapshot?.id === freshEventId ? restored.eventSnapshot : null)
+      : restored.eventSnapshot || suppliedEventSnapshot,
+    categorySnapshot: startsFresh
+      ? suppliedCategorySnapshot
+        || (restored.categorySnapshot?.id === freshCategoryId ? restored.categorySnapshot : null)
+      : restored.categorySnapshot || suppliedCategorySnapshot,
     targetWinnerCount,
-    startedAt: restored.startedAt || updatedAt,
+    startedAt: startsFresh ? updatedAt : restored.startedAt || updatedAt,
     updatedAt,
     completedAt: targetReached ? restored.completedAt || updatedAt : '',
     pauseReason: '',
@@ -532,6 +581,31 @@ export function nextMultiAngleBatch({
   }
 
   const batchLimit = Math.max(1, Math.min(30, Number(limit) || 8))
+  const completedOrFailed = new Set([
+    ...current.evidenceKeys,
+    ...current.failedEvidenceKeys,
+  ])
+  const currentBatchCandidates = current.currentBatchCandidates
+    .map((candidate) => hydrateCandidate(candidate, current, candidate?.angleId))
+    .filter(Boolean)
+    .filter((candidate) => !completedOrFailed.has(candidateEvidenceKey(candidate)))
+    .slice(0, batchLimit)
+  if (currentBatchCandidates.length > 0) {
+    return {
+      state: {
+        ...current,
+        status: 'running',
+        queuedEvidenceKeys: uniqueStrings([
+          ...current.queuedEvidenceKeys,
+          ...currentBatchCandidates.map(candidateEvidenceKey),
+        ]),
+        currentBatchCandidates,
+      },
+      candidates: currentBatchCandidates,
+      reason: 'current-batch',
+    }
+  }
+
   const nowMs = Date.parse(timestamp(now))
   const dueRetries = current.retryQueue
     .filter((entry) => Date.parse(entry.retryAt) <= nowMs)
@@ -546,12 +620,11 @@ export function nextMultiAngleBatch({
           ...current.queuedEvidenceKeys,
           ...dueRetries.map((entry) => entry.evidenceKey),
         ]),
-        retryQueue: current.retryQueue.map((entry) => (
-          dueKeys.has(entry.evidenceKey)
-            ? { ...entry, retryAt: '' }
-            : entry
-        )),
-        currentBatchCandidates: dueRetries.map((entry) => entry.candidate),
+        retryQueue: current.retryQueue.filter((entry) => !dueKeys.has(entry.evidenceKey)),
+        currentBatchCandidates: dueRetries.map((entry) => ({
+          ...entry.candidate,
+          retryAttempts: entry.attempts,
+        })),
       },
       candidates: dueRetries.map((entry) => ({
         ...entry.candidate,

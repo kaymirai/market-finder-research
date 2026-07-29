@@ -139,12 +139,15 @@ import {
   listingOutcomesDomReady,
 } from './listing-outcomes-ui.js?v=20260726-3'
 import {
+  buildNextWinningNicheBatch,
   createWinningNicheAutomation,
   migrateWinningNicheState,
-} from './winning-niche-automation.js?v=20260727-2'
+  startWinningNicheAutomation,
+} from './winning-niche-automation.js?v=20260730-1'
 import {
   EXPLORATION_ANGLE_ORDER,
   buildMultiAngleCandidatePools,
+  candidateEvidenceKey,
   restoreSavedSeasonalReferences,
 } from './multi-angle-candidates.js?v=20260730-3'
 import {
@@ -3908,14 +3911,11 @@ function renderMarketTimingGate() {
 
 function explorationAngleState(automation, angleId, index) {
   const isCurrent = automation.currentAngleId === angleId
-  const currentFinished = isCurrent && (
-    automation.status === 'winner-found'
-    || automation.exhaustedAngles.includes(angleId)
-  )
+  if (automation.exhaustedAngles.includes(angleId)) return 'empty'
+  const currentFinished = isCurrent && automation.status === 'winner-found'
   if (currentFinished) return 'complete'
   if (isCurrent) return 'active'
   if (index < automation.angleIndex) return 'complete'
-  if (automation.exhaustedAngles.includes(angleId)) return 'empty'
   return 'idle'
 }
 
@@ -5274,14 +5274,55 @@ function evidenceLearningRecords() {
 }
 
 function nextTaxonomyCandidates() {
-  return finalEvidenceRows()
-    .filter((row) => row.drilldownNode?.specificityAxis)
-    .map((row) => ({
-      keyword: row.keyword,
-      source: 'measured-taxonomy',
-      priorityScore: row.scoreState.score ?? row.scoreState.explorationPriority,
-      sourceKeywords: [row.drilldownNode.parentKeyword].filter(Boolean),
+  const { event, category } = activeResearchContext()
+  const evidenceKeys = new Set([
+    ...state.multiAngleExploration.evidenceKeys,
+    ...state.multiAngleExploration.queuedEvidenceKeys,
+  ])
+  const contextSuffix = `|${category.id}|${event.id}`
+  const keywordFromEvidenceKey = (evidenceKey) => {
+    const normalizedKey = String(evidenceKey ?? '')
+    return normalizedKey.endsWith(contextSuffix)
+      ? normalizedKey.slice(0, -contextSuffix.length)
+      : ''
+  }
+  const automation = startWinningNicheAutomation(
+    createWinningNicheAutomation({
+      researchedKeywords: state.multiAngleExploration.evidenceKeys
+        .map(keywordFromEvidenceKey)
+        .filter(Boolean),
+      queuedKeywords: state.multiAngleExploration.queuedEvidenceKeys
+        .map(keywordFromEvidenceKey)
+        .filter(Boolean),
+    }),
+    {
+      eventId: event.id,
+      eventTerm: event.searchTerm,
+      categoryId: category.id,
+      productTerm: category.searchTerm,
+    },
+  )
+  const batch = buildNextWinningNicheBatch({
+    automation,
+    batchSize: 50,
+    customRiskTerms: String(elements.riskInput.value ?? '')
+      .split(',')
+      .map((term) => term.trim())
+      .filter(Boolean),
+  })
+  return batch.candidates
+    .map((candidate) => ({
+      ...candidate,
+      categoryId: category.id,
+      eventId: event.id,
+      angleId: 'attribute-combination',
+      source: candidate.source,
+      sources: [candidate.source],
+      sourceKeywords: [candidate.axisTerm].filter(Boolean),
+      specificityAxis: candidate.axisId,
+      priorityScore: 70,
     }))
+    .filter((candidate) => !evidenceKeys.has(candidateEvidenceKey(candidate)))
 }
 
 function measuredEventlessCandidates() {

@@ -211,6 +211,43 @@ test('prepares an exhausted cycle as fresh idle work while preserving saved refe
   assert.deepEqual(prepared.evidenceArchives, evidenceArchives)
 })
 
+test('starting prepared idle work replaces its old context with the current cycle context', () => {
+  const prepared = multiAngleApi.prepareNewMultiAngleCycle({}, {
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'halloween',
+      label: 'Halloween',
+      searchTerm: 'halloween',
+    },
+    categorySnapshot: {
+      id: 'shirt',
+      label: 'Shirt',
+      searchTerm: 'shirt',
+    },
+  }).exploration
+  const started = startMultiAngleExploration(prepared, {
+    activeEventId: 'christmas',
+    categoryId: 'mug',
+    eventSnapshot: {
+      id: 'christmas',
+      label: 'Christmas',
+      searchTerm: 'christmas',
+    },
+    categorySnapshot: {
+      id: 'mug',
+      label: 'Mug',
+      searchTerm: 'mug',
+    },
+  })
+
+  assert.equal(started.status, 'running')
+  assert.equal(started.activeEventId, 'christmas')
+  assert.equal(started.eventSnapshot.searchTerm, 'christmas')
+  assert.equal(started.categoryId, 'mug')
+  assert.equal(started.categorySnapshot.searchTerm, 'mug')
+})
+
 test('moves one timed-out keyword to retry wait and continues other candidates', () => {
   const started = startMultiAngleExploration({}, context)
   const candidate = {
@@ -268,14 +305,85 @@ test('keeps timeout attempts in saved state until a due retry finishes', () => {
   )
   const twice = recordMultiAngleFailure(
     restored,
-    { ...candidate },
+    restored.currentBatchCandidates[0],
     { code: 'page-timeout', retryAfterMs: 60_000 },
     '2026-07-30T00:02:00Z',
   )
 
-  assert.equal(restored.retryQueue[0].attempts, 1)
+  assert.equal(restored.retryQueue.length, 0)
+  assert.equal(restored.currentBatchCandidates[0].retryAttempts, 1)
   assert.equal(twice.retryQueue.length, 0)
   assert.deepEqual(twice.failedEvidenceKeys, [candidateEvidenceKey(candidate)])
+})
+
+test('restores a dequeued retry through a global pause without pending targets or retry-wait loops', () => {
+  const candidate = {
+    keyword: 'spooky nurse shirt',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+  }
+  const once = recordMultiAngleFailure(
+    startMultiAngleExploration({}, context),
+    candidate,
+    { code: 'page-timeout', retryAfterMs: 60_000 },
+    '2026-07-30T00:00:00Z',
+  )
+  const due = nextMultiAngleBatch({
+    state: once,
+    pools: {},
+    now: '2026-07-30T00:01:00Z',
+  })
+  const paused = pauseMultiAngleExploration(
+    due.state,
+    'service-unavailable',
+    '2026-07-30T00:01:01Z',
+  )
+  const restored = createMultiAngleExplorationState(
+    JSON.parse(JSON.stringify(paused)),
+  )
+  const resumed = resumeMultiAngleExploration(restored)
+  const recovered = nextMultiAngleBatch({
+    state: resumed,
+    pools: {},
+    now: '2026-07-30T00:02:00Z',
+  })
+  const twice = recordMultiAngleFailure(
+    recovered.state,
+    recovered.candidates[0],
+    { code: 'page-timeout', retryAfterMs: 60_000 },
+    '2026-07-30T00:02:01Z',
+  )
+
+  assert.equal(due.state.retryQueue.length, 0)
+  assert.equal(due.state.currentBatchCandidates[0].retryAttempts, 1)
+  assert.equal(recovered.reason, 'current-batch')
+  assert.deepEqual(recovered.candidates.map((item) => item.keyword), [candidate.keyword])
+  assert.equal(twice.retryQueue.length, 0)
+  assert.deepEqual(twice.failedEvidenceKeys, [candidateEvidenceKey(candidate)])
+})
+
+test('normalizes a legacy retry without a valid retry time as immediately recoverable', () => {
+  const candidate = {
+    keyword: 'legacy retry shirt',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+  }
+  const restored = createMultiAngleExplorationState({
+    ...startMultiAngleExploration({}, context),
+    retryQueue: [{
+      candidate,
+      attempts: 1,
+      retryAt: '',
+    }],
+  })
+  const recovered = nextMultiAngleBatch({
+    state: restored,
+    pools: {},
+    now: '2026-07-30T00:01:00Z',
+  })
+
+  assert.equal(recovered.reason, 'retry-ready')
+  assert.deepEqual(recovered.candidates.map((item) => item.keyword), [candidate.keyword])
 })
 
 test('returns only due timeout retries before queuing new evidence', () => {
@@ -295,8 +403,13 @@ test('returns only due timeout retries before queuing new evidence', () => {
     pools: { 'demand-neighborhood': [{ keyword: 'other', categoryId: 'shirt', eventId: 'halloween' }] },
     now: '2026-07-30T00:00:30Z',
   })
+  const afterOther = recordMultiAngleBatch(waiting.state, waiting.candidates.map((item) => ({
+    ...item,
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  })), '2026-07-30T00:00:45Z')
   const due = nextMultiAngleBatch({
-    state: waiting.state,
+    state: afterOther,
     pools: {},
     now: '2026-07-30T00:01:00Z',
   })
@@ -702,6 +815,71 @@ test('custom event candidate and imported row keep the frozen Alpha metadata aft
     categoryId: 'shirt',
     categoryLabel: 'Shirt',
     categorySearchTerm: 'shirt',
+  })
+})
+
+test('fixed imports replace stale row metadata consistently and keep only explicit evergreen eventless', () => {
+  const christmas = {
+    id: 'christmas',
+    label: 'Christmas',
+    jpLabel: 'Christmas',
+    searchTerm: 'christmas',
+    displayTerm: 'Christmas',
+    month: 12,
+  }
+  const mug = {
+    id: 'mug',
+    label: 'Mug',
+    searchTerm: 'mug',
+    tags: ['mug'],
+  }
+  const frozen = startMultiAngleExploration({}, {
+    activeEventId: christmas.id,
+    categoryId: mug.id,
+    eventSnapshot: christmas,
+    categorySnapshot: mug,
+  })
+  const stale = multiAngleApi.resolveMultiAngleImportedResearchContext(
+    frozen,
+    {
+      row: {
+        researchEventId: 'halloween',
+        researchEventLabel: 'Halloween',
+        researchEventSearchTerm: 'halloween',
+        researchCategoryId: 'shirt',
+        researchCategoryLabel: 'Shirt',
+        researchCategorySearchTerm: 'shirt',
+      },
+    },
+  )
+  const evergreen = multiAngleApi.resolveMultiAngleImportedResearchContext(
+    frozen,
+    {
+      row: {
+        researchEventId: '',
+        intentTrack: 'evergreen',
+        researchCategoryId: 'shirt',
+        researchCategoryLabel: 'Shirt',
+        researchCategorySearchTerm: 'shirt',
+      },
+    },
+  )
+
+  assert.deepEqual(stale, {
+    eventId: 'christmas',
+    eventLabel: 'Christmas',
+    eventSearchTerm: 'christmas',
+    categoryId: 'mug',
+    categoryLabel: 'Mug',
+    categorySearchTerm: 'mug',
+  })
+  assert.deepEqual(evergreen, {
+    eventId: '',
+    eventLabel: 'Evergreen',
+    eventSearchTerm: '',
+    categoryId: 'mug',
+    categoryLabel: 'Mug',
+    categorySearchTerm: 'mug',
   })
 })
 

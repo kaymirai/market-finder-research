@@ -80,6 +80,32 @@ test('does not queue keywords already researched or already waiting', () => {
   ])
 })
 
+test('builds a new fixed-context attribute candidate while excluding measured and queued combinations', () => {
+  const started = startWinningNicheAutomation(createWinningNicheAutomation({
+    researchedKeywords: ['christmas teacher mug'],
+    queuedKeywords: ['christmas nurse mug'],
+  }), {
+    eventId: 'christmas',
+    eventTerm: 'christmas',
+    categoryId: 'mug',
+    productTerm: 'mug',
+  })
+  const result = buildNextWinningNicheBatch({
+    automation: started,
+    batchSize: 8,
+    axisOrder: ['career'],
+    termsByAxis: {
+      career: ['teacher', 'nurse', 'librarian'],
+    },
+  })
+
+  assert.deepEqual(result.candidates.map((candidate) => candidate.keyword), [
+    'christmas librarian mug',
+  ])
+  assert.equal(result.candidates[0].source, 'curated-taxonomy')
+  assert.equal(result.candidates[0].eventId, 'christmas')
+})
+
 test('records risky terms as excluded instead of sending them to Etsy', () => {
   const started = startWinningNicheAutomation(createWinningNicheAutomation(), HALLOWEEN_CONTEXT)
   const result = buildNextWinningNicheBatch({

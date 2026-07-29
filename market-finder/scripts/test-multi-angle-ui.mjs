@@ -141,6 +141,17 @@ test('derives angle completion from the exploration cursor rather than shared pr
   assert.match(angleStateBody, /automation\.currentAngleId/)
   assert.match(angleStateBody, /automation\.exhaustedAngles/)
   assert.doesNotMatch(angleStateBody, /automation\.provenance|automation\.evidenceKeys/)
+  const currentFinished = angleStateBody.match(/const currentFinished[\s\S]*?\n\s*\)/)?.[0] ?? ''
+  assert.doesNotMatch(
+    currentFinished,
+    /automation\.exhaustedAngles/,
+    'an exhausted current angle is empty, not complete',
+  )
+  assert.ok(
+    angleStateBody.indexOf('if (automation.exhaustedAngles.includes(angleId))')
+      < angleStateBody.indexOf('index < automation.angleIndex'),
+    'empty angles must be labelled before the completed-cursor fallback',
+  )
 })
 
 test('has no hidden all-seasonal save control or dead all-handler branch', () => {
