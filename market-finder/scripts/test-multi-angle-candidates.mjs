@@ -19,7 +19,11 @@ test('creates separate pools from demand, taxonomy, recent sales and adjacent pr
     ...base,
     relatedTerms: ['spooky nurse shirt'],
     taxonomyCandidates: [{ keyword: 'halloween gardener shirt', source: 'curated-taxonomy' }],
-    drilldownCandidates: [{ keyword: 'ghost book lover shirt', source: 'everbee-title', priorityScore: 81 }],
+    drilldownCandidates: [{
+      keyword: 'ghost book lover shirt',
+      sources: ['everbee-title', 'measured-child'],
+      priorityScore: 81,
+    }],
     adjacentProductListings: [{
       title: 'Witchy Gardener Mug',
       categoryId: 'mug',
@@ -31,6 +35,8 @@ test('creates separate pools from demand, taxonomy, recent sales and adjacent pr
   assert.equal(pools['demand-neighborhood'][0].keyword, 'spooky nurse shirt')
   assert.equal(pools['attribute-combination'][0].keyword, 'halloween gardener shirt')
   assert.equal(pools['recent-sales'][0].keyword, 'ghost book lover shirt')
+  assert.equal(pools['recent-sales'][0].source, 'everbee-title')
+  assert.deepEqual(pools['recent-sales'][0].sources, ['everbee-title', 'measured-child'])
   assert.equal(pools['adjacent-product'][0].keyword, 'witchy gardener shirt')
 })
 
@@ -52,11 +58,11 @@ test('keeps only current-category Marketplace terms in demand neighborhood', () 
   )
 })
 
-test('keeps only everbee-title drilldowns in recent sales', () => {
+test('keeps singular everbee-title compatibility and excludes unmatched drilldowns', () => {
   const pools = buildMultiAngleCandidatePools({
     ...base,
     drilldownCandidates: [
-      { keyword: 'halloween teacher shirt', source: 'etsy-related' },
+      { keyword: 'halloween teacher shirt', sources: ['etsy-related'] },
       { keyword: 'halloween librarian shirt', source: 'everbee-title' },
     ],
   })

@@ -14,6 +14,13 @@ function normalizedList(value) {
   return [...new Set(values.map(normalizePhrase).filter(Boolean))]
 }
 
+function normalizedSources(value) {
+  const values = Array.isArray(value) ? value : [value]
+  return [...new Set(values
+    .map((source) => String(source ?? '').trim().toLowerCase())
+    .filter(Boolean))]
+}
+
 function categoryMatchTerms(category = {}) {
   const terms = normalizedList([category.searchTerm, ...(category.tags ?? [])])
   if (String(category.id ?? '').trim() === 'shirt' || terms.includes('shirt')) {
@@ -25,6 +32,13 @@ function categoryMatchTerms(category = {}) {
 function matchesCategory(keyword, category) {
   const phrase = ` ${normalizePhrase(keyword)} `
   return categoryMatchTerms(category).some((term) => phrase.includes(` ${term} `))
+}
+
+function hasEverbeeTitleSource(candidate = {}) {
+  if (candidate.source === 'everbee-title') return true
+  return Array.isArray(candidate.sources) && candidate.sources.some(
+    (source) => String(source ?? '').trim().toLowerCase() === 'everbee-title',
+  )
 }
 
 function optionalNumber(value) {
@@ -44,7 +58,7 @@ export function normalizeExplorationCandidate(candidate = {}) {
   if (!keyword) return null
 
   const source = String(candidate.source ?? '').trim()
-  const sources = normalizedList([source, ...(candidate.sources ?? [])])
+  const sources = normalizedSources([source, ...(candidate.sources ?? [])])
   const angleId = String(candidate.angleId ?? '').trim()
   const angleIds = [...new Set([
     angleId,
@@ -228,7 +242,7 @@ export function buildMultiAngleCandidatePools(input = {}) {
     angleId: 'attribute-combination',
   })
   addCandidates(byEvidence, (input.drilldownCandidates ?? [])
-    .filter((candidate) => candidate?.source === 'everbee-title'), {
+    .filter(hasEverbeeTitleSource), {
     ...common,
     angleId: 'recent-sales',
   })
