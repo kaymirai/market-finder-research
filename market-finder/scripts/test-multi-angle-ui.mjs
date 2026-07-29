@@ -132,26 +132,58 @@ test('a blocked event change stops the Marketplace Insights loop without clearin
   assert.doesNotMatch(pauseBody, /targetKeywords\s*=\s*\[\]/)
 })
 
-test('derives angle completion from the exploration cursor rather than shared provenance', () => {
+test('renders researched and candidate-none angles from explicit state without shared provenance', () => {
   const angleStateBody = app.slice(
     app.indexOf('function explorationAngleState('),
     app.indexOf('\nfunction ', app.indexOf('function explorationAngleState(') + 1),
   )
-  assert.match(angleStateBody, /automation\.angleIndex/)
-  assert.match(angleStateBody, /automation\.currentAngleId/)
-  assert.match(angleStateBody, /automation\.exhaustedAngles/)
+  const angleState = new Function(
+    `${angleStateBody}; return explorationAngleState`,
+  )()
+
+  const automation = {
+    status: 'running',
+    currentAngleId: 'recent-sales',
+    completedAngles: ['demand-neighborhood'],
+    emptyAngles: ['attribute-combination'],
+    provenance: {
+      shared: ['market-gap'],
+    },
+  }
+
+  assert.equal(angleState(automation, 'demand-neighborhood', 0), 'complete')
+  assert.equal(angleState(automation, 'attribute-combination', 1), 'empty')
+  assert.equal(angleState(automation, 'recent-sales', 2), 'active')
+  assert.equal(angleState(automation, 'market-gap', 4), 'idle')
   assert.doesNotMatch(angleStateBody, /automation\.provenance|automation\.evidenceKeys/)
-  const currentFinished = angleStateBody.match(/const currentFinished[\s\S]*?\n\s*\)/)?.[0] ?? ''
-  assert.doesNotMatch(
-    currentFinished,
-    /automation\.exhaustedAngles/,
-    'an exhausted current angle is empty, not complete',
+})
+
+test('treats the last evergreen angle as final instead of repeating it as next', () => {
+  const progressBody = app.slice(
+    app.indexOf('function explorationRouteProgress('),
+    app.indexOf('\nfunction ', app.indexOf('function explorationRouteProgress(') + 1),
   )
-  assert.ok(
-    angleStateBody.indexOf('if (automation.exhaustedAngles.includes(angleId))')
-      < angleStateBody.indexOf('index < automation.angleIndex'),
-    'empty angles must be labelled before the completed-cursor fallback',
-  )
+  const explorationRouteProgress = new Function(
+    'EXPLORATION_ANGLE_ORDER',
+    `${progressBody}; return explorationRouteProgress`,
+  )([
+    'demand-neighborhood',
+    'attribute-combination',
+    'recent-sales',
+    'adjacent-product',
+    'market-gap',
+    'evergreen',
+  ])
+  const progress = explorationRouteProgress({
+    currentAngleId: 'evergreen',
+    completedAngles: [],
+    emptyAngles: [],
+  })
+
+  assert.equal(progress.currentAngleId, 'evergreen')
+  assert.equal(progress.nextAngleId, '')
+  assert.equal(progress.isFinal, true)
+  assert.match(app, /最終角度です。完了後は今回の探索を終了します。/)
 })
 
 test('has no hidden all-seasonal save control or dead all-handler branch', () => {

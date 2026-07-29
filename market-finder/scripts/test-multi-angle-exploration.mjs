@@ -74,6 +74,88 @@ test('finishes as exhausted after every angle has no unseen candidates', () => {
   const result = nextMultiAngleBatch({ state: started, pools: {}, limit: 8 })
   assert.equal(result.state.status, 'exhausted')
   assert.equal(result.reason, 'all-angles-exhausted')
+  assert.deepEqual(result.state.completedAngles, [])
+  assert.deepEqual(result.state.emptyAngles, [
+    'demand-neighborhood',
+    'attribute-combination',
+    'recent-sales',
+    'adjacent-product',
+    'market-gap',
+    'evergreen',
+  ])
+})
+
+test('separates a researched demand angle from a later attribute angle with no candidates', () => {
+  const pools = {
+    'demand-neighborhood': [{
+      keyword: 'spooky nurse shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+    }],
+    'recent-sales': [{
+      keyword: 'ghost gardener shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+    }],
+  }
+  const demand = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, context),
+    pools,
+  })
+  const recorded = recordMultiAngleBatch(demand.state, [{
+    ...demand.candidates[0],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  }])
+  const advanced = nextMultiAngleBatch({ state: recorded, pools })
+
+  const restored = createMultiAngleExplorationState(
+    JSON.parse(JSON.stringify(advanced.state)),
+  )
+  assert.deepEqual(restored.completedAngles, ['demand-neighborhood'])
+  assert.deepEqual(restored.emptyAngles, ['attribute-combination'])
+  assert.equal(restored.currentAngleId, 'recent-sales')
+})
+
+test('records a definitively failed angle as processed instead of candidate-none', () => {
+  const batch = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, context),
+    pools: {
+      'demand-neighborhood': [{
+        keyword: 'spooky nurse shirt',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+      }],
+    },
+  })
+  const failed = recordMultiAngleFailure(
+    batch.state,
+    batch.candidates[0],
+    { code: 'invalid-page' },
+  )
+
+  assert.deepEqual(failed.completedAngles, ['demand-neighborhood'])
+  assert.deepEqual(failed.emptyAngles, [])
+})
+
+test('normalizes legacy exhausted angles as empty without inferring completion from provenance', () => {
+  const restored = createMultiAngleExplorationState({
+    exhaustedAngles: ['attribute-combination'],
+    provenance: {
+      'shared|shirt|halloween': ['demand-neighborhood', 'recent-sales'],
+    },
+  })
+
+  assert.deepEqual(restored.completedAngles, [])
+  assert.deepEqual(restored.emptyAngles, ['attribute-combination'])
+  assert.deepEqual(restored.exhaustedAngles, ['attribute-combination'])
+
+  const partiallyMigrated = createMultiAngleExplorationState({
+    completedAngles: ['demand-neighborhood'],
+    exhaustedAngles: ['demand-neighborhood', 'attribute-combination'],
+  })
+  assert.deepEqual(partiallyMigrated.completedAngles, ['demand-neighborhood'])
+  assert.deepEqual(partiallyMigrated.emptyAngles, ['attribute-combination'])
 })
 
 test('treats winner-found and exhausted as completed cycles with one new-cycle action', () => {
@@ -186,6 +268,8 @@ test('prepares an exhausted cycle as fresh idle work while preserving saved refe
     'retryQueue',
     'failedEvidenceKeys',
     'winnerKeywords',
+    'completedAngles',
+    'emptyAngles',
     'exhaustedAngles',
   ]) {
     assert.deepEqual(prepared.exploration[key], [])
@@ -246,6 +330,56 @@ test('starting prepared idle work replaces its old context with the current cycl
   assert.equal(started.eventSnapshot.searchTerm, 'christmas')
   assert.equal(started.categoryId, 'mug')
   assert.equal(started.categorySnapshot.searchTerm, 'mug')
+})
+
+test('winner-found and exhausted runs retain their fixed snapshots until a new cycle is prepared', () => {
+  const fixedContext = {
+    activeEventId: 'custom-event',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'custom-event',
+      label: 'Alpha Launch',
+      jpLabel: 'Alpha Launch',
+      searchTerm: 'alpha launch',
+    },
+    categorySnapshot: {
+      id: 'shirt',
+      label: 'Shirt',
+      searchTerm: 'shirt',
+    },
+  }
+  const selectedNextCycle = {
+    eventId: 'christmas',
+    categoryId: 'mug',
+    eventSnapshot: {
+      id: 'christmas',
+      label: 'Christmas',
+      jpLabel: 'Christmas',
+      searchTerm: 'christmas',
+    },
+    categorySnapshot: {
+      id: 'mug',
+      label: 'Mug',
+      searchTerm: 'mug',
+    },
+  }
+
+  for (const status of ['winner-found', 'exhausted']) {
+    const terminal = createMultiAngleExplorationState({
+      ...fixedContext,
+      status,
+    })
+    const resolved = multiAngleApi.resolveMultiAngleResearchContext(
+      terminal,
+      selectedNextCycle,
+    )
+
+    assert.equal(resolved.fixed, true)
+    assert.equal(resolved.eventId, 'custom-event')
+    assert.equal(resolved.eventSnapshot.searchTerm, 'alpha launch')
+    assert.equal(resolved.categoryId, 'shirt')
+    assert.equal(resolved.categorySnapshot.searchTerm, 'shirt')
+  }
 })
 
 test('moves one timed-out keyword to retry wait and continues other candidates', () => {

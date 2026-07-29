@@ -3828,11 +3828,12 @@ function renderWinningNicheAutomation() {
   const status = automation.status || 'idle'
   const angleLabels = EXPLORATION_ANGLE_LABELS
   const axisLabel = angleLabels[automation.currentAngleId] || '未開始'
-  const nextAngleId = EXPLORATION_ANGLE_ORDER[Math.min(
-    automation.angleIndex + (automation.currentAngleId ? 1 : 0),
-    EXPLORATION_ANGLE_ORDER.length - 1,
-  )]
+  const routeProgress = explorationRouteProgress(automation)
+  const nextAngleId = routeProgress.nextAngleId
   const nextAxisLabel = angleLabels[nextAngleId] || '需要周辺'
+  const nextAngleProgressCopy = routeProgress.isFinal
+    ? '最終角度です。完了後は今回の探索を終了します。'
+    : `次は「${nextAxisLabel}」へ進みます。`
   const researchedCount = automation.evidenceKeys.length
   const queuedCount = automation.queuedEvidenceKeys.length
   const targetWinnerCount = automation.targetWinnerCount
@@ -3845,7 +3846,7 @@ function renderWinningNicheAutomation() {
     || state.marketplaceInsightBusy
   const statusCopy = {
     idle: `未開始です。A/B候補${targetWinnerCount}件を目標に、最初の未調査カテゴリ「${nextAxisLabel}」から始めます。`,
-    running: `勝ち候補を探索中（${winnerCount}/${targetWinnerCount}件）。「${axisLabel}」を検証し、残り${remainingWinnerCount}件へ向けて「${nextAxisLabel}」へ進みます。`,
+    running: `勝ち候補を探索中（${winnerCount}/${targetWinnerCount}件）。「${axisLabel}」を検証し、残り${remainingWinnerCount}件へ向けています。${nextAngleProgressCopy}`,
     paused: `一時停止中: ${automation.pauseReason || '外部確認を再開できる状態になるまで待機します。'}`,
     stopped: `停止中。調査済み${researchedCount}件、待機${queuedCount}件を保持しています。次の未調査カテゴリから再開できます。`,
     'winner-found': `A/Bの勝ち候補を${winnerCount}/${targetWinnerCount}件確保し、今回の出品目標を達成しました。`,
@@ -3911,27 +3912,42 @@ function renderMarketTimingGate() {
 
 function explorationAngleState(automation, angleId, index) {
   const isCurrent = automation.currentAngleId === angleId
-  if (automation.exhaustedAngles.includes(angleId)) return 'empty'
-  const currentFinished = isCurrent && automation.status === 'winner-found'
-  if (currentFinished) return 'complete'
+  if ((automation.completedAngles ?? []).includes(angleId)) return 'complete'
+  if ((automation.emptyAngles ?? []).includes(angleId)) return 'empty'
   if (isCurrent) return 'active'
-  if (index < automation.angleIndex) return 'complete'
   return 'idle'
+}
+
+function explorationRouteProgress(automation) {
+  const currentAngleId = String(automation?.currentAngleId ?? '')
+  const currentIndex = EXPLORATION_ANGLE_ORDER.indexOf(currentAngleId)
+  const finishedAngles = new Set([
+    ...(automation?.completedAngles ?? []),
+    ...(automation?.emptyAngles ?? []),
+  ])
+  const nextAngleId = EXPLORATION_ANGLE_ORDER
+    .slice(currentIndex >= 0 ? currentIndex + 1 : 0)
+    .find((angleId) => !finishedAngles.has(angleId)) ?? ''
+  return {
+    currentAngleId,
+    nextAngleId,
+    isFinal: Boolean(currentAngleId)
+      && currentIndex === EXPLORATION_ANGLE_ORDER.length - 1,
+  }
 }
 
 function renderExplorationAngleRail() {
   if (!elements.multiAngleRail || !elements.explorationAngleStatus) return
   const automation = state.multiAngleExploration
-  const currentIndex = Math.max(0, EXPLORATION_ANGLE_ORDER.indexOf(automation.currentAngleId))
-  const nextAngleId = EXPLORATION_ANGLE_ORDER.slice(currentIndex + (automation.currentAngleId ? 1 : 0))
-    .find((angleId) => !automation.exhaustedAngles.includes(angleId))
+  const routeProgress = explorationRouteProgress(automation)
+  const nextAngleId = routeProgress.nextAngleId
   const currentLabel = EXPLORATION_ANGLE_LABELS[automation.currentAngleId] || '未開始'
   const nextLabel = EXPLORATION_ANGLE_LABELS[nextAngleId] || ''
   const routeCopy = automation.status === 'idle'
     ? `現在: 未開始。最初に「${EXPLORATION_ANGLE_LABELS[EXPLORATION_ANGLE_ORDER[0]]}」から需要の近い候補を確認します。`
     : nextLabel
       ? `現在: ${currentLabel}。未確認の切り口を広げるため、完了後は「${nextLabel}」へ進みます。`
-      : `現在: ${currentLabel}。6つの角度を確認し終えたため、次の角度はありません。`
+      : `現在: ${currentLabel}。最終角度です。完了後は今回の探索を終了します。`
   const stateLabels = {
     idle: '未開始',
     active: '調査中',
