@@ -11,6 +11,7 @@ import {
   startMultiAngleExploration,
   stopMultiAngleExploration,
 } from '../src/multi-angle-exploration.js'
+import * as multiAngleApi from '../src/multi-angle-exploration.js'
 import { candidateEvidenceKey } from '../src/multi-angle-candidates.js'
 
 const context = {
@@ -317,4 +318,142 @@ test('pause resume and stop keep the current batch serializable', () => {
   assert.equal(resumed.status, 'running')
   assert.equal(stopped.status, 'stopped')
   assert.deepEqual(stopped.queuedEvidenceKeys, batch.queuedEvidenceKeys)
+})
+
+test('reload resume and external completion use the persisted current batch', () => {
+  const batch = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, {
+      ...context,
+      targetWinnerCount: 1,
+    }),
+    pools: {
+      'demand-neighborhood': [{
+        keyword: 'persisted winner',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+      }],
+    },
+  })
+  const restored = createMultiAngleExplorationState(
+    JSON.parse(JSON.stringify(batch.state)),
+  )
+
+  assert.deepEqual(
+    (restored.currentBatchCandidates ?? []).map((candidate) => candidate.keyword),
+    ['persisted winner'],
+  )
+
+  const paused = pauseMultiAngleExploration(restored, 'input-context-changed')
+  const resumed = resumeMultiAngleExploration(
+    createMultiAngleExplorationState(JSON.parse(JSON.stringify(paused))),
+  )
+  const completed = recordMultiAngleBatch(resumed, [{
+    ...resumed.currentBatchCandidates[0],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'A',
+  }])
+
+  assert.equal(completed.status, 'winner-found')
+  assert.deepEqual(completed.winnerKeywords, ['persisted winner'])
+  assert.deepEqual(completed.currentBatchCandidates, [])
+})
+
+test('selector changes pause the fixed research context and resume its batch', () => {
+  assert.equal(typeof multiAngleApi.resolveMultiAngleResearchContext, 'function')
+  assert.equal(typeof multiAngleApi.pauseMultiAngleForContextChange, 'function')
+
+  const batch = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, context),
+    pools: {
+      'demand-neighborhood': [{
+        keyword: 'fixed halloween niche',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+      }],
+    },
+  })
+  const selectedNextCycle = {
+    eventId: 'christmas',
+    categoryId: 'mug',
+  }
+  const fixed = multiAngleApi.resolveMultiAngleResearchContext(
+    batch.state,
+    selectedNextCycle,
+  )
+  const paused = multiAngleApi.pauseMultiAngleForContextChange(
+    batch.state,
+    selectedNextCycle,
+    'input-context-changed',
+    '2026-07-30T00:01:00Z',
+  )
+
+  assert.deepEqual(fixed, {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    fixed: true,
+  })
+  assert.equal(paused.status, 'paused')
+  assert.equal(paused.pauseReason, 'input-context-changed')
+  assert.deepEqual(
+    paused.currentBatchCandidates.map((candidate) => candidate.keyword),
+    ['fixed halloween niche'],
+  )
+
+  const resumed = resumeMultiAngleExploration(paused)
+  const completed = recordMultiAngleBatch(resumed, [{
+    ...resumed.currentBatchCandidates[0],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  }])
+
+  assert.equal(completed.status, 'running')
+  assert.deepEqual(completed.evidenceKeys, ['fixed halloween niche|shirt|halloween'])
+})
+
+test('marketplace extension and global stops preserve a resumable batch', () => {
+  assert.equal(typeof multiAngleApi.stopMultiAngleWork, 'function')
+
+  for (const source of ['marketplace', 'extension', 'global']) {
+    const batch = nextMultiAngleBatch({
+      state: startMultiAngleExploration({}, context),
+      pools: {
+        'demand-neighborhood': [{
+          keyword: `${source} stop candidate`,
+          categoryId: 'shirt',
+          eventId: 'halloween',
+        }],
+      },
+    })
+    const stopped = multiAngleApi.stopMultiAngleWork({
+      exploration: batch.state,
+      pendingEvidenceAutomation: {
+        active: true,
+        scheduled: true,
+        initialCount: 1,
+        currentStage: 'pending-everbee',
+        targetKeywords: [`${source} stop candidate`],
+      },
+    }, source, '2026-07-30T00:01:00Z')
+
+    assert.equal(stopped.source, source)
+    assert.equal(stopped.exploration.status, 'stopped')
+    assert.equal(stopped.pendingEvidenceAutomation.active, false)
+    assert.equal(stopped.pendingEvidenceAutomation.scheduled, false)
+    assert.deepEqual(
+      stopped.pendingEvidenceAutomation.targetKeywords,
+      [`${source} stop candidate`],
+    )
+    assert.equal(stopped.exploration.currentBatchCandidates.length, 1)
+
+    const resumed = resumeMultiAngleExploration(stopped.exploration)
+    const completed = recordMultiAngleBatch(resumed, [{
+      ...resumed.currentBatchCandidates[0],
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'C',
+    }])
+    assert.deepEqual(
+      completed.evidenceKeys,
+      [`${source} stop candidate|shirt|halloween`],
+    )
+  }
 })

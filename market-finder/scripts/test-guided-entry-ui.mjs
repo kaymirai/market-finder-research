@@ -1231,10 +1231,12 @@ test('keeps research stage tabs auto-route-only and ignores CSV stage selection'
   }
 })
 
-test('routes the global stop action to the existing active service stop behavior', () => {
+test('routes the global stop action through multi-angle orchestration before active service stops', () => {
   const body = app.match(/function stopActiveResearch\(\) \{([\s\S]*?)\n\}/)?.[1]
   assert.ok(body, 'global stop router must be extractable')
   const createStop = new Function(
+    'multiAngleWorkHasCurrentBatch',
+    'stopMultiAngleOrchestration',
     'researchHeaderState',
     'stopMarketplaceInsightAutomation',
     'stopExtensionResearch',
@@ -1243,22 +1245,35 @@ test('routes the global stop action to the existing active service stop behavior
   const calls = []
 
   createStop(
+    () => true,
+    (source) => calls.push(`multi:${source}`),
     () => ({ stopKind: 'marketplace' }),
     () => calls.push('marketplace'),
     () => calls.push('extension'),
   )()
   createStop(
+    () => false,
+    (source) => calls.push(`multi:${source}`),
+    () => ({ stopKind: 'marketplace' }),
+    () => calls.push('marketplace'),
+    () => calls.push('extension'),
+  )()
+  createStop(
+    () => false,
+    (source) => calls.push(`multi:${source}`),
     () => ({ stopKind: 'extension' }),
     () => calls.push('marketplace'),
     () => calls.push('extension'),
   )()
   createStop(
+    () => false,
+    (source) => calls.push(`multi:${source}`),
     () => ({ stopKind: '' }),
     () => calls.push('marketplace'),
     () => calls.push('extension'),
   )()
 
-  assert.deepEqual(calls, ['marketplace', 'extension'])
+  assert.deepEqual(calls, ['multi:global', 'marketplace', 'extension'])
 })
 
 test('derives every final-result toolbar action from one state function', () => {

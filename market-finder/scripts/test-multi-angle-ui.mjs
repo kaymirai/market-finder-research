@@ -80,7 +80,7 @@ test('desktop route and result lanes protect readable Japanese columns', () => {
   assert.match(css, /\.exploration-result-item\s*\{[\s\S]*min-width:\s*\d+px/)
 })
 
-test('a blocked event change pauses scheduled verification without losing its targets', () => {
+test('an event change pauses scheduled verification without losing its targets', () => {
   const pauseBody = app.slice(
     app.indexOf('function pauseMultiAngleForBlockedTimingChange()'),
     app.indexOf('\nfunction ', app.indexOf('function pauseMultiAngleForBlockedTimingChange()') + 1),
@@ -98,9 +98,9 @@ test('a blocked event change pauses scheduled verification without losing its ta
   assert.match(pauseBody, /state\.pendingEvidenceAutomation\.scheduled = false/)
   assert.match(pauseBody, /pauseMultiAngleExploration\(/)
   assert.doesNotMatch(pauseBody, /targetKeywords\s*=\s*\[\]/)
-  assert.match(eventChangeBody, /pauseMultiAngleForBlockedTimingChange\(\)/)
-  assert.match(eventChangeBody, /const pausedForTiming = pauseMultiAngleForBlockedTimingChange\(\)/)
-  assert.match(eventChangeBody, /if \(!pausedForTiming\) resetCandidatesForInputChange\(\)/)
+  assert.match(eventChangeBody, /pauseMultiAngleForInputChange\(\)/)
+  assert.match(eventChangeBody, /const pausedForContext = pauseMultiAngleForInputChange\(\)/)
+  assert.match(eventChangeBody, /if \(!pausedForContext\) resetCandidatesForInputChange\(\)/)
   assert.ok(
     scheduleBody.indexOf('pauseMultiAngleForBlockedTimingChange()')
       < scheduleBody.indexOf("verifyPendingEvidence('', '',"),
@@ -128,7 +128,7 @@ test('a blocked event change stops the Marketplace Insights loop without clearin
     app.indexOf('\nfunction ', app.indexOf('function pauseMultiAngleForBlockedTimingChange()') + 1),
   )
   assert.match(pauseBody, /const marketplaceWasActive/)
-  assert.match(pauseBody, /stopMarketplaceInsightAutomation\(\)/)
+  assert.match(pauseBody, /stopMarketplaceInsightAutomation\(\{ skipMultiAngle: true \}\)/)
   assert.doesNotMatch(pauseBody, /targetKeywords\s*=\s*\[\]/)
 })
 

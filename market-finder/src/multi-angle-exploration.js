@@ -23,6 +23,7 @@ const GLOBAL_PAUSE_FAILURES = new Set([
   'login-required',
   'rate-limited',
 ])
+const FIXED_CONTEXT_STATUSES = new Set(['running', 'paused', 'stopped'])
 
 function timestamp(value = '') {
   const supplied = String(value ?? '').trim()
@@ -151,15 +152,27 @@ function annotatePools(state, pools) {
 
 export function createMultiAngleExplorationState(saved = {}) {
   const status = VALID_STATUSES.has(saved?.status) ? saved.status : 'idle'
+  const activeEventId = String(saved?.activeEventId ?? '').trim()
+  const categoryId = String(saved?.categoryId ?? '').trim()
+  const currentAngleId = String(saved?.currentAngleId ?? '').trim()
+  const currentBatchCandidates = (Array.isArray(saved?.currentBatchCandidates)
+    ? saved.currentBatchCandidates
+    : [])
+    .map((candidate) => hydrateCandidate(candidate, {
+      activeEventId,
+      categoryId,
+    }, currentAngleId))
+    .filter(Boolean)
   return {
     status,
-    activeEventId: String(saved?.activeEventId ?? '').trim(),
-    categoryId: String(saved?.categoryId ?? '').trim(),
-    currentAngleId: String(saved?.currentAngleId ?? '').trim(),
+    activeEventId,
+    categoryId,
+    currentAngleId,
     angleIndex: Math.max(0, Number(saved?.angleIndex) || 0),
     evidenceKeys: uniqueStrings(saved?.evidenceKeys),
     provenance: normalizedProvenance(saved?.provenance),
     queuedEvidenceKeys: uniqueStrings(saved?.queuedEvidenceKeys),
+    currentBatchCandidates,
     retryQueue: normalizedRetryQueue(saved?.retryQueue),
     failedEvidenceKeys: uniqueStrings(saved?.failedEvidenceKeys),
     winnerKeywords: uniqueStrings(saved?.winnerKeywords),
@@ -171,6 +184,38 @@ export function createMultiAngleExplorationState(saved = {}) {
     completedAt: String(saved?.completedAt ?? '').trim(),
     pauseReason: String(saved?.pauseReason ?? '').trim(),
   }
+}
+
+export function resolveMultiAngleResearchContext(state = {}, selected = {}) {
+  const current = createMultiAngleExplorationState(state)
+  const hasFixedContext = FIXED_CONTEXT_STATUSES.has(current.status)
+    && Boolean(current.activeEventId)
+    && Boolean(current.categoryId)
+  return {
+    eventId: hasFixedContext
+      ? current.activeEventId
+      : String(selected?.eventId ?? selected?.activeEventId ?? '').trim(),
+    categoryId: hasFixedContext
+      ? current.categoryId
+      : String(selected?.categoryId ?? '').trim(),
+    fixed: hasFixedContext,
+  }
+}
+
+export function pauseMultiAngleForContextChange(
+  state = {},
+  selected = {},
+  reason = 'input-context-changed',
+  now = '',
+) {
+  const current = createMultiAngleExplorationState(state)
+  if (current.status !== 'running') return current
+  const fixed = resolveMultiAngleResearchContext(current, selected)
+  const selectedEventId = String(selected?.eventId ?? selected?.activeEventId ?? '').trim()
+  const selectedCategoryId = String(selected?.categoryId ?? '').trim()
+  const changed = (selectedEventId && selectedEventId !== fixed.eventId)
+    || (selectedCategoryId && selectedCategoryId !== fixed.categoryId)
+  return changed ? pauseMultiAngleExploration(current, reason, now) : current
 }
 
 export function startMultiAngleExploration(state = {}, context = {}, now = '') {
@@ -227,6 +272,7 @@ export function nextMultiAngleBatch({
             ? { ...entry, retryAt: '' }
             : entry
         )),
+        currentBatchCandidates: dueRetries.map((entry) => entry.candidate),
       },
       candidates: dueRetries.map((entry) => ({
         ...entry.candidate,
@@ -267,6 +313,7 @@ export function nextMultiAngleBatch({
         currentAngleId: angleId,
         angleIndex: index,
         queuedEvidenceKeys: unseen.map(candidateEvidenceKey),
+        currentBatchCandidates: unseen,
         exhaustedAngles: [...exhausted],
       },
       candidates: unseen,
@@ -290,6 +337,7 @@ export function nextMultiAngleBatch({
     ...current,
     status: 'exhausted',
     queuedEvidenceKeys: [],
+    currentBatchCandidates: [],
     exhaustedAngles: [...new Set([...exhausted, ...angleOrder])],
     completedAt: current.completedAt || timestamp(now),
     updatedAt: timestamp(now),
@@ -334,6 +382,8 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
     evidenceKeys: uniqueStrings([...current.evidenceKeys, ...recordedKeys]),
     provenance,
     queuedEvidenceKeys: current.queuedEvidenceKeys.filter((key) => !recorded.has(key)),
+    currentBatchCandidates: current.currentBatchCandidates
+      .filter((candidate) => !recorded.has(candidateEvidenceKey(candidate))),
     retryQueue: current.retryQueue.filter((entry) => !recorded.has(entry.evidenceKey)),
     winnerKeywords,
     resultLanes,
@@ -361,6 +411,8 @@ export function recordMultiAngleFailure(
   const previousRetry = current.retryQueue.find((entry) => entry.evidenceKey === evidenceKey)
   const otherRetries = current.retryQueue.filter((entry) => entry.evidenceKey !== evidenceKey)
   const queuedEvidenceKeys = current.queuedEvidenceKeys.filter((key) => key !== evidenceKey)
+  const currentBatchCandidates = current.currentBatchCandidates
+    .filter((item) => candidateEvidenceKey(item) !== evidenceKey)
   if (code === 'page-timeout') {
     const attempts = Math.max(
       previousRetry?.attempts ?? 0,
@@ -373,6 +425,7 @@ export function recordMultiAngleFailure(
         ...current,
         status: 'running',
         queuedEvidenceKeys,
+        currentBatchCandidates,
         retryQueue: [...otherRetries, {
           evidenceKey,
           candidate,
@@ -388,6 +441,7 @@ export function recordMultiAngleFailure(
     ...current,
     status: 'running',
     queuedEvidenceKeys,
+    currentBatchCandidates,
     retryQueue: otherRetries,
     failedEvidenceKeys: uniqueStrings([...current.failedEvidenceKeys, evidenceKey]),
     updatedAt: timestamp(now),
@@ -423,5 +477,23 @@ export function stopMultiAngleExploration(state = {}, now = '') {
     status: 'stopped',
     pauseReason: '',
     updatedAt: timestamp(now),
+  }
+}
+
+export function stopMultiAngleWork(snapshot = {}, source = 'global', now = '') {
+  const stopSource = ['marketplace', 'extension', 'global'].includes(source)
+    ? source
+    : 'global'
+  const pending = snapshot?.pendingEvidenceAutomation ?? {}
+  return {
+    source: stopSource,
+    exploration: stopMultiAngleExploration(snapshot?.exploration, now),
+    pendingEvidenceAutomation: {
+      ...pending,
+      active: false,
+      scheduled: false,
+      currentStage: '',
+      targetKeywords: uniqueStrings(pending?.targetKeywords),
+    },
   }
 }

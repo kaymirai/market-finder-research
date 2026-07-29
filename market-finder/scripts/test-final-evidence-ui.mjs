@@ -123,6 +123,54 @@ test('persists multi-angle progress and reconstructs legacy pending targets', ()
   assert.match(app, /winningNicheAutomation:\s*legacyRestoreAutomation/)
 })
 
+test('completes a restored batch from persisted multi-angle candidates', () => {
+  const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
+  const timeoutBody = app.match(/function continueAfterMultiAnglePageTimeout\(message = ''\) \{([\s\S]*?)\n\}\n\nfunction completeMultiAngleBatch/)?.[1] ?? ''
+  assert.match(app, /function currentMultiAngleBatchCandidates\(/)
+  assert.match(app, /state\.multiAngleExploration\.currentBatchCandidates/)
+  assert.match(app, /queuedKeywords:[\s\S]*currentBatchCandidates\s*\.\s*map\(\(candidate\) => candidate\.keyword\)/)
+  assert.match(completeBody, /currentMultiAngleBatchCandidates\(\)/)
+  assert.match(timeoutBody, /currentMultiAngleBatchCandidates\(\)/)
+})
+
+test('uses one fixed research context for gates pools resume results and archives', () => {
+  assert.match(app, /function activeResearchContext\(/)
+  assert.match(app, /resolveMultiAngleResearchContext\(/)
+  for (const functionName of [
+    'evidenceArchiveRecord',
+    'renderMarketTimingGate',
+    'renderExplorationResultLanes',
+    'currentMultiAnglePools',
+    'resumeMultiAngleSearch',
+    'schedulePendingEvidenceAutomation',
+  ]) {
+    const body = app.match(new RegExp(`function ${functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+    assert.match(body, /activeResearchContext\(\)/, `${functionName} must use the fixed context`)
+  }
+  assert.match(app, /pauseMultiAngleForContextChange\(/)
+})
+
+test('routes marketplace extension and global stop controls through multi-angle orchestration', () => {
+  const hasWork = app.match(/function multiAngleWorkHasCurrentBatch\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const marketplaceStop = app.match(/function stopMarketplaceInsightAutomation\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const extensionStop = app.match(/async function stopExtensionResearch\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const globalStop = app.match(/function stopActiveResearch\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(app, /async function stopMultiAngleOrchestration\(/)
+  assert.match(app, /stopMultiAngleWork\(/)
+  assert.match(hasWork, /status === 'running'/)
+  assert.match(marketplaceStop, /stopMultiAngleOrchestration\('marketplace'\)/)
+  assert.match(extensionStop, /stopMultiAngleOrchestration\('extension'\)/)
+  assert.match(globalStop, /stopMultiAngleOrchestration\('global'\)/)
+})
+
+test('persists seasonal reference objects and feeds compatible later cycles', () => {
+  assert.match(app, /savedSeasonalReferences:\s*\[\]/)
+  assert.match(app, /savedSeasonalReferences:\s*state\.savedSeasonalReferences/)
+  assert.match(app, /restoreSavedSeasonalReferences\(/)
+  assert.match(app, /savedNextCycleCandidates:\s*state\.savedSeasonalReferences/)
+  assert.match(app, /state\.savedSeasonalReferences = \[\.\.\.state\.savedSeasonalReferences,\s*reference\]/)
+})
+
 test('keeps manual cross-niche confirmation while using drilldown evidence in multi-angle pools', () => {
   assert.match(app, /drilldownCandidates:\s*currentCrossNicheDrilldown\(\)\.candidates/)
   assert.match(app, /data-cross-niche-apply/)
@@ -164,7 +212,7 @@ test('stopping automatic verification stops multi-angle state without dropping c
   const stopBody = app.match(/async function stopMultiAngleSearch\(\) \{([\s\S]*?)\n\}\n\nasync function resumeMultiAngleSearch/)?.[1] ?? ''
   assert.match(toggleBody, /multiAngleSearchIsRunning\(\)[\s\S]*stopMultiAngleSearch\(\)/)
   assert.doesNotMatch(stopBody, /targetKeywords\s*=\s*\[\]/)
-  assert.match(stopBody, /stopMultiAngleExploration\(/)
+  assert.match(stopBody, /stopMultiAngleOrchestration\('global'\)/)
 })
 
 test('keeps continuous exploration visible outside every stage-specific panel', () => {

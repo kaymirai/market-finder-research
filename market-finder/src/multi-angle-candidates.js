@@ -66,6 +66,53 @@ export function candidateProvenanceKey(candidate = {}) {
   return `${candidateEvidenceKey(candidate)}|${String(candidate.angleId ?? '')}`
 }
 
+function savedSeasonalReference(candidate = {}) {
+  const keyword = normalizePhrase(candidate.keyword)
+  const eventId = String(candidate.eventId ?? '').trim()
+  const categoryId = String(candidate.categoryId ?? '').trim()
+  if (!keyword || !eventId || !categoryId) return null
+  return {
+    keyword,
+    categoryId,
+    eventId,
+    timingStatus: String(candidate.timingStatus ?? '').trim(),
+    source: String(candidate.source ?? 'seasonal-result-lane').trim()
+      || 'seasonal-result-lane',
+  }
+}
+
+export function restoreSavedSeasonalReferences({
+  saved = [],
+  legacyKeys = [],
+  availableCandidates = [],
+} = {}) {
+  const availableByKey = new Map()
+  ;(Array.isArray(availableCandidates) ? availableCandidates : []).forEach((candidate) => {
+    const normalized = savedSeasonalReference(candidate)
+    if (!normalized) return
+    const keys = [
+      `${normalized.eventId}|${normalized.keyword}`,
+      ...(Array.isArray(candidate?.legacyKeys) ? candidate.legacyKeys : []),
+    ]
+    keys.map((key) => String(key ?? '').trim()).filter(Boolean)
+      .forEach((key) => availableByKey.set(key, normalized))
+  })
+  const candidates = [
+    ...(Array.isArray(saved) ? saved : []),
+    ...(Array.isArray(legacyKeys) ? legacyKeys : [])
+      .map((key) => availableByKey.get(String(key ?? '').trim()))
+      .filter(Boolean),
+  ]
+  const byKey = new Map()
+  candidates.forEach((candidate) => {
+    const normalized = savedSeasonalReference(candidate)
+    if (!normalized) return
+    const key = candidateEvidenceKey(normalized)
+    if (!byKey.has(key)) byKey.set(key, normalized)
+  })
+  return [...byKey.values()]
+}
+
 function mergeCandidate(existing, incoming) {
   const sources = [...new Set([...existing.sources, ...incoming.sources])]
   const angleIds = [...new Set([...existing.angleIds, ...incoming.angleIds])]
@@ -133,6 +180,19 @@ export function buildMultiAngleCandidatePools(input = {}) {
   }
   const byEvidence = new Map()
 
+  addCandidates(byEvidence, restoreSavedSeasonalReferences({
+    saved: input.savedNextCycleCandidates,
+  })
+    .filter((candidate) => candidate.eventId === activeEventId)
+    .filter((candidate) => candidate.categoryId === common.categoryId)
+    .map((candidate) => ({
+      ...candidate,
+      source: 'saved-next-cycle-seasonal-reference',
+      sources: [candidate.source, 'saved-next-cycle-seasonal-reference'],
+    })), {
+    ...common,
+    angleId: 'demand-neighborhood',
+  })
   addCandidates(byEvidence, normalizedList(input.relatedTerms).map((keyword) => ({ keyword, source: 'marketplace-insights' })), {
     ...common,
     angleId: 'demand-neighborhood',

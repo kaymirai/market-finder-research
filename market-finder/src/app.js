@@ -144,17 +144,20 @@ import {
 import {
   EXPLORATION_ANGLE_ORDER,
   buildMultiAngleCandidatePools,
-} from './multi-angle-candidates.js?v=20260730-1'
+  restoreSavedSeasonalReferences,
+} from './multi-angle-candidates.js?v=20260730-2'
 import {
   createMultiAngleExplorationState,
   nextMultiAngleBatch,
+  pauseMultiAngleForContextChange,
   pauseMultiAngleExploration,
   recordMultiAngleBatch,
   recordMultiAngleFailure,
+  resolveMultiAngleResearchContext,
   resumeMultiAngleExploration,
   startMultiAngleExploration,
-  stopMultiAngleExploration,
-} from './multi-angle-exploration.js?v=20260730-1'
+  stopMultiAngleWork,
+} from './multi-angle-exploration.js?v=20260730-2'
 import {
   calculateMonthlyProfitTarget,
 } from './monthly-profit-target.js?v=20260726-1'
@@ -286,6 +289,7 @@ const state = {
   finalEvidenceCount: 0,
   timingOverrideConfirmed: false,
   savedSeasonalReferenceKeys: [],
+  savedSeasonalReferences: [],
   pendingEvidenceAutomation: {
     active: false,
     scheduled: false,
@@ -740,6 +744,7 @@ function persistMarketFinderState() {
       profitInputsByKeyword: state.profitInputsByKeyword,
       finalEvidenceFilter: state.finalEvidenceFilter,
       savedSeasonalReferenceKeys: state.savedSeasonalReferenceKeys,
+      savedSeasonalReferences: state.savedSeasonalReferences,
       multiAngleExploration: state.multiAngleExploration,
       winningNicheAutomation: state.winningNicheAutomation,
       pendingEvidenceAutomation: {
@@ -856,6 +861,9 @@ function restorePersistedState() {
   state.savedSeasonalReferenceKeys = Array.isArray(savedState.savedSeasonalReferenceKeys)
     ? [...new Set(savedState.savedSeasonalReferenceKeys.map((key) => String(key ?? '').trim()).filter(Boolean))]
     : []
+  state.savedSeasonalReferences = restoreSavedSeasonalReferences({
+    saved: savedState.savedSeasonalReferences,
+  })
   state.listingResearchTargetSettings = normalizeListingResearchTarget(
     savedState.listingResearchTargetSettings,
   )
@@ -878,10 +886,25 @@ function restorePersistedState() {
         ...migrateWinningNicheState(savedState.winningNicheAutomation),
         targetWinnerCount: restoredWinnerTarget,
       })
+  state.savedSeasonalReferences = restoreSavedSeasonalReferences({
+    saved: state.savedSeasonalReferences,
+    legacyKeys: state.savedSeasonalReferenceKeys,
+    availableCandidates: restorableSeasonalReferenceCandidates(),
+  })
+  state.savedSeasonalReferenceKeys = [...new Set([
+    ...state.savedSeasonalReferenceKeys,
+    ...state.savedSeasonalReferences.map(explorationResultKey),
+  ])]
+  const savedPendingTargets = Array.isArray(savedState.pendingEvidenceAutomation?.targetKeywords)
+    ? savedState.pendingEvidenceAutomation.targetKeywords
+    : []
   const legacyRestoreAutomation = savedState.multiAngleExploration
     ? {
         status: state.multiAngleExploration.status,
-        queuedKeywords: savedState.pendingEvidenceAutomation?.targetKeywords ?? [],
+        queuedKeywords: savedPendingTargets.length > 0
+          ? savedPendingTargets
+          : state.multiAngleExploration.currentBatchCandidates
+            .map((candidate) => candidate.keyword),
       }
     : {
         status: state.multiAngleExploration.status,
@@ -962,6 +985,25 @@ function selectedEvent() {
 
 function selectedCategory() {
   return PRODUCT_CATEGORIES.find((category) => category.id === elements.categorySelect.value) ?? PRODUCT_CATEGORIES[0]
+}
+
+function activeResearchContext() {
+  const selected = {
+    event: selectedEvent(),
+    category: selectedCategory(),
+  }
+  const context = resolveMultiAngleResearchContext(state.multiAngleExploration, {
+    eventId: selected.event.id,
+    categoryId: selected.category.id,
+  })
+  return {
+    ...context,
+    event: context.eventId === selected.event.id
+      ? selected.event
+      : resolveMarketEvent({ eventId: context.eventId }),
+    category: PRODUCT_CATEGORIES.find((category) => category.id === context.categoryId)
+      ?? selected.category,
+  }
 }
 
 function selectedTargets() {
@@ -1425,6 +1467,7 @@ function currentEvidenceRunId() {
 }
 
 function evidenceArchiveRecord() {
+  const researchContext = activeResearchContext()
   const evidence = modifierEvidenceInput()
   const capturedAt = new Date().toISOString()
   const runId = currentEvidenceRunId()
@@ -1437,13 +1480,13 @@ function evidenceArchiveRecord() {
     runId,
     capturedAt,
     locale: 'en-US',
-    categoryId: selectedCategory().id,
-    eventId: selectedEvent().id,
+    categoryId: researchContext.categoryId,
+    eventId: researchContext.eventId,
     identitySeeds: buyerIdentityLines(),
     context: {
-      categoryId: selectedCategory().id,
-      eventId: selectedEvent().id,
-      eventTerm: normalizePhrase(selectedEvent().searchTerm),
+      categoryId: researchContext.categoryId,
+      eventId: researchContext.eventId,
+      eventTerm: normalizePhrase(researchContext.event.searchTerm),
       buyerIdentities: buyerIdentityLines(),
     },
     demandKeywords: evidence.demandKeywords.map((row) => ({
@@ -1460,8 +1503,8 @@ function evidenceArchiveRecord() {
     drilldownNodes: mergeNicheDrilldownNodes(previousNodes, buildNicheDrilldownGraph({
       rows: state.researchRows,
       candidates: [...state.candidateCatalog, ...drilldown.candidates],
-      categoryId: selectedCategory().id,
-      eventId: selectedEvent().id,
+      categoryId: researchContext.categoryId,
+      eventId: researchContext.eventId,
       createdAt: capturedAt,
     })),
   }
@@ -3807,7 +3850,7 @@ function renderMarketTimingGate() {
     || !elements.marketTimingOverrideBtn
   ) return
 
-  const event = selectedEvent()
+  const { event } = activeResearchContext()
   const timing = classifyProductionWindow(event)
   const blocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
   const peakDetail = timing.peakDate
@@ -3901,6 +3944,57 @@ function explorationResultKey(item = {}) {
   return `${eventId}|${keyword}`
 }
 
+function seasonalReferenceCandidate(item = {}) {
+  const context = activeResearchContext()
+  const legacyKey = explorationResultKey(item)
+  const event = item.event ?? (item.eventId
+    ? resolveMarketEvent({ eventId: item.eventId })
+    : null)
+  if (!event?.id || event.id === context.eventId) return null
+  const keyword = normalizePhrase(item.keyword)
+    || normalizePhrase(`${event.searchTerm} ${context.category.searchTerm}`)
+  if (!keyword) return null
+  return {
+    ...item,
+    event,
+    keyword,
+    eventId: event.id,
+    categoryId: String(item.categoryId ?? context.categoryId).trim(),
+    timingStatus: String(item.timingStatus ?? item.status ?? '').trim(),
+    source: String(item.source ?? 'timely-seasonal-suggestion').trim(),
+    legacyKeys: [legacyKey].filter(Boolean),
+  }
+}
+
+function availableSeasonalReferenceCandidates() {
+  const context = activeResearchContext()
+  const timelySuggestions = buildTimelySeasonalSuggestions(MARKET_EVENTS, {
+    selectedEventId: context.eventId,
+  })
+  const byKey = new Map()
+  ;[
+    ...state.multiAngleExploration.resultLanes.seasonalReference,
+    ...timelySuggestions,
+  ].forEach((item) => {
+    const candidate = seasonalReferenceCandidate(item)
+    if (candidate) byKey.set(explorationResultKey(candidate), candidate)
+  })
+  return [...byKey.values()]
+}
+
+function restorableSeasonalReferenceCandidates() {
+  const context = activeResearchContext()
+  return [
+    ...state.multiAngleExploration.resultLanes.seasonalReference,
+    ...MARKET_EVENTS
+      .filter((event) => event.id !== context.eventId)
+      .map((event) => ({
+        event,
+        ...classifyProductionWindow(event),
+      })),
+  ].map(seasonalReferenceCandidate).filter(Boolean)
+}
+
 function explorationResultItemHtml(item = {}, options = {}) {
   const event = item.event ?? (item.eventId ? resolveMarketEvent({ eventId: item.eventId }) : null)
   const label = normalizePhrase(item.keyword) || event?.jpLabel || event?.label || '名称未設定'
@@ -3939,17 +4033,13 @@ function renderExplorationResultLane(lane, items, options = {}) {
 
 function renderExplorationResultLanes() {
   if (!elements.activeEventResultLane || !elements.evergreenResultLane || !elements.seasonalReferenceLane) return
+  const context = activeResearchContext()
   const resultLanes = state.multiAngleExploration.resultLanes
   const activeEventRows = resultLanes.event.filter((item) => (
-    ['A', 'B', 'C', 'D'].includes(String(item.opportunityLabel ?? '').trim().toUpperCase())
+    (!item.eventId || item.eventId === context.eventId)
+    && ['A', 'B', 'C', 'D'].includes(String(item.opportunityLabel ?? '').trim().toUpperCase())
   ))
-  const timelySeasonalReferences = buildTimelySeasonalSuggestions(MARKET_EVENTS, {
-    selectedEventId: selectedEvent().id,
-  })
-  const seasonalByKey = new Map()
-  ;[...resultLanes.seasonalReference, ...timelySeasonalReferences].forEach((item) => {
-    seasonalByKey.set(explorationResultKey(item), item)
-  })
+  const seasonalReferences = availableSeasonalReferenceCandidates()
 
   renderExplorationResultLane(elements.activeEventResultLane, activeEventRows, {
     emptyText: '今回イベントの検証済み結果はまだありません。',
@@ -3957,7 +4047,7 @@ function renderExplorationResultLanes() {
   renderExplorationResultLane(elements.evergreenResultLane, resultLanes.evergreen, {
     emptyText: 'エバーグリーン候補はまだありません。',
   })
-  renderExplorationResultLane(elements.seasonalReferenceLane, [...seasonalByKey.values()], {
+  renderExplorationResultLane(elements.seasonalReferenceLane, seasonalReferences, {
     seasonalReference: true,
     emptyText: '今作る別季節の参考候補はありません。',
   })
@@ -5118,6 +5208,29 @@ function multiAngleSearchIsRunning() {
   return state.multiAngleExploration?.status === 'running'
 }
 
+function currentMultiAngleBatchCandidates() {
+  const persisted = state.multiAngleExploration.currentBatchCandidates
+  if (persisted.length > 0) return persisted
+
+  const targetKeys = new Set(
+    state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase),
+  )
+  const context = activeResearchContext()
+  const byKeyword = new Map()
+  ;[
+    ...state.multiAngleExploration.retryQueue.map((entry) => entry.candidate),
+    ...state.candidateCatalog,
+    ...state.candidates,
+  ].forEach((candidate) => {
+    const keyword = normalizePhrase(candidate?.keyword)
+    if (!keyword || !targetKeys.has(keyword)) return
+    if (candidate?.categoryId && candidate.categoryId !== context.categoryId) return
+    if (candidate?.eventId && candidate.eventId !== context.eventId) return
+    if (!byKeyword.has(keyword)) byKeyword.set(keyword, candidate)
+  })
+  return [...byKeyword.values()]
+}
+
 function marketplaceRelatedTerms() {
   const plan = state.marketplaceInsightPlan
   return cleanKeywordList([
@@ -5158,7 +5271,7 @@ function measuredEventlessCandidates() {
 }
 
 function currentSeasonalReferenceCandidates() {
-  const activeEventId = state.multiAngleExploration.activeEventId || selectedEvent().id
+  const { eventId: activeEventId } = activeResearchContext()
   return evidenceLearningRecords().flatMap((record) => {
     const eventId = String(record.eventId ?? '').trim()
     if (!eventId || eventId === activeEventId) return []
@@ -5175,11 +5288,7 @@ function currentSeasonalReferenceCandidates() {
 }
 
 function currentMultiAnglePools() {
-  const activeEventId = state.multiAngleExploration.activeEventId || selectedEvent().id
-  const event = resolveMarketEvent({ eventId: activeEventId })
-  const category = PRODUCT_CATEGORIES.find(
-    (item) => item.id === (state.multiAngleExploration.categoryId || selectedCategory().id),
-  ) ?? selectedCategory()
+  const { event, category } = activeResearchContext()
   const measuredRows = finalEvidenceRows()
   return buildMultiAngleCandidatePools({
     event,
@@ -5206,16 +5315,18 @@ function currentMultiAnglePools() {
     })),
     evergreenCandidates: measuredEventlessCandidates(),
     seasonalReferenceCandidates: currentSeasonalReferenceCandidates(),
+    savedNextCycleCandidates: state.savedSeasonalReferences,
   })
 }
 
 function multiAngleCandidateForResearch(candidate) {
+  const context = activeResearchContext()
   const event = resolveMarketEvent({
-    eventId: candidate.eventId || state.multiAngleExploration.activeEventId,
+    eventId: candidate.eventId || context.eventId,
   })
   const category = PRODUCT_CATEGORIES.find(
     (item) => item.id === candidate.categoryId,
-  ) ?? selectedCategory()
+  ) ?? context.category
   const keyword = normalizePhrase(candidate.keyword)
   const riskTerms = detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/))
   return {
@@ -5366,7 +5477,8 @@ function queueNextMultiAngleBatch() {
 }
 
 async function startMultiAngleSearch() {
-  const timing = classifyProductionWindow(selectedEvent())
+  const researchContext = activeResearchContext()
+  const timing = classifyProductionWindow(researchContext.event)
   if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
     setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は開始しません。')
     renderAll()
@@ -5377,8 +5489,8 @@ async function startMultiAngleSearch() {
   state.multiAngleExploration = startMultiAngleExploration(
     state.multiAngleExploration,
     {
-      activeEventId: selectedEvent().id,
-      categoryId: selectedCategory().id,
+      activeEventId: researchContext.eventId,
+      categoryId: researchContext.categoryId,
       targetWinnerCount: target.targetWinnerCount,
     },
   )
@@ -5386,7 +5498,11 @@ async function startMultiAngleSearch() {
 }
 
 async function startNewMultiAngleCycle() {
-  const timing = classifyProductionWindow(selectedEvent())
+  const nextCycleContext = {
+    event: selectedEvent(),
+    category: selectedCategory(),
+  }
+  const timing = classifyProductionWindow(nextCycleContext.event)
   if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
     setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は開始しません。')
     renderAll()
@@ -5397,8 +5513,8 @@ async function startNewMultiAngleCycle() {
   state.multiAngleExploration = startMultiAngleExploration(
     createMultiAngleExplorationState(),
     {
-      activeEventId: selectedEvent().id,
-      categoryId: selectedCategory().id,
+      activeEventId: nextCycleContext.event.id,
+      categoryId: nextCycleContext.category.id,
       targetWinnerCount: target.targetWinnerCount,
     },
   )
@@ -5407,7 +5523,7 @@ async function startNewMultiAngleCycle() {
 
 function pauseMultiAngleSearch(reason = '', failureCode = '') {
   if (!multiAngleSearchIsRunning()) return
-  const candidate = state.candidates.find((item) => (
+  const candidate = currentMultiAngleBatchCandidates().find((item) => (
     state.pendingEvidenceAutomation.targetKeywords.includes(item.keyword)
   ))
   const globalFailure = ['service-unavailable', 'login-required', 'rate-limited'].includes(failureCode)
@@ -5422,20 +5538,40 @@ function pauseMultiAngleSearch(reason = '', failureCode = '') {
   persistMarketFinderState()
 }
 
-async function stopMultiAngleSearch() {
-  state.multiAngleExploration = stopMultiAngleExploration(state.multiAngleExploration)
-  state.pendingEvidenceAutomation.active = false
-  state.pendingEvidenceAutomation.scheduled = false
-  state.pendingEvidenceAutomation.currentStage = ''
-  if (state.marketplaceInsightAutoRunning) stopMarketplaceInsightAutomation()
-  else if (state.extensionState?.active) await stopExtensionResearch()
+function multiAngleWorkHasCurrentBatch() {
+  const status = state.multiAngleExploration?.status
+  if (status === 'running') return true
+  return ['paused', 'stopped'].includes(status) && (
+    state.multiAngleExploration.currentBatchCandidates.length > 0
+    || state.pendingEvidenceAutomation.targetKeywords.length > 0
+    || state.multiAngleExploration.queuedEvidenceKeys.length > 0
+  )
+}
+
+async function stopMultiAngleOrchestration(source = 'global') {
+  const transition = stopMultiAngleWork({
+    exploration: state.multiAngleExploration,
+    pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+  }, source)
+  state.multiAngleExploration = transition.exploration
+  state.pendingEvidenceAutomation = transition.pendingEvidenceAutomation
+  const marketplaceWasActive = state.marketplaceInsightAutoRunning
+  const extensionWasActive = state.extensionState?.active
+  if (marketplaceWasActive) stopMarketplaceInsightAutomation({ skipMultiAngle: true })
+  if (extensionWasActive) await stopExtensionResearch({ skipMultiAngle: true })
   setSimpleStatus('複数角度の探索を停止しました。取得済み結果と現在バッチは保持しています。')
   renderAll()
   persistMarketFinderState()
+  return true
+}
+
+async function stopMultiAngleSearch() {
+  return stopMultiAngleOrchestration('global')
 }
 
 async function resumeMultiAngleSearch() {
-  const timing = classifyProductionWindow(selectedEvent())
+  const researchContext = activeResearchContext()
+  const timing = classifyProductionWindow(researchContext.event)
   if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
     setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は再開しません。')
     renderAll()
@@ -5474,11 +5610,15 @@ function multiAngleFailureCode(value = '') {
 function continueAfterMultiAnglePageTimeout(message = '') {
   const targetKeys = new Set(state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase))
   const activeKeyword = normalizePhrase(state.extensionState?.currentKeyword)
-  const candidate = state.candidates.find((item) => (
+  const batchCandidates = currentMultiAngleBatchCandidates()
+  const candidate = batchCandidates.find((item) => (
     targetKeys.has(normalizePhrase(item.keyword))
     && (!activeKeyword || normalizePhrase(item.keyword) === activeKeyword)
-  )) ?? state.candidates.find((item) => targetKeys.has(normalizePhrase(item.keyword)))
-  if (!candidate) return false
+  )) ?? batchCandidates.find((item) => targetKeys.has(normalizePhrase(item.keyword)))
+  if (!candidate) {
+    pauseMultiAngleSearch('現在バッチの候補情報を復元できないため、対象ワードを保持して一時停止しました。')
+    return false
+  }
 
   state.multiAngleExploration = recordMultiAngleFailure(
     state.multiAngleExploration,
@@ -5506,13 +5646,19 @@ function completeMultiAngleBatch() {
   const originalTargetKeywords = [...state.pendingEvidenceAutomation.targetKeywords]
   const targetKeys = new Set(originalTargetKeywords.map(normalizePhrase))
   const unresolvedTargetKeys = new Set(targetKeys)
+  const batchCandidates = currentMultiAngleBatchCandidates()
+  if (targetKeys.size > 0 && batchCandidates.length === 0) {
+    pauseMultiAngleSearch('現在バッチの候補情報を復元できないため、対象ワードを保持して一時停止しました。')
+    return false
+  }
   const rowsByKeyword = new Map(
     finalEvidenceRows()
       .filter((row) => targetKeys.has(normalizePhrase(row.keyword)))
       .map((row) => [normalizePhrase(row.keyword), row]),
   )
   const successfulRows = []
-  for (const candidate of state.candidates.filter((item) => targetKeys.has(normalizePhrase(item.keyword)))) {
+  for (const candidate of batchCandidates
+    .filter((item) => targetKeys.has(normalizePhrase(item.keyword)))) {
     const row = rowsByKeyword.get(normalizePhrase(candidate.keyword))
     if (!row) {
       state.multiAngleExploration = recordMultiAngleFailure(
@@ -5609,7 +5755,8 @@ function stopPendingEvidenceAutomation(message = '') {
 }
 
 function pauseMultiAngleForBlockedTimingChange() {
-  const timing = classifyProductionWindow(selectedEvent())
+  const researchContext = activeResearchContext()
+  const timing = classifyProductionWindow(researchContext.event)
   const blocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
   if (!blocked) return false
 
@@ -5630,26 +5777,74 @@ function pauseMultiAngleForBlockedTimingChange() {
       '制作時期が対象外へ変わったため、現在の候補を保持して一時停止しました。',
     )
   }
-  if (state.marketplaceInsightAutoRunning) stopMarketplaceInsightAutomation()
+  if (state.marketplaceInsightAutoRunning) {
+    stopMarketplaceInsightAutomation({ skipMultiAngle: true })
+  }
   setSimpleStatus('制作時期が対象外へ変わったため、自動調査を一時停止しました。候補は保持しています。')
   renderAll()
   persistMarketFinderState()
 
   if ((pendingWasActive || marketplaceWasActive) && state.extensionState?.active) {
-    stopExtensionResearch()
+    stopExtensionResearch({ skipMultiAngle: true })
       .catch((error) => setSimpleStatus(friendlyExtensionError(error)))
   }
   return true
 }
 
+function pauseMultiAngleForInputChange() {
+  const selectedContext = {
+    eventId: selectedEvent().id,
+    categoryId: selectedCategory().id,
+  }
+  const previousStatus = state.multiAngleExploration.status
+  const fixedContext = resolveMultiAngleResearchContext(
+    state.multiAngleExploration,
+    selectedContext,
+  )
+  const contextChanged = fixedContext.fixed && (
+    fixedContext.eventId !== selectedContext.eventId
+    || fixedContext.categoryId !== selectedContext.categoryId
+  )
+  if (previousStatus !== 'running' && !contextChanged) return false
+  if (!multiAngleWorkHasCurrentBatch() && !contextChanged) return false
+
+  state.multiAngleExploration = pauseMultiAngleForContextChange(
+    state.multiAngleExploration,
+    selectedContext,
+    '条件が変更されたため、現在バッチを保持して一時停止しました。新しい選択は次回サイクルで使います。',
+  )
+  if (state.multiAngleExploration.status === 'running') {
+    state.multiAngleExploration = pauseMultiAngleExploration(
+      state.multiAngleExploration,
+      '条件が変更されたため、現在バッチを保持して一時停止しました。新しい選択は次回サイクルで使います。',
+    )
+  }
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.scheduled = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  state.restoredAutomationPending = false
+  if (state.marketplaceInsightAutoRunning) {
+    stopMarketplaceInsightAutomation({ skipMultiAngle: true })
+  }
+  if (state.extensionState?.active) {
+    stopExtensionResearch({ skipMultiAngle: true })
+      .catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+  }
+  setSimpleStatus('現在の探索を一時停止しました。変更した条件は次回サイクルで使います。')
+  renderAll()
+  persistMarketFinderState()
+  return true
+}
+
 function schedulePendingEvidenceAutomation(delayMs = 500) {
   if (!state.pendingEvidenceAutomation.active || state.pendingEvidenceAutomation.scheduled) return
+  const researchContext = activeResearchContext()
   state.pendingEvidenceAutomation.scheduled = true
   persistMarketFinderState()
   window.setTimeout(async () => {
     state.pendingEvidenceAutomation.scheduled = false
     if (!state.pendingEvidenceAutomation.active) return
-    const timing = classifyProductionWindow(selectedEvent())
+    const timing = classifyProductionWindow(researchContext.event)
     if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
       pauseMultiAngleForBlockedTimingChange()
       return
@@ -5711,7 +5906,8 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
 
 function resumePersistedEvidenceAutomationIfReady() {
   if (!state.restoredAutomationPending || !state.extensionConnected) return false
-  const timing = classifyProductionWindow(selectedEvent())
+  const researchContext = activeResearchContext()
+  const timing = classifyProductionWindow(researchContext.event)
   if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
     setSimpleStatus('前回の未完了調査は自動再開しません。制作時期を確認して、続行を明示してください。')
     renderAll()
@@ -6224,8 +6420,7 @@ function renderResearchInspector() {
 }
 
 function researchHeaderState() {
-  const category = selectedCategory()
-  const event = selectedEvent()
+  const { category, event } = activeResearchContext()
   const year = selectedYearOption()
   const condition = [category.label, event.jpLabel, year ? `${year}年` : '年指定なし'].filter(Boolean).join(' / ')
   const marketplaceKeyword = openedMarketplaceInsightItem()?.query ?? nextMarketplaceInsightItem()?.query ?? ''
@@ -6254,6 +6449,7 @@ function renderGlobalResearchStatus() {
 }
 
 function stopActiveResearch() {
+  if (multiAngleWorkHasCurrentBatch()) return stopMultiAngleOrchestration('global')
   const headerState = researchHeaderState()
   if (headerState.stopKind === 'marketplace') return stopMarketplaceInsightAutomation()
   if (headerState.stopKind === 'extension') return stopExtensionResearch()
@@ -6540,6 +6736,7 @@ function generateCandidates({ preserveMarketplacePlan = false } = {}) {
 }
 
 function resetCandidatesForInputChange(message = '条件を変更しました。もう一度「候補を自動で探す」を押してください。') {
+  if (pauseMultiAngleForInputChange()) return
   state.candidates = []
   state.activeDiscoveryLane = 'all'
   state.marketplaceInsightPlan = null
@@ -8530,7 +8727,10 @@ async function runMarketplaceInsightAutomation() {
   }
 }
 
-function stopMarketplaceInsightAutomation() {
+function stopMarketplaceInsightAutomation(options = {}) {
+  if (!options.skipMultiAngle && multiAngleWorkHasCurrentBatch()) {
+    return stopMultiAngleOrchestration('marketplace')
+  }
   if (!state.marketplaceInsightAutoRunning) return
   if (state.pendingEvidenceAutomation?.active) {
     stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
@@ -8674,7 +8874,10 @@ function skipMarketplaceInsight() {
   persistMarketFinderState()
 }
 
-async function stopExtensionResearch() {
+async function stopExtensionResearch(options = {}) {
+  if (!options.skipMultiAngle && multiAngleWorkHasCurrentBatch()) {
+    return stopMultiAngleOrchestration('extension')
+  }
   if (state.pendingEvidenceAutomation?.active) {
     stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
   }
@@ -8712,21 +8915,22 @@ function bindEvents() {
   })
   elements.eventSelect.addEventListener('change', () => {
     state.timingOverrideConfirmed = false
-    const pausedForTiming = pauseMultiAngleForBlockedTimingChange()
+    const pausedForContext = pauseMultiAngleForInputChange()
     renderTargets({ syncYear: true })
     autoSelectBuyerIdentities({ refresh: true })
-    if (!pausedForTiming) resetCandidatesForInputChange()
+    if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.customEventInput.addEventListener('input', () => {
     state.timingOverrideConfirmed = false
-    const pausedForTiming = pauseMultiAngleForBlockedTimingChange()
+    const pausedForContext = pauseMultiAngleForInputChange()
     renderTargets({ syncYear: false })
     autoSelectBuyerIdentities({ refresh: true })
-    if (!pausedForTiming) resetCandidatesForInputChange()
+    if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.categorySelect.addEventListener('change', () => {
+    const pausedForContext = pauseMultiAngleForInputChange()
     autoSelectBuyerIdentities({ refresh: true })
-    resetCandidatesForInputChange()
+    if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.yearInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.limitInput.addEventListener('input', () => resetCandidatesForInputChange())
@@ -8749,7 +8953,18 @@ function bindEvents() {
     if (!button) return
     const key = String(button.dataset.saveSeasonalReference ?? '').trim()
     if (!key || state.savedSeasonalReferenceKeys.includes(key)) return
+    const displayedReference = availableSeasonalReferenceCandidates()
+      .find((candidate) => explorationResultKey(candidate) === key)
+    if (!displayedReference) return
+    const reference = {
+      eventId: displayedReference.eventId,
+      categoryId: displayedReference.categoryId,
+      keyword: displayedReference.keyword,
+      timingStatus: displayedReference.timingStatus,
+      source: displayedReference.source,
+    }
     state.savedSeasonalReferenceKeys = [...state.savedSeasonalReferenceKeys, key]
+    state.savedSeasonalReferences = [...state.savedSeasonalReferences, reference]
     setSimpleStatus('参考候補を次回用に保存しました。今回のA/B目標には追加していません。')
     renderExplorationResultLanes()
     persistMarketFinderState()

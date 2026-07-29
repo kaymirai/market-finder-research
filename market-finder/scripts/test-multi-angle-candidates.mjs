@@ -6,6 +6,7 @@ import {
   candidateEvidenceKey,
   candidateProvenanceKey,
 } from '../src/multi-angle-candidates.js'
+import * as candidateApi from '../src/multi-angle-candidates.js'
 
 const base = {
   event: { id: 'halloween', searchTerm: 'halloween' },
@@ -88,4 +89,68 @@ test('keeps measured market gaps separate from source-angle candidates', () => {
   })
 
   assert.equal(pools['market-gap'][0].keyword, 'halloween librarian shirt')
+})
+
+test('saved seasonal references persist as useful objects and enter only a compatible later cycle', () => {
+  assert.equal(typeof candidateApi.restoreSavedSeasonalReferences, 'function')
+
+  const availableCandidates = [{
+    keyword: 'thanksgiving nurse shirt',
+    categoryId: 'shirt',
+    eventId: 'thanksgiving',
+    timingStatus: 'timely',
+    source: 'timely-seasonal-suggestion',
+    legacyKeys: ['thanksgiving|thanksgiving'],
+  }]
+  const restored = candidateApi.restoreSavedSeasonalReferences({
+    saved: [{
+      keyword: 'christmas teacher shirt',
+      categoryId: 'shirt',
+      eventId: 'christmas',
+      timingStatus: 'timely',
+      source: 'seasonal-result-lane',
+    }],
+    legacyKeys: ['thanksgiving|thanksgiving'],
+    availableCandidates,
+  })
+  const persisted = JSON.parse(JSON.stringify(restored))
+
+  assert.deepEqual(persisted, [
+    {
+      keyword: 'christmas teacher shirt',
+      categoryId: 'shirt',
+      eventId: 'christmas',
+      timingStatus: 'timely',
+      source: 'seasonal-result-lane',
+    },
+    {
+      keyword: 'thanksgiving nurse shirt',
+      categoryId: 'shirt',
+      eventId: 'thanksgiving',
+      timingStatus: 'timely',
+      source: 'timely-seasonal-suggestion',
+    },
+  ])
+
+  const currentPools = buildMultiAngleCandidatePools({
+    ...base,
+    savedNextCycleCandidates: persisted,
+  })
+  assert.equal(
+    currentPools['demand-neighborhood'].some(
+      (candidate) => candidate.keyword === 'thanksgiving nurse shirt',
+    ),
+    false,
+  )
+
+  const laterPools = buildMultiAngleCandidatePools({
+    ...base,
+    event: { id: 'thanksgiving', searchTerm: 'thanksgiving' },
+    savedNextCycleCandidates: persisted,
+  })
+  const laterCandidate = laterPools['demand-neighborhood'].find(
+    (candidate) => candidate.keyword === 'thanksgiving nurse shirt',
+  )
+  assert.equal(laterCandidate.source, 'saved-next-cycle-seasonal-reference')
+  assert.equal(laterCandidate.resultLane, 'event')
 })
