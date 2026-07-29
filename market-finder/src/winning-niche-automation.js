@@ -92,33 +92,30 @@ export function createWinningNicheAutomation(saved = {}) {
 }
 
 export function migrateWinningNicheState(saved = {}) {
+  const legacy = createWinningNicheAutomation(saved)
   const context = {
-    categoryId: String(saved?.categoryId ?? ''),
-    eventId: String(saved?.eventId ?? ''),
+    categoryId: legacy.categoryId,
+    eventId: legacy.eventId,
   }
   return createMultiAngleExplorationState({
-    status: saved?.status === 'winner-found' ? 'winner-found'
-      : saved?.status === 'paused' ? 'paused'
-        : saved?.status === 'stopped' ? 'stopped'
-          : saved?.status === 'exhausted' ? 'running'
-            : saved?.status,
-    activeEventId: saved?.eventId,
-    categoryId: saved?.categoryId,
-    currentAngleId: saved?.currentAxis ? 'attribute-combination' : '',
-    evidenceKeys: (saved?.researchedKeywords ?? []).map((keyword) => (
+    status: legacy.status === 'exhausted' ? 'running' : legacy.status,
+    activeEventId: legacy.eventId,
+    categoryId: legacy.categoryId,
+    currentAngleId: legacy.currentAxis ? 'attribute-combination' : '',
+    evidenceKeys: legacy.researchedKeywords.map((keyword) => (
       candidateEvidenceKey({ ...context, keyword })
     )),
-    queuedEvidenceKeys: (saved?.queuedKeywords ?? []).map((keyword) => (
+    queuedEvidenceKeys: legacy.queuedKeywords.map((keyword) => (
       candidateEvidenceKey({ ...context, keyword })
     )),
     retryQueue: [],
     failedEvidenceKeys: [],
-    winnerKeywords: saved?.winnerKeywords,
-    targetWinnerCount: saved?.targetWinnerCount,
-    startedAt: saved?.startedAt,
-    updatedAt: saved?.updatedAt,
-    completedAt: saved?.completedAt,
-    pauseReason: saved?.pauseReason,
+    winnerKeywords: legacy.winnerKeywords,
+    targetWinnerCount: legacy.targetWinnerCount,
+    startedAt: legacy.startedAt,
+    updatedAt: legacy.updatedAt,
+    completedAt: legacy.completedAt,
+    pauseReason: legacy.pauseReason,
   })
 }
 

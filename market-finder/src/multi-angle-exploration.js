@@ -222,7 +222,11 @@ export function nextMultiAngleBatch({
           ...current.queuedEvidenceKeys,
           ...dueRetries.map((entry) => entry.evidenceKey),
         ]),
-        retryQueue: current.retryQueue.filter((entry) => !dueKeys.has(entry.evidenceKey)),
+        retryQueue: current.retryQueue.map((entry) => (
+          dueKeys.has(entry.evidenceKey)
+            ? { ...entry, retryAt: '' }
+            : entry
+        )),
       },
       candidates: dueRetries.map((entry) => ({
         ...entry.candidate,

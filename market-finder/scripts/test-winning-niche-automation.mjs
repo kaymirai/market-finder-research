@@ -288,3 +288,21 @@ test('migrates a legacy exhausted state as resumable running work', () => {
   assert.equal(migrated.status, 'running')
   assert.equal(migrated.activeEventId, 'halloween')
 })
+
+test('safely migrates malformed legacy keyword lists and an unknown status', () => {
+  const migrated = migrateWinningNicheState({
+    status: 'not-real',
+    eventId: ' halloween ',
+    categoryId: ' shirt ',
+    researchedKeywords: 'wrong',
+    queuedKeywords: { keyword: 'wrong' },
+    winnerKeywords: 'wrong',
+  })
+
+  assert.equal(migrated.status, 'idle')
+  assert.equal(migrated.activeEventId, 'halloween')
+  assert.equal(migrated.categoryId, 'shirt')
+  assert.deepEqual(migrated.evidenceKeys, [])
+  assert.deepEqual(migrated.queuedEvidenceKeys, [])
+  assert.deepEqual(migrated.winnerKeywords, [])
+})

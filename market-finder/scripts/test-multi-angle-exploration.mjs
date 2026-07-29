@@ -109,6 +109,38 @@ test('stops retrying one keyword after two timeouts', () => {
   assert.equal(twice.failedEvidenceKeys.length, 1)
 })
 
+test('keeps timeout attempts in saved state until a due retry finishes', () => {
+  const candidate = {
+    keyword: 'spooky nurse shirt',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+  }
+  const once = recordMultiAngleFailure(
+    startMultiAngleExploration({}, context),
+    candidate,
+    { code: 'page-timeout', retryAfterMs: 60_000 },
+    '2026-07-30T00:00:00Z',
+  )
+  const due = nextMultiAngleBatch({
+    state: once,
+    pools: {},
+    now: '2026-07-30T00:01:00Z',
+  })
+  const restored = createMultiAngleExplorationState(
+    JSON.parse(JSON.stringify(due.state)),
+  )
+  const twice = recordMultiAngleFailure(
+    restored,
+    { ...candidate },
+    { code: 'page-timeout', retryAfterMs: 60_000 },
+    '2026-07-30T00:02:00Z',
+  )
+
+  assert.equal(restored.retryQueue[0].attempts, 1)
+  assert.equal(twice.retryQueue.length, 0)
+  assert.deepEqual(twice.failedEvidenceKeys, [candidateEvidenceKey(candidate)])
+})
+
 test('returns only due timeout retries before queuing new evidence', () => {
   const candidate = {
     keyword: 'spooky nurse shirt',
