@@ -201,6 +201,24 @@ function isMarketGap(candidate) {
   return demand !== null && demand > 0 && reduction !== null && reduction >= 0.3 && sales !== null && sales >= 2
 }
 
+export function currentMeasuredMarketGapCandidates(rows = [], context = {}) {
+  const activeEventId = String(context.eventId ?? '').trim()
+  const activeCategoryId = String(context.categoryId ?? '').trim()
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => (
+      String(row?.raw?.researchEventId ?? row?.researchEventId ?? '').trim() === activeEventId
+      && String(row?.raw?.researchCategoryId ?? row?.researchCategoryId ?? '').trim() === activeCategoryId
+    ))
+    .map((row) => ({
+      ...row.raw,
+      ...row.normalized,
+      keyword: row.keyword,
+      comparison: row.drilldownNode?.comparison,
+      priorityScore: row.scoreState?.score ?? row.scoreState?.explorationPriority,
+      source: 'measured-market-gap',
+    }))
+}
+
 export function buildMultiAngleCandidatePools(input = {}) {
   const event = input.event ?? {}
   const category = input.category ?? {}
@@ -256,7 +274,17 @@ export function buildMultiAngleCandidatePools(input = {}) {
     ...common,
     angleId: 'adjacent-product',
   })
-  addCandidates(byEvidence, (input.marketGapCandidates ?? []).filter(isMarketGap), {
+  const measuredMarketGapCandidates = currentMeasuredMarketGapCandidates(
+    input.measuredRows,
+    {
+      eventId: activeEventId,
+      categoryId: common.categoryId,
+    },
+  )
+  addCandidates(byEvidence, [
+    ...(input.marketGapCandidates ?? []),
+    ...measuredMarketGapCandidates,
+  ].filter(isMarketGap), {
     ...common,
     angleId: 'market-gap',
   })

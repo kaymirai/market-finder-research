@@ -149,7 +149,7 @@ import {
   buildMultiAngleCandidatePools,
   candidateEvidenceKey,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260730-3'
+} from './multi-angle-candidates.js?v=20260730-4'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
@@ -168,7 +168,10 @@ import {
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-6'
+} from './multi-angle-exploration.js?v=20260730-7'
+import {
+  createMultiAngleRetryScheduler,
+} from './multi-angle-retry-scheduler.js?v=20260730-1'
 import {
   calculateMonthlyProfitTarget,
 } from './monthly-profit-target.js?v=20260726-1'
@@ -334,6 +337,10 @@ const pendingExtensionRequests = new Map()
 const trackActiveWorkspaceRender = createRenderSignatureTracker()
 let evidenceAutoArchiveTimer = null
 let listingOutcomesController = null
+const multiAngleRetryScheduler = createMultiAngleRetryScheduler({
+  setTimeoutFn: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearTimeoutFn: (handle) => window.clearTimeout(handle),
+})
 const MONTH_LABELS = [
   '月未設定',
   '1月',
@@ -5416,14 +5423,6 @@ function currentMultiAnglePools() {
       })))
       .filter((listing) => listing.categoryId !== category.id),
     measuredRows,
-    marketGapCandidates: measuredRows.map((row) => ({
-      ...row.raw,
-      ...row.normalized,
-      keyword: row.keyword,
-      comparison: row.drilldownNode?.comparison,
-      priorityScore: row.scoreState.score ?? row.scoreState.explorationPriority,
-      source: 'measured-market-gap',
-    })),
     evergreenCandidates: measuredEventlessCandidates(),
     seasonalReferenceCandidates: currentSeasonalReferenceCandidates(),
     savedNextCycleCandidates: state.savedSeasonalReferences,
@@ -5491,8 +5490,24 @@ function nextAppMultiAngleBatch() {
   })
 }
 
+function invalidateMultiAngleRetrySchedule() {
+  multiAngleRetryScheduler.invalidate()
+}
+
+function scheduleMultiAngleRetry(delayMs) {
+  multiAngleRetryScheduler.schedule({
+    delayMs,
+    isCurrent: () => (
+      multiAngleSearchIsRunning()
+      && state.multiAngleExploration.retryQueue.length > 0
+    ),
+    dispatch: () => queueNextMultiAngleBatch(),
+  })
+}
+
 function queueNextMultiAngleBatch() {
   if (!multiAngleSearchIsRunning()) return false
+  invalidateMultiAngleRetrySchedule()
   const result = nextAppMultiAngleBatch()
   state.multiAngleExploration = result.state
   if (result.candidates.length === 0) {
@@ -5507,7 +5522,7 @@ function queueNextMultiAngleBatch() {
         .sort((left, right) => left - right)[0]
       const delayMs = Math.max(250, (nextRetryAt ?? Date.now()) - Date.now())
       setSimpleStatus('通常候補を確認しました。時間切れ候補は再試行時刻になったら続けます。')
-      window.setTimeout(() => queueNextMultiAngleBatch(), delayMs)
+      scheduleMultiAngleRetry(delayMs)
     } else {
       setSimpleStatus(result.reason === 'all-angles-exhausted'
         ? 'すべての探索角度を確認しました。'
@@ -5564,6 +5579,7 @@ function queueNextMultiAngleBatch() {
 }
 
 async function startMultiAngleSearch() {
+  invalidateMultiAngleRetrySchedule()
   const researchContext = activeResearchContext()
   const timing = classifyProductionWindow(researchContext.event)
   if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
@@ -5587,6 +5603,7 @@ async function startMultiAngleSearch() {
 }
 
 async function startNewMultiAngleCycle() {
+  invalidateMultiAngleRetrySchedule()
   const nextCycleContext = {
     event: selectedEvent(),
     category: selectedCategory(),
@@ -5626,6 +5643,7 @@ async function startNewMultiAngleCycle() {
 }
 
 function pauseMultiAngleSearch(reason = '', failureCode = '') {
+  invalidateMultiAngleRetrySchedule()
   if (!multiAngleSearchIsRunning()) return
   const candidate = currentMultiAngleBatchCandidates().find((item) => (
     state.pendingEvidenceAutomation.targetKeywords.includes(item.keyword)
@@ -5653,6 +5671,7 @@ function multiAngleWorkHasCurrentBatch() {
 }
 
 async function stopMultiAngleOrchestration(source = 'global') {
+  invalidateMultiAngleRetrySchedule()
   const transition = stopMultiAngleWork({
     exploration: state.multiAngleExploration,
     pendingEvidenceAutomation: state.pendingEvidenceAutomation,
@@ -5811,6 +5830,7 @@ function completeMultiAngleBatch() {
   }
   state.pendingEvidenceAutomation.targetKeywords = []
   if (state.multiAngleExploration.status === 'winner-found') {
+    invalidateMultiAngleRetrySchedule()
     setSimpleStatus(`A/B候補を${state.multiAngleExploration.winnerKeywords.length}/${state.multiAngleExploration.targetWinnerCount}件確保しました。今回の探索を停止します。`)
     renderAll()
     persistMarketFinderState()
@@ -5848,6 +5868,7 @@ function extensionBlockReason() {
 }
 
 function stopPendingEvidenceAutomation(message = '') {
+  invalidateMultiAngleRetrySchedule()
   if (!state.pendingEvidenceAutomation.active && !state.pendingEvidenceAutomation.scheduled) return
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
@@ -5871,6 +5892,7 @@ function pauseMultiAngleForBlockedTimingChange() {
     || state.marketplaceInsightBusy
   if (!pendingWasActive && !explorationWasActive && !marketplaceWasActive) return false
 
+  invalidateMultiAngleRetrySchedule()
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
   state.pendingEvidenceAutomation.currentStage = ''
@@ -5896,6 +5918,7 @@ function pauseMultiAngleForBlockedTimingChange() {
 }
 
 function pauseMultiAngleForInputChange() {
+  invalidateMultiAngleRetrySchedule()
   const selectedContext = {
     eventId: selectedEvent().id,
     categoryId: selectedCategory().id,

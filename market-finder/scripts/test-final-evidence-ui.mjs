@@ -309,7 +309,7 @@ test('keeps eRank narrowing query plans and the EverBee handoff on the active re
   }
 })
 
-test('exports frozen event and category metadata instead of live selector fallbacks', () => {
+test('exports row research metadata through the active-context fallback resolver', () => {
   const erankExport = app.match(/function exportErankCsv\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   const resultsExport = app.match(/function exportResultRowsCsv\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
 

@@ -130,6 +130,60 @@ test('keeps measured market gaps separate from source-angle candidates', () => {
   assert.equal(pools['market-gap'][0].keyword, 'halloween librarian shirt')
 })
 
+test('uses only measured market gaps from the active event and category', () => {
+  const measuredRow = ({
+    keyword,
+    eventId,
+    categoryId,
+  }) => ({
+    keyword,
+    raw: {
+      researchEventId: eventId,
+      researchCategoryId: categoryId,
+    },
+    normalized: {
+      metrics: {
+        etsy: { searches30d: 120 },
+        everbee: { sellingListings: 3 },
+      },
+    },
+    drilldownNode: {
+      comparison: { competitionReduction: 0.4 },
+    },
+    scoreState: {
+      score: 78,
+      explorationPriority: 70,
+    },
+  })
+  const pools = buildMultiAngleCandidatePools({
+    event: { id: 'christmas', searchTerm: 'christmas' },
+    category: { id: 'mug', searchTerm: 'mug', tags: ['coffee cup'] },
+    timingStatus: 'timely',
+    measuredRows: [
+      measuredRow({
+        keyword: 'halloween librarian shirt',
+        eventId: 'halloween',
+        categoryId: 'shirt',
+      }),
+      measuredRow({
+        keyword: 'christmas librarian mug',
+        eventId: 'christmas',
+        categoryId: 'mug',
+      }),
+      measuredRow({
+        keyword: 'evergreen librarian mug',
+        eventId: '',
+        categoryId: 'mug',
+      }),
+    ],
+  })
+
+  assert.deepEqual(
+    pools['market-gap'].map((candidate) => candidate.keyword),
+    ['christmas librarian mug'],
+  )
+})
+
 test('saved seasonal references persist as useful objects and enter only a compatible later cycle', () => {
   assert.equal(typeof candidateApi.restoreSavedSeasonalReferences, 'function')
 

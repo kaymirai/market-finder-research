@@ -484,17 +484,13 @@ export function resolveMultiAngleExportResearchContext(
   } = {},
 ) {
   const context = resolveMultiAngleResearchContext(state, selected)
+  const hasRowEventId = Object.hasOwn(row ?? {}, 'researchEventId')
+  const hasRowCategoryId = Object.hasOwn(row ?? {}, 'researchCategoryId')
   return {
-    eventId: String(
-      context.fixed
-        ? context.eventId
-        : row?.researchEventId || context.eventId || '',
-    ),
+    eventId: String(hasRowEventId ? row.researchEventId ?? '' : context.eventId ?? '').trim(),
     categoryId: String(
-      context.fixed
-        ? context.categoryId
-        : row?.researchCategoryId || context.categoryId || '',
-    ),
+      hasRowCategoryId ? row.researchCategoryId ?? '' : context.categoryId ?? '',
+    ).trim(),
   }
 }
 

@@ -1152,7 +1152,7 @@ test('fixed imports replace stale row metadata consistently and keep only explic
   })
 })
 
-test('eRank narrowing and CSV metadata keep Alpha Shirt after selectors move to Beta Mug', () => {
+test('eRank narrowing stays fixed while CSV export preserves explicit row context', () => {
   assert.equal(typeof erankQueryApi.extractErankSpecificTokens, 'function')
   assert.equal(typeof multiAngleApi.resolveMultiAngleExportResearchContext, 'function')
 
@@ -1224,12 +1224,66 @@ test('eRank narrowing and CSV metadata keep Alpha Shirt after selectors move to 
 
   assert.deepEqual(specificTokens, ['special', 'education'])
   assert.deepEqual(csvContext, {
-    eventId: 'custom-event',
-    categoryId: 'shirt',
+    eventId: 'custom-event-beta',
+    categoryId: 'mug',
   })
   assert.deepEqual(idleCsvContext, {
     eventId: 'custom-event',
     categoryId: 'mug',
+  })
+})
+
+test('CSV export keeps evergreen and historical row context but falls back for planned rows', () => {
+  const halloweenShirt = startMultiAngleExploration({}, {
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+  })
+  const selected = {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+  }
+
+  const evergreen = multiAngleApi.resolveMultiAngleExportResearchContext(
+    halloweenShirt,
+    {
+      row: {
+        researchEventId: '',
+        researchCategoryId: 'shirt',
+        intentTrack: 'evergreen',
+        resultLane: 'evergreen',
+      },
+      selected,
+    },
+  )
+  const historical = multiAngleApi.resolveMultiAngleExportResearchContext(
+    halloweenShirt,
+    {
+      row: {
+        researchEventId: 'christmas',
+        researchCategoryId: 'mug',
+      },
+      selected,
+    },
+  )
+  const planned = multiAngleApi.resolveMultiAngleExportResearchContext(
+    halloweenShirt,
+    {
+      row: {},
+      selected,
+    },
+  )
+
+  assert.deepEqual(evergreen, {
+    eventId: '',
+    categoryId: 'shirt',
+  })
+  assert.deepEqual(historical, {
+    eventId: 'christmas',
+    categoryId: 'mug',
+  })
+  assert.deepEqual(planned, {
+    eventId: 'halloween',
+    categoryId: 'shirt',
   })
 })
 
