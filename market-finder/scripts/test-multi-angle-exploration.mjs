@@ -218,6 +218,48 @@ test('recording completed rows cannot resume a batch paused by a global failure'
   assert.deepEqual(recorded.queuedEvidenceKeys, [candidateEvidenceKey(batch.candidates[0])])
 })
 
+test('global failure stays paused when another row reaches the winner target', () => {
+  const batch = nextMultiAngleBatch({
+    state: startMultiAngleExploration({}, {
+      ...context,
+      targetWinnerCount: 1,
+    }),
+    pools: {
+      'demand-neighborhood': [
+        { keyword: 'unresolved', categoryId: 'shirt', eventId: 'halloween' },
+        { keyword: 'winner', categoryId: 'shirt', eventId: 'halloween' },
+      ],
+    },
+  })
+  const paused = recordMultiAngleFailure(
+    batch.state,
+    batch.candidates[0],
+    { code: 'service-unavailable' },
+    '2026-07-30T00:00:00Z',
+  )
+  const recorded = recordMultiAngleBatch(paused, [{
+    ...batch.candidates[1],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'A',
+  }], '2026-07-30T00:01:00Z')
+
+  assert.equal(recorded.status, 'paused')
+  assert.equal(recorded.pauseReason, 'service-unavailable')
+  assert.equal(recorded.completedAt, '')
+  assert.deepEqual(recorded.winnerKeywords, ['winner'])
+  assert.deepEqual(recorded.queuedEvidenceKeys, [candidateEvidenceKey(batch.candidates[0])])
+
+  const resumed = resumeMultiAngleExploration(recorded, '2026-07-30T00:02:00Z')
+  const completed = recordMultiAngleBatch(resumed, [{
+    ...batch.candidates[0],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  }], '2026-07-30T00:03:00Z')
+
+  assert.equal(completed.status, 'winner-found')
+  assert.equal(completed.completedAt, '2026-07-30T00:03:00Z')
+})
+
 test('keeps the active event fixed when start is called with another event', () => {
   const started = startMultiAngleExploration({}, context, '2026-07-30T00:00:00Z')
   const restarted = startMultiAngleExploration(started, {
