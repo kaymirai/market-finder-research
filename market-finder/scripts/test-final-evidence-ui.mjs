@@ -2,6 +2,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import {
+  createMultiAngleExplorationState,
+  nextMultiAngleBatch,
+  recordMultiAngleBatch,
+} from '../src/multi-angle-exploration.js'
+
 const [rawHtml, rawApp, rawCss] = await Promise.all([
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
@@ -82,6 +88,79 @@ test('continues with the next evidence angle after a completed no-winner verific
   assert.match(app, /function resumeMultiAngleSearch\(/)
   assert.match(app, /recordMultiAngleBatch\(/)
   assert.match(app, /return queueNextMultiAngleBatch\(\)/)
+})
+
+test('prefers a later normal candidate without completing its retained retry angle', () => {
+  const nextAppBody = app.slice(
+    app.indexOf('function nextAppMultiAngleBatch()'),
+    app.indexOf('\nfunction ', app.indexOf('function nextAppMultiAngleBatch()') + 1),
+  )
+  const pools = {
+    'demand-neighborhood': [{
+      keyword: 'spooky nurse shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+      angleId: 'demand-neighborhood',
+    }],
+    'recent-sales': [{
+      keyword: 'ghost gardener shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+      angleId: 'recent-sales',
+    }],
+  }
+  const appState = {
+    multiAngleExploration: createMultiAngleExplorationState({
+      status: 'running',
+      activeEventId: 'halloween',
+      categoryId: 'shirt',
+      currentAngleId: 'demand-neighborhood',
+      angleIndex: 0,
+      attemptedAngles: ['demand-neighborhood'],
+      retryQueue: [{
+        evidenceKey: 'spooky nurse shirt|shirt|halloween',
+        candidate: pools['demand-neighborhood'][0],
+        attempts: 1,
+        retryAt: '1970-01-01T00:00:00.000Z',
+      }],
+    }),
+  }
+  const nextAppMultiAngleBatch = new Function(
+    'state',
+    'currentMultiAnglePools',
+    'nextMultiAngleBatch',
+    `${nextAppBody}; return nextAppMultiAngleBatch`,
+  )(appState, () => pools, nextMultiAngleBatch)
+
+  const normal = nextAppMultiAngleBatch()
+  assert.deepEqual(normal.candidates.map((candidate) => candidate.keyword), [
+    'ghost gardener shirt',
+  ])
+  assert.equal(normal.state.retryQueue.length, 1)
+  assert.doesNotMatch(
+    [...normal.state.completedAngles, ...normal.state.emptyAngles].join(','),
+    /demand-neighborhood/,
+  )
+
+  appState.multiAngleExploration = recordMultiAngleBatch(normal.state, [{
+    ...normal.candidates[0],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  }])
+  const retry = nextAppMultiAngleBatch()
+  assert.equal(retry.reason, 'retry-ready')
+  assert.deepEqual(retry.candidates.map((candidate) => candidate.keyword), [
+    'spooky nurse shirt',
+  ])
+  assert.doesNotMatch(retry.state.completedAngles.join(','), /demand-neighborhood/)
+
+  appState.multiAngleExploration = recordMultiAngleBatch(retry.state, [{
+    ...retry.candidates[0],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  }])
+  const finished = nextAppMultiAngleBatch()
+  assert.match(finished.state.completedAngles.join(','), /demand-neighborhood/)
 })
 
 test('keeps unresolved targets when a global batch failure pauses exploration', () => {

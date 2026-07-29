@@ -586,12 +586,35 @@ export function startMultiAngleExploration(state = {}, context = {}, now = '') {
   }
 }
 
+function readyMultiAngleRetryBatch(current, dueRetries) {
+  const dueKeys = new Set(dueRetries.map((entry) => entry.evidenceKey))
+  const candidates = dueRetries.map((entry) => ({
+    ...entry.candidate,
+    retryAttempts: entry.attempts,
+  }))
+  return {
+    state: {
+      ...current,
+      status: 'running',
+      queuedEvidenceKeys: uniqueStrings([
+        ...current.queuedEvidenceKeys,
+        ...dueRetries.map((entry) => entry.evidenceKey),
+      ]),
+      retryQueue: current.retryQueue.filter((entry) => !dueKeys.has(entry.evidenceKey)),
+      currentBatchCandidates: candidates,
+    },
+    candidates,
+    reason: 'retry-ready',
+  }
+}
+
 export function nextMultiAngleBatch({
   state,
   pools = {},
   angleOrder = EXPLORATION_ANGLE_ORDER,
   limit = 8,
   now = '',
+  preferNormalCandidates = false,
 } = {}) {
   let current = annotatePools(createMultiAngleExplorationState(state), pools)
   if (TERMINAL_STATUSES.has(current.status)) {
@@ -628,28 +651,8 @@ export function nextMultiAngleBatch({
   const dueRetries = current.retryQueue
     .filter((entry) => Date.parse(entry.retryAt) <= nowMs)
     .slice(0, batchLimit)
-  if (dueRetries.length > 0) {
-    const dueKeys = new Set(dueRetries.map((entry) => entry.evidenceKey))
-    return {
-      state: {
-        ...current,
-        status: 'running',
-        queuedEvidenceKeys: uniqueStrings([
-          ...current.queuedEvidenceKeys,
-          ...dueRetries.map((entry) => entry.evidenceKey),
-        ]),
-        retryQueue: current.retryQueue.filter((entry) => !dueKeys.has(entry.evidenceKey)),
-        currentBatchCandidates: dueRetries.map((entry) => ({
-          ...entry.candidate,
-          retryAttempts: entry.attempts,
-        })),
-      },
-      candidates: dueRetries.map((entry) => ({
-        ...entry.candidate,
-        retryAttempts: entry.attempts,
-      })),
-      reason: 'retry-ready',
-    }
+  if (dueRetries.length > 0 && !preferNormalCandidates) {
+    return readyMultiAngleRetryBatch(current, dueRetries)
   }
 
   const used = new Set([
@@ -713,6 +716,16 @@ export function nextMultiAngleBatch({
       candidates: unseen,
       reason: 'batch-ready',
     }
+  }
+
+  if (dueRetries.length > 0) {
+    return readyMultiAngleRetryBatch({
+      ...current,
+      attemptedAngles: [...attempted],
+      completedAngles: [...completed],
+      emptyAngles: [...empty],
+      exhaustedAngles: [...new Set([...completed, ...empty])],
+    }, dueRetries)
   }
 
   if (current.retryQueue.length > 0) {

@@ -5483,47 +5483,11 @@ function multiAngleCandidateForResearch(candidate) {
 
 function nextAppMultiAngleBatch() {
   const pools = currentMultiAnglePools()
-  const retryQueue = state.multiAngleExploration.retryQueue
-  if (retryQueue.length === 0) {
-    return nextMultiAngleBatch({
-      state: state.multiAngleExploration,
-      pools,
-      limit: 8,
-    })
-  }
-
-  const failedEvidenceKeys = state.multiAngleExploration.failedEvidenceKeys
-  const retryEvidenceKeys = retryQueue.map((entry) => entry.evidenceKey)
-  const normal = nextMultiAngleBatch({
-    state: {
-      ...state.multiAngleExploration,
-      retryQueue: [],
-      failedEvidenceKeys: [...new Set([...failedEvidenceKeys, ...retryEvidenceKeys])],
-      status: 'running',
-    },
-    pools,
-    limit: 8,
-  })
-  if (normal.candidates.length > 0) {
-    return {
-      ...normal,
-      state: {
-        ...normal.state,
-        status: 'running',
-        retryQueue,
-        failedEvidenceKeys,
-      },
-    }
-  }
   return nextMultiAngleBatch({
-    state: {
-      ...normal.state,
-      status: 'running',
-      retryQueue,
-      failedEvidenceKeys,
-    },
+    state: state.multiAngleExploration,
     pools,
     limit: 8,
+    preferNormalCandidates: state.multiAngleExploration.retryQueue.length > 0,
   })
 }
 
