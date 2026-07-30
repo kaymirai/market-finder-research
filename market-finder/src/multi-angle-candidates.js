@@ -41,6 +41,50 @@ function hasEverbeeTitleSource(candidate = {}) {
   )
 }
 
+function keywordWithoutEvent(keyword, event = {}) {
+  const phrase = normalizePhrase(keyword)
+  const eventTerm = normalizePhrase(event.searchTerm)
+  if (!phrase || !eventTerm) return ''
+  const escapedEvent = eventTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const stripped = normalizePhrase(
+    phrase.replace(new RegExp(`(^|\\s)${escapedEvent}(?=\\s|$)`, 'g'), ' '),
+  )
+  return stripped && stripped !== phrase ? stripped : ''
+}
+
+function crossSourceEvergreenCandidates(relatedCandidates, sellingTitleCandidates, event, category) {
+  const relatedByKeyword = new Map(
+    relatedCandidates.map((candidate) => [normalizePhrase(candidate.keyword), candidate]),
+  )
+  const sellingByKeyword = new Map(
+    sellingTitleCandidates.map((candidate) => [normalizePhrase(candidate.keyword), candidate]),
+  )
+  const matches = new Map()
+  const recordMatch = (keyword, related, selling) => {
+    if (!keyword || !matchesCategory(keyword, category)) return
+    matches.set(keyword, {
+      keyword,
+      eventId: '',
+      categoryId: String(category.id ?? '').trim(),
+      source: 'marketplace-insights',
+      sources: ['marketplace-insights', 'everbee-title'],
+      sourceKeywords: [related.keyword, selling.keyword],
+    })
+  }
+
+  sellingTitleCandidates.forEach((selling) => {
+    const keyword = keywordWithoutEvent(selling.keyword, event)
+    const related = relatedByKeyword.get(keyword)
+    if (related) recordMatch(keyword, related, selling)
+  })
+  relatedCandidates.forEach((related) => {
+    const keyword = keywordWithoutEvent(related.keyword, event)
+    const selling = sellingByKeyword.get(keyword)
+    if (selling) recordMatch(keyword, related, selling)
+  })
+  return [...matches.values()]
+}
+
 function optionalNumber(value) {
   if (value === null || value === undefined || value === '') return null
   const number = Number(value)
@@ -386,6 +430,15 @@ export function buildMultiAngleCandidatePools(input = {}) {
     activeEventId,
   }
   const byEvidence = new Map()
+  const relatedCandidates = (Array.isArray(input.relatedTerms) ? input.relatedTerms : [input.relatedTerms])
+    .map((candidate) => typeof candidate === 'string' ? { keyword: candidate } : candidate)
+    .filter(Boolean)
+    .filter((candidate) => candidateMatchesResearchContext(candidate, common))
+    .filter((candidate) => matchesCategory(candidate.keyword, category))
+    .map((candidate) => ({ source: 'marketplace-insights', ...candidate }))
+  const sellingTitleCandidates = (input.drilldownCandidates ?? [])
+    .filter((candidate) => candidateMatchesResearchContext(candidate, common))
+    .filter(hasEverbeeTitleSource)
 
   addCandidates(byEvidence, restoreSavedSeasonalReferences({
     saved: input.savedNextCycleCandidates,
@@ -405,12 +458,7 @@ export function buildMultiAngleCandidatePools(input = {}) {
     ...common,
     angleId: 'demand-neighborhood',
   })
-  addCandidates(byEvidence, (Array.isArray(input.relatedTerms) ? input.relatedTerms : [input.relatedTerms])
-    .map((candidate) => typeof candidate === 'string' ? { keyword: candidate } : candidate)
-    .filter(Boolean)
-    .filter((candidate) => candidateMatchesResearchContext(candidate, common))
-    .filter((candidate) => matchesCategory(candidate.keyword, category))
-    .map((candidate) => ({ source: 'marketplace-insights', ...candidate })), {
+  addCandidates(byEvidence, relatedCandidates, {
     ...common,
     angleId: 'demand-neighborhood',
   })
@@ -419,9 +467,7 @@ export function buildMultiAngleCandidatePools(input = {}) {
     ...common,
     angleId: 'attribute-combination',
   })
-  addCandidates(byEvidence, (input.drilldownCandidates ?? [])
-    .filter((candidate) => candidateMatchesResearchContext(candidate, common))
-    .filter(hasEverbeeTitleSource), {
+  addCandidates(byEvidence, sellingTitleCandidates, {
     ...common,
     angleId: 'recent-sales',
   })
@@ -444,6 +490,17 @@ export function buildMultiAngleCandidatePools(input = {}) {
   ].filter(isMarketGap), {
     ...common,
     angleId: 'market-gap',
+  })
+  addCandidates(byEvidence, crossSourceEvergreenCandidates(
+    relatedCandidates,
+    sellingTitleCandidates,
+    event,
+    category,
+  ), {
+    ...common,
+    eventId: '',
+    angleId: 'evergreen',
+    resultLane: 'evergreen',
   })
   addCandidates(byEvidence, (input.evergreenCandidates ?? [])
     .filter((candidate) => candidateMatchesResearchContext(candidate, common, {

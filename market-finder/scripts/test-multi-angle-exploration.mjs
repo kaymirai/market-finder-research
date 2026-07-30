@@ -444,6 +444,84 @@ test('prepares an exhausted cycle as fresh idle work while preserving saved refe
   assert.equal(prepared.crossNicheProposal, null)
 })
 
+test('starts a reused custom-event id with no live evidence from the archived cycle', () => {
+  const evidenceArchives = [{
+    runId: 'custom-alpha-terminal',
+    context: {
+      eventId: 'custom-event',
+      eventSnapshot: {
+        id: 'custom-event',
+        label: 'Alpha',
+        searchTerm: 'alpha',
+      },
+      categoryId: 'shirt',
+    },
+  }]
+  const prepared = multiAngleApi.prepareNewMultiAngleCycle({
+    exploration: createMultiAngleExplorationState({
+      status: 'winner-found',
+      activeEventId: 'custom-event',
+      categoryId: 'shirt',
+    }),
+    researchRows: [{
+      keyword: 'teacher shirt',
+      researchEventId: 'custom-event',
+      researchCategoryId: 'shirt',
+      eventSnapshot: {
+        id: 'custom-event',
+        label: 'Alpha',
+        searchTerm: 'alpha',
+      },
+      opportunityLabel: 'A',
+    }],
+    researchRounds: {
+      rounds: [{ id: 'multi-angle-evergreen-1' }],
+      activeRoundId: 'multi-angle-evergreen-1',
+      selectedRoundId: 'all',
+    },
+    candidateRoundId: 'multi-angle-evergreen-1',
+    candidates: [{ keyword: 'teacher shirt' }],
+    candidateCatalog: [{ keyword: 'teacher shirt' }],
+    erankQueryPlan: [{ query: 'teacher shirt' }],
+    restoredResearchSavedAt: '2026-07-30T00:00:00.000Z',
+    restoredResultsAccepted: true,
+    acceptExtensionResults: true,
+    selectedResultKey: 'teacher shirt|shirt|custom-event',
+    seoPlan: { keyword: 'teacher shirt' },
+    evidenceArchives,
+  }, {
+    activeEventId: 'custom-event',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'custom-event',
+      label: 'Beta',
+      searchTerm: 'beta',
+    },
+    categorySnapshot: {
+      id: 'shirt',
+      label: 'Shirt',
+      searchTerm: 'shirt',
+    },
+  })
+
+  assert.deepEqual(prepared.evidenceArchives, evidenceArchives)
+  assert.deepEqual(prepared.researchRows, [])
+  assert.deepEqual(prepared.researchRounds, {
+    rounds: [],
+    activeRoundId: '',
+    selectedRoundId: 'all',
+  })
+  assert.equal(prepared.candidateRoundId, '')
+  assert.deepEqual(prepared.candidates, [])
+  assert.deepEqual(prepared.candidateCatalog, [])
+  assert.deepEqual(prepared.erankQueryPlan, [])
+  assert.equal(prepared.restoredResearchSavedAt, '')
+  assert.equal(prepared.restoredResultsAccepted, false)
+  assert.equal(prepared.acceptExtensionResults, false)
+  assert.equal(prepared.selectedResultKey, '')
+  assert.equal(prepared.seoPlan, null)
+})
+
 test('reload pauses active multi-angle work without losing its batch retry or targets', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 

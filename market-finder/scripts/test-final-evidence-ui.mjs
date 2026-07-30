@@ -541,6 +541,23 @@ test('new-cycle button persists terminal evidence before resetting or starting w
     newCycleBody.indexOf('if (!terminalEvidencePersisted) return false')
       < newCycleBody.indexOf('state.multiAngleExploration = prepared.exploration'),
   )
+  for (const field of [
+    'researchRows',
+    'researchRounds',
+    'candidateRoundId',
+    'erankQueryPlan',
+    'restoredResearchSavedAt',
+    'restoredResultsAccepted',
+    'acceptExtensionResults',
+    'selectedResultKey',
+    'seoPlan',
+  ]) {
+    assert.match(
+      newCycleBody,
+      new RegExp(`state\\.${field} = prepared\\.${field}`),
+      `new-cycle must install the prepared ${field} boundary`,
+    )
+  }
   assert.match(clickBody, /await startNewMultiAngleCycle\(\)/)
 })
 

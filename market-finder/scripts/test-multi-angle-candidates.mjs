@@ -414,6 +414,40 @@ test('places evergreen and timely other events outside the active-event lane', (
   assert.equal(pools['seasonal-reference'][0].resultLane, 'seasonal-reference')
 })
 
+test('promotes an event-stripped phrase to evergreen only when related and selling-title sources match exactly', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    relatedTerms: [
+      { keyword: 'teacher shirt', source: 'marketplace-insights' },
+      { keyword: 'halloween nurse shirt', source: 'marketplace-insights' },
+    ],
+    drilldownCandidates: [{
+      keyword: 'halloween teacher shirt',
+      source: 'everbee-title',
+    }, {
+      keyword: 'halloween gardener shirt',
+      source: 'everbee-title',
+    }],
+  })
+
+  assert.deepEqual(
+    pools.evergreen.map((candidate) => ({
+      keyword: candidate.keyword,
+      eventId: candidate.eventId,
+      resultLane: candidate.resultLane,
+      sources: candidate.sources,
+      sourceKeywords: candidate.sourceKeywords,
+    })),
+    [{
+      keyword: 'teacher shirt',
+      eventId: '',
+      resultLane: 'evergreen',
+      sources: ['marketplace-insights', 'everbee-title'],
+      sourceKeywords: ['teacher shirt', 'halloween teacher shirt'],
+    }],
+  )
+})
+
 test('does not allow a raw event lane to promote a timely other-event reference', () => {
   const pools = buildMultiAngleCandidatePools({
     ...base,

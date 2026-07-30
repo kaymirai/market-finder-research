@@ -152,7 +152,7 @@ import {
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260730-7'
+} from './multi-angle-candidates.js?v=20260730-8'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
@@ -179,7 +179,7 @@ import {
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260730-15'
+} from './multi-angle-exploration.js?v=20260730-16'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -215,7 +215,7 @@ const SEARCH_SEED_PREVIEW_LIMIT = 6
 const FINAL_EVIDENCE_BATCH_SIZE = 50
 const EVIDENCE_ARCHIVE_LOAD_LIMIT = 12
 const MARKETPLACE_QUERY_COOLDOWN_MS = 12_000
-const REQUIRED_EXTENSION_VERSION = '1.38'
+const REQUIRED_EXTENSION_VERSION = '1.39'
 const EVIDENCE_SESSION_ID = `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 const DISCOVERY_LANE_LABELS = {
   motif: 'モチーフ',
@@ -5831,6 +5831,15 @@ async function startNewMultiAngleCycle() {
     marketplaceInsightMessage: state.marketplaceInsightMessage,
     candidates: state.candidates,
     candidateCatalog: state.candidateCatalog,
+    researchRows: state.researchRows,
+    researchRounds: state.researchRounds,
+    candidateRoundId: state.candidateRoundId,
+    erankQueryPlan: state.erankQueryPlan,
+    restoredResearchSavedAt: state.restoredResearchSavedAt,
+    restoredResultsAccepted: state.restoredResultsAccepted,
+    acceptExtensionResults: state.acceptExtensionResults,
+    selectedResultKey: state.selectedResultKey,
+    seoPlan: state.seoPlan,
     crossNicheProposal: state.crossNicheProposal,
   }, cycleContext)
   state.multiAngleExploration = prepared.exploration
@@ -5839,9 +5848,17 @@ async function startNewMultiAngleCycle() {
   state.marketplaceInsightMessage = prepared.marketplaceInsightMessage
   state.candidates = prepared.candidates
   state.candidateCatalog = prepared.candidateCatalog
+  state.researchRows = prepared.researchRows
+  state.researchRounds = prepared.researchRounds
+  state.candidateRoundId = prepared.candidateRoundId
+  state.erankQueryPlan = prepared.erankQueryPlan
+  state.restoredResearchSavedAt = prepared.restoredResearchSavedAt
+  state.restoredResultsAccepted = prepared.restoredResultsAccepted
+  state.acceptExtensionResults = prepared.acceptExtensionResults
+  state.selectedResultKey = prepared.selectedResultKey
+  state.seoPlan = prepared.seoPlan
   state.crossNicheProposal = prepared.crossNicheProposal
   state.crossNicheWorkflow = createCrossNicheWorkflowState()
-  state.erankQueryPlan = []
   renderAll()
   persistMarketFinderState()
 

@@ -5,11 +5,14 @@ import { extensionResultsImportMode } from '../src/research-flow.js'
 import { deriveErankCaptureUiState } from '../src/research-console-ui.js'
 
 const root = new URL('../', import.meta.url)
-const [html, app, styles] = await Promise.all([
+const [html, app, styles, extensionManifestText, readme] = await Promise.all([
   readFile(new URL('index.html', root), 'utf8'),
   readFile(new URL('src/app.js', root), 'utf8'),
   readFile(new URL('styles.css', root), 'utf8'),
+  readFile(new URL('../etsy-chrome-extension/manifest.json', root), 'utf8'),
+  readFile(new URL('README.md', root), 'utf8'),
 ])
+const extensionManifest = JSON.parse(extensionManifestText)
 
 function position(id) {
   const index = html.indexOf(`id="${id}"`)
@@ -320,6 +323,15 @@ test('always states the next action and why a control cannot be pressed', () => 
   // A version checked before the bridge has spoken is unknown, not wrong.
   assert.match(app, /if \(!state\.extensionVersion\) \{[\s\S]{0,240}await new Promise/)
   assert.match(styles, /\.action-block-reason/)
+})
+
+test('requires and documents the exact installed extension manifest version', () => {
+  const requiredVersion = app.match(/const REQUIRED_EXTENSION_VERSION = '([^']+)'/)?.[1]
+
+  assert.equal(extensionManifest.version, '1.39')
+  assert.equal(requiredVersion, extensionManifest.version)
+  assert.match(readme, /バージョンが `1\.39`/)
+  assert.match(html, /拡張バージョン 1\.39/)
 })
 
 test('dispatches only the selected stage detail renderers', () => {

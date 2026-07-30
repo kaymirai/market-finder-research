@@ -299,11 +299,24 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
   })
   return {
     ...snapshot,
+    researchRows: [],
+    researchRounds: {
+      rounds: [],
+      activeRoundId: '',
+      selectedRoundId: 'all',
+    },
+    candidateRoundId: '',
     marketplaceInsightPlan: null,
     marketplaceInsightMessage: '',
     candidates: [],
     candidateCatalog: [],
+    erankQueryPlan: [],
     crossNicheProposal: null,
+    restoredResearchSavedAt: '',
+    restoredResultsAccepted: false,
+    acceptExtensionResults: false,
+    selectedResultKey: '',
+    seoPlan: null,
     exploration,
     pendingEvidenceAutomation: {
       ...pending,
