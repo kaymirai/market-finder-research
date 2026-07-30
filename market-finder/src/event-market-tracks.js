@@ -31,6 +31,9 @@ export function eventSignalTerms(options = {}) {
   const profile = getBroadEventDiscoveryProfile(options)
   return unique([
     event.searchTerm,
+    event.label,
+    event.displayTerm,
+    event.name,
     ...(event.seasonalSignals ?? []),
     ...(profile.lanes?.motif ?? []),
     ...(profile.lanes?.moment ?? []),

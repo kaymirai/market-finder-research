@@ -482,6 +482,37 @@ test('does not call a phrase evergreen when another known event remains after re
   assert.deepEqual(pools.evergreen, [])
 })
 
+test('recognizes another event by its formal label without losing ordinary evergreen phrases', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    relatedTerms: [{
+      keyword: 'teacher shirt',
+      source: 'marketplace-insights',
+    }, {
+      keyword: 'independence day teacher shirt',
+      source: 'marketplace-insights',
+    }, {
+      keyword: '4th of july teacher shirt',
+      source: 'marketplace-insights',
+    }],
+    drilldownCandidates: [{
+      keyword: 'halloween teacher shirt',
+      source: 'everbee-title',
+    }, {
+      keyword: 'halloween independence day teacher shirt',
+      source: 'everbee-title',
+    }, {
+      keyword: 'halloween 4th of july teacher shirt',
+      source: 'everbee-title',
+    }],
+  })
+
+  assert.deepEqual(
+    pools.evergreen.map((candidate) => candidate.keyword),
+    ['teacher shirt'],
+  )
+})
+
 test('does not allow a raw event lane to promote a timely other-event reference', () => {
   const pools = buildMultiAngleCandidatePools({
     ...base,

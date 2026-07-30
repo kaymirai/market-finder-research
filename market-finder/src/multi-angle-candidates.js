@@ -2,7 +2,7 @@ import {
   MARKET_EVENTS,
   normalizePhrase,
 } from '../../shared/market-keyword-engine/index.js?v=20260730-13'
-import { eventSignalTerms } from './event-market-tracks.js?v=20260730-3'
+import { eventSignalTerms } from './event-market-tracks.js?v=20260730-4'
 
 export const EXPLORATION_ANGLE_ORDER = Object.freeze([
   'demand-neighborhood',

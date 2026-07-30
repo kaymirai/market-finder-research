@@ -79,7 +79,7 @@ import {
   classifyEventMarketTrack,
   normalizeResearchMarketHistory,
   prioritizeEventCandidates,
-} from './event-market-tracks.js?v=20260730-3'
+} from './event-market-tracks.js?v=20260730-4'
 import {
   bindResearchStageTabs,
   createRenderSignatureTracker,
@@ -152,7 +152,7 @@ import {
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260730-9'
+} from './multi-angle-candidates.js?v=20260730-10'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
