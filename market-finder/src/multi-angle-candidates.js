@@ -1,4 +1,8 @@
-import { normalizePhrase } from '../../shared/market-keyword-engine/index.js'
+import {
+  MARKET_EVENTS,
+  normalizePhrase,
+} from '../../shared/market-keyword-engine/index.js?v=20260730-13'
+import { eventSignalTerms } from './event-market-tracks.js?v=20260730-3'
 
 export const EXPLORATION_ANGLE_ORDER = Object.freeze([
   'demand-neighborhood',
@@ -52,6 +56,18 @@ function keywordWithoutEvent(keyword, event = {}) {
   return stripped && stripped !== phrase ? stripped : ''
 }
 
+function phraseContainsTerm(phrase, term) {
+  const normalizedPhrase = ` ${normalizePhrase(phrase)} `
+  const normalizedTerm = normalizePhrase(term)
+  return Boolean(normalizedTerm) && normalizedPhrase.includes(` ${normalizedTerm} `)
+}
+
+function knownOtherEventSignals(activeEventId) {
+  return normalizedList(MARKET_EVENTS
+    .filter((event) => event.id !== 'auto-discovery' && event.id !== activeEventId)
+    .flatMap((event) => eventSignalTerms({ eventId: event.id })))
+}
+
 function crossSourceEvergreenCandidates(relatedCandidates, sellingTitleCandidates, event, category) {
   const relatedByKeyword = new Map(
     relatedCandidates.map((candidate) => [normalizePhrase(candidate.keyword), candidate]),
@@ -59,15 +75,27 @@ function crossSourceEvergreenCandidates(relatedCandidates, sellingTitleCandidate
   const sellingByKeyword = new Map(
     sellingTitleCandidates.map((candidate) => [normalizePhrase(candidate.keyword), candidate]),
   )
+  const otherEventSignals = knownOtherEventSignals(event.id)
   const matches = new Map()
   const recordMatch = (keyword, related, selling) => {
-    if (!keyword || !matchesCategory(keyword, category)) return
+    if (
+      !keyword
+      || !matchesCategory(keyword, category)
+      || otherEventSignals.some((term) => phraseContainsTerm(keyword, term))
+    ) return
+    const sources = normalizedSources([
+      related.source,
+      ...(related.sources ?? []),
+      selling.source,
+      ...(selling.sources ?? []),
+    ])
+    if (sources.length < 2) return
     matches.set(keyword, {
       keyword,
       eventId: '',
       categoryId: String(category.id ?? '').trim(),
-      source: 'marketplace-insights',
-      sources: ['marketplace-insights', 'everbee-title'],
+      source: sources[0],
+      sources,
       sourceKeywords: [related.keyword, selling.keyword],
     })
   }

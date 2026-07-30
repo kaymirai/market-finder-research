@@ -3,7 +3,7 @@ import {
   getBroadEventDiscoveryProfile,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260720-12'
+} from '../../shared/market-keyword-engine/index.js?v=20260730-13'
 
 export const EVENT_MARKET_TRACKS = {
   eventSpecific: 'event-specific',
@@ -26,7 +26,7 @@ function phraseHasTerm(phrase, term) {
   ))
 }
 
-function eventSignalTerms(options = {}) {
+export function eventSignalTerms(options = {}) {
   const event = resolveMarketEvent(options)
   const profile = getBroadEventDiscoveryProfile(options)
   return unique([

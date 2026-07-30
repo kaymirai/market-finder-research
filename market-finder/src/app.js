@@ -37,7 +37,7 @@ import {
   learnedBuyerIntentSignals,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260726-12'
+} from '../../shared/market-keyword-engine/index.js?v=20260730-13'
 import {
   createMemoizedAnalysis,
 } from './research-performance.js?v=20260720-1'
@@ -79,7 +79,7 @@ import {
   classifyEventMarketTrack,
   normalizeResearchMarketHistory,
   prioritizeEventCandidates,
-} from './event-market-tracks.js?v=20260720-1'
+} from './event-market-tracks.js?v=20260730-3'
 import {
   bindResearchStageTabs,
   createRenderSignatureTracker,
@@ -152,7 +152,7 @@ import {
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260730-8'
+} from './multi-angle-candidates.js?v=20260730-9'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,

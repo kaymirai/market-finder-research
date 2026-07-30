@@ -448,6 +448,40 @@ test('promotes an event-stripped phrase to evergreen only when related and selli
   )
 })
 
+test('does not invent cross-source evergreen provenance when both observations came from EverBee titles', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    relatedTerms: [{
+      keyword: 'teacher shirt',
+      source: 'everbee-title',
+      sources: ['everbee-title'],
+    }],
+    drilldownCandidates: [{
+      keyword: 'halloween teacher shirt',
+      source: 'everbee-title',
+      sources: ['everbee-title'],
+    }],
+  })
+
+  assert.deepEqual(pools.evergreen, [])
+})
+
+test('does not call a phrase evergreen when another known event remains after removing the active event', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    relatedTerms: [{
+      keyword: 'thanksgiving teacher shirt',
+      source: 'marketplace-insights',
+    }],
+    drilldownCandidates: [{
+      keyword: 'halloween thanksgiving teacher shirt',
+      source: 'everbee-title',
+    }],
+  })
+
+  assert.deepEqual(pools.evergreen, [])
+})
+
 test('does not allow a raw event lane to promote a timely other-event reference', () => {
   const pools = buildMultiAngleCandidatePools({
     ...base,

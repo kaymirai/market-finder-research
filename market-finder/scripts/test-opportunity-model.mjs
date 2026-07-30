@@ -1549,6 +1549,56 @@ test('prefers vocabulary from the current market over a larger unrelated event',
   assert.equal(learned[0].contextLevel, 'identity')
 })
 
+test('ranks a custom-event archive as event context only when its fixed snapshot matches', () => {
+  const alphaSnapshot = {
+    id: 'custom-event',
+    label: 'Alpha Launch',
+    searchTerm: 'alpha launch',
+    displayTerm: 'Alpha Launch',
+  }
+  const record = {
+    version: 3,
+    runId: 'custom-alpha-1',
+    capturedAt: '2026-07-20T00:00:00Z',
+    categoryId: 'shirt',
+    eventId: 'custom-event',
+    context: { eventSnapshot: alphaSnapshot },
+    demandKeywords: [{ keyword: 'retro teacher shirt', etsySearches30d: 80 }],
+    supplyListings: [],
+  }
+  const analyze = (eventSnapshot) => analyzeMarketplaceVocabulary([record], {
+    categoryId: 'shirt',
+    eventId: 'custom-event',
+    eventSnapshot,
+    now: '2026-07-26T00:00:00Z',
+  }).rows.find((row) => row.signalType === 'modifier' && row.phrase === 'retro')
+
+  const matching = analyze(alphaSnapshot)
+  const different = analyze({
+    id: 'custom-event',
+    label: 'Beta Launch',
+    searchTerm: 'beta launch',
+    displayTerm: 'Beta Launch',
+  })
+
+  assert.equal(matching.contextLevel, 'event')
+  assert.equal(matching.bestContextRank, 3)
+  assert.equal(different.contextLevel, 'category')
+  assert.equal(different.bestContextRank, 2)
+
+  const ordinary = analyzeMarketplaceVocabulary([{
+    ...record,
+    eventId: 'halloween',
+    context: {},
+  }], {
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    now: '2026-07-26T00:00:00Z',
+  }).rows.find((row) => row.signalType === 'modifier' && row.phrase === 'retro')
+  assert.equal(ordinary.contextLevel, 'event')
+  assert.equal(ordinary.bestContextRank, 3)
+})
+
 test('keeps repeat observations across dates but deduplicates one saved run', () => {
   const base = {
     version: 2,

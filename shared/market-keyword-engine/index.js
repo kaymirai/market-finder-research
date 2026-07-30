@@ -2463,12 +2463,38 @@ function uniqueContainedPhrases(value, phrases = []) {
   ))
 }
 
+function marketplaceEventSnapshot(record = {}) {
+  return record.eventSnapshot ?? record.context?.eventSnapshot
+}
+
+function marketplaceEventSnapshotKey(snapshot = {}) {
+  return [
+    String(snapshot?.id ?? '').trim(),
+    normalizePhrase(snapshot?.searchTerm),
+    normalizePhrase(snapshot?.label),
+    normalizePhrase(snapshot?.displayTerm),
+  ].join('|')
+}
+
+function matchingCustomEventSnapshots(record = {}, options = {}) {
+  const recordKey = marketplaceEventSnapshotKey(marketplaceEventSnapshot(record))
+  return recordKey !== '|||'
+    && recordKey === marketplaceEventSnapshotKey(options.eventSnapshot)
+}
+
 function marketplaceContext(record = {}, options = {}) {
   const recordIdentities = splitSeedText(record.identitySeeds)
   const targetIdentities = splitSeedText(options.identitySeeds)
   const identityMatch = recordIdentities.some((identity) => targetIdentities.includes(identity))
   if (identityMatch) return { level: 'identity', rank: 4 }
-  if (record.eventId && record.eventId === options.eventId) return { level: 'event', rank: 3 }
+  if (
+    record.eventId
+    && record.eventId === options.eventId
+    && (
+      record.eventId !== 'custom-event'
+      || matchingCustomEventSnapshots(record, options)
+    )
+  ) return { level: 'event', rank: 3 }
   if (record.categoryId && record.categoryId === options.categoryId) return { level: 'category', rank: 2 }
   return { level: 'global', rank: 1 }
 }
