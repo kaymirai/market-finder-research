@@ -95,12 +95,19 @@ export function deriveResearchHeaderState(input = {}) {
   const marketplaceActive = Boolean(input.marketplaceActive)
   const extensionMode = String(input.extensionState?.mode ?? '').toLowerCase()
   const extensionService = extensionMode.includes('erank') ? 'eRank' : 'EverBee'
+  const multiAngleActive = ['running', 'paused'].includes(
+    String(input.multiAngleStatus ?? '').trim(),
+  )
   const service = marketplaceActive ? 'Etsy公式' : extensionActive ? extensionService : ''
   const keyword = marketplaceActive
     ? String(input.marketplaceKeyword ?? '').trim()
     : String(input.extensionState?.currentKeyword ?? '').trim()
-  const canStop = marketplaceActive || extensionActive
-  const stopKind = marketplaceActive ? 'marketplace' : extensionActive ? 'extension' : ''
+  const canStop = marketplaceActive || extensionActive || multiAngleActive
+  const stopKind = marketplaceActive
+    ? 'marketplace'
+    : extensionActive
+      ? 'extension'
+      : multiAngleActive ? 'multi-angle' : ''
 
   return {
     condition: String(input.condition ?? '').trim() || '条件未設定',
@@ -112,7 +119,9 @@ export function deriveResearchHeaderState(input = {}) {
       ? 'Etsy公式の自動確認を停止します'
       : extensionActive
         ? `${extensionService}調査を停止します`
-        : '停止できる調査はありません',
+        : multiAngleActive
+          ? '複数角度の探索を停止します'
+          : '停止できる調査はありません',
   }
 }
 

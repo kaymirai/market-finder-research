@@ -6,6 +6,7 @@ import {
   analyzeMarketplaceVocabulary,
   buildKeywordClusterKey,
   buildCrossNicheDrilldown,
+  buildTimelySeasonalSuggestions,
   buildMarketplaceInsightPlan,
   generateBroadMarketQueries,
   generateBroadEventCandidates,
@@ -25,6 +26,7 @@ import {
   scoreErankOpportunity,
   suggestBuyerIdentities,
   classifyCandidateKeyword,
+  classifyProductionWindow,
   detectRiskTerms,
   clusterKeywordCandidates,
   getMarketTiming,
@@ -35,10 +37,9 @@ import {
   learnedBuyerIntentSignals,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260726-12'
+} from '../../shared/market-keyword-engine/index.js?v=20260730-13'
 import {
   createMemoizedAnalysis,
-  mergeRowsByKey,
 } from './research-performance.js?v=20260720-1'
 import {
   buildEtsyCandidatesFromPool,
@@ -55,8 +56,9 @@ import {
   attachErankQueryProvenance,
   buildErankBaseFollowUpPlan,
   buildErankQueryPlan,
+  extractErankSpecificTokens,
   summarizeErankQueryPlan,
-} from './erank-query-plan.js?v=20260725-4'
+} from './erank-query-plan.js?v=20260730-1'
 import {
   DESIGN_CLUSTER_COUNT,
   DESIGN_PER_CLUSTER_MAX,
@@ -70,14 +72,14 @@ import {
   startResearchRound,
   summarizeOpportunityCounts,
   updateResearchRound,
-} from './research-rounds.js?v=20260726-1'
+} from './research-rounds.js?v=20260730-1'
 import {
   EVENT_MARKET_TRACKS,
   buildResearchMarketHistory,
   classifyEventMarketTrack,
   normalizeResearchMarketHistory,
   prioritizeEventCandidates,
-} from './event-market-tracks.js?v=20260720-1'
+} from './event-market-tracks.js?v=20260730-4'
 import {
   bindResearchStageTabs,
   createRenderSignatureTracker,
@@ -93,7 +95,7 @@ import {
   selectResearchQueueFilter,
   selectResearchStage,
   stableRenderSignature,
-} from './research-console-ui.js?v=20260723-1'
+} from './research-console-ui.js?v=20260730-1'
 import {
   buildFinalEvidenceKeywordPool,
   deriveFinalEvidenceState,
@@ -138,17 +140,49 @@ import {
 import {
   buildNextWinningNicheBatch,
   createWinningNicheAutomation,
-  evaluateWinningNicheRows,
-  pauseWinningNicheAutomation,
-  resetWinningNicheCycle,
-  resumeWinningNicheAutomation,
+  migrateWinningNicheState,
   startWinningNicheAutomation,
-  stopWinningNicheAutomation,
-} from './winning-niche-automation.js?v=20260727-2'
+} from './winning-niche-automation.js?v=20260730-1'
 import {
-  NICHE_AXIS_ORDER,
-  NICHE_TAXONOMY,
-} from './niche-taxonomy.js?v=20260726-1'
+  EXPLORATION_ANGLE_ORDER,
+  adjacentProductListingsFromLearningRecords,
+  buildMultiAngleCandidatePools,
+  candidateMatchesResearchContext,
+  candidateEvidenceKey,
+  marketplaceRelatedTermCandidates,
+  normalizeArchivedSupplyListings,
+  restoreSavedSeasonalReferences,
+} from './multi-angle-candidates.js?v=20260730-10'
+import {
+  backfillMultiAngleResearchSnapshots,
+  createMultiAngleExplorationState,
+  hasMeaningfulMultiAngleContext,
+  multiAngleAutomationControl,
+  nextMultiAngleBatch,
+  pauseMultiAngleForContextChange,
+  pauseMultiAngleExploration,
+  pauseMultiAngleWorkAfterReload,
+  persistTerminalMultiAngleEvidenceBeforeReset,
+  prepareNewMultiAngleCycle,
+  recordMultiAngleBatch,
+  recordMultiAngleFailure,
+  mergeResearchRowsByContext,
+  researchRowContextKey,
+  researchRowForMultiAngleCandidate,
+  resolveMultiAngleCandidateResearchContext,
+  resolveMultiAngleExportResearchContext,
+  resolveMultiAngleImportedResearchContext,
+  resolveMultiAngleResearchContext,
+  resolveMultiAngleResearchOptions,
+  restoreMarketplaceInsightPlanForResearchFlow,
+  restoredMultiAngleTargetKeywords,
+  resumeMultiAngleExploration,
+  startMultiAngleExploration,
+  stopMultiAngleWork,
+} from './multi-angle-exploration.js?v=20260730-16'
+import {
+  createMultiAngleRetryScheduler,
+} from './multi-angle-retry-scheduler.js?v=20260730-1'
 import {
   calculateMonthlyProfitTarget,
 } from './monthly-profit-target.js?v=20260726-1'
@@ -181,7 +215,7 @@ const SEARCH_SEED_PREVIEW_LIMIT = 6
 const FINAL_EVIDENCE_BATCH_SIZE = 50
 const EVIDENCE_ARCHIVE_LOAD_LIMIT = 12
 const MARKETPLACE_QUERY_COOLDOWN_MS = 12_000
-const REQUIRED_EXTENSION_VERSION = '1.38'
+const REQUIRED_EXTENSION_VERSION = '1.39'
 const EVIDENCE_SESSION_ID = `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 const DISCOVERY_LANE_LABELS = {
   motif: 'モチーフ',
@@ -215,6 +249,14 @@ const MARKETPLACE_STOP_LABELS = {
   'candidate-pool-depleted': '有効候補が5語未満',
   'targeted-batch': '指定した候補の確認完了',
 }
+const EXPLORATION_ANGLE_LABELS = Object.freeze({
+  'demand-neighborhood': '需要周辺',
+  'attribute-combination': '属性組み合わせ',
+  'recent-sales': '新着販売',
+  'adjacent-product': '別商品種',
+  'market-gap': '市場の空白',
+  evergreen: '大市場・通年',
+})
 
 const state = {
   candidates: [],
@@ -270,6 +312,9 @@ const state = {
   selectedResultKey: '',
   finalEvidenceFilter: 'all',
   finalEvidenceCount: 0,
+  timingOverrideConfirmed: false,
+  savedSeasonalReferenceKeys: [],
+  savedSeasonalReferences: [],
   pendingEvidenceAutomation: {
     active: false,
     scheduled: false,
@@ -280,6 +325,7 @@ const state = {
   },
   marketplaceRetryState: normalizeMarketplaceRetryState(),
   restoredAutomationPending: false,
+  multiAngleExploration: createMultiAngleExplorationState(),
   winningNicheAutomation: createWinningNicheAutomation(),
   listingResearchTargetSettings: normalizeListingResearchTarget(),
   recentTrendKeywords: new Set(),
@@ -302,6 +348,10 @@ const pendingExtensionRequests = new Map()
 const trackActiveWorkspaceRender = createRenderSignatureTracker()
 let evidenceAutoArchiveTimer = null
 let listingOutcomesController = null
+const multiAngleRetryScheduler = createMultiAngleRetryScheduler({
+  setTimeoutFn: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearTimeoutFn: (handle) => window.clearTimeout(handle),
+})
 const MONTH_LABELS = [
   '月未設定',
   '1月',
@@ -447,6 +497,15 @@ const elements = {
   winningNicheAutomationRail: document.querySelector('#winningNicheAutomationRail'),
   winningNicheAutomationStatus: document.querySelector('#winningNicheAutomationStatus'),
   winningNicheAutomationToggle: document.querySelector('#winningNicheAutomationToggle'),
+  marketTimingGate: document.querySelector('#marketTimingGate'),
+  marketTimingStatus: document.querySelector('#marketTimingStatus'),
+  marketTimingDetail: document.querySelector('#marketTimingDetail'),
+  marketTimingOverrideBtn: document.querySelector('#marketTimingOverrideBtn'),
+  multiAngleRail: document.querySelector('#multiAngleRail'),
+  explorationAngleStatus: document.querySelector('#explorationAngleStatus'),
+  activeEventResultLane: document.querySelector('#activeEventResultLane'),
+  evergreenResultLane: document.querySelector('#evergreenResultLane'),
+  seasonalReferenceLane: document.querySelector('#seasonalReferenceLane'),
   monthlyListingTargetInput: document.querySelector('#monthlyListingTargetInput'),
   researchRunsPerMonthInput: document.querySelector('#researchRunsPerMonthInput'),
   listingsPerWinnerInput: document.querySelector('#listingsPerWinnerInput'),
@@ -713,6 +772,9 @@ function persistMarketFinderState() {
       selectedResultKey: state.selectedResultKey,
       profitInputsByKeyword: state.profitInputsByKeyword,
       finalEvidenceFilter: state.finalEvidenceFilter,
+      savedSeasonalReferenceKeys: state.savedSeasonalReferenceKeys,
+      savedSeasonalReferences: state.savedSeasonalReferences,
+      multiAngleExploration: state.multiAngleExploration,
       winningNicheAutomation: state.winningNicheAutomation,
       pendingEvidenceAutomation: {
         ...state.pendingEvidenceAutomation,
@@ -825,6 +887,12 @@ function restorePersistedState() {
     .includes(savedState.finalEvidenceFilter)
     ? savedState.finalEvidenceFilter
     : 'all'
+  state.savedSeasonalReferenceKeys = Array.isArray(savedState.savedSeasonalReferenceKeys)
+    ? [...new Set(savedState.savedSeasonalReferenceKeys.map((key) => String(key ?? '').trim()).filter(Boolean))]
+    : []
+  state.savedSeasonalReferences = restoreSavedSeasonalReferences({
+    saved: savedState.savedSeasonalReferences,
+  })
   state.listingResearchTargetSettings = normalizeListingResearchTarget(
     savedState.listingResearchTargetSettings,
   )
@@ -838,31 +906,102 @@ function restorePersistedState() {
     ...savedState.winningNicheAutomation,
     targetWinnerCount: restoredWinnerTarget,
   })
+  state.multiAngleExploration = savedState.multiAngleExploration
+    ? createMultiAngleExplorationState({
+        ...savedState.multiAngleExploration,
+        targetWinnerCount: restoredWinnerTarget,
+      })
+    : createMultiAngleExplorationState({
+        ...migrateWinningNicheState(savedState.winningNicheAutomation),
+        targetWinnerCount: restoredWinnerTarget,
+      })
+  const selectedRestoreEvent = selectedEvent()
+  const selectedRestoreCategory = selectedCategory()
+  const restoredEvent = state.multiAngleExploration.activeEventId === selectedRestoreEvent.id
+    ? selectedRestoreEvent
+    : resolveMarketEvent({ eventId: state.multiAngleExploration.activeEventId })
+  const restoredCategory = PRODUCT_CATEGORIES.find(
+    (category) => category.id === state.multiAngleExploration.categoryId,
+  ) ?? selectedRestoreCategory
+  state.multiAngleExploration = backfillMultiAngleResearchSnapshots(
+    state.multiAngleExploration,
+    {
+      eventSnapshot: researchEventSnapshot(restoredEvent),
+      categorySnapshot: restoredCategory,
+    },
+  )
+  const restoringMultiAngleWork = hasMeaningfulMultiAngleContext(
+    state.multiAngleExploration,
+  )
+  const compatibleMarketplaceInsightPlan = restoreMarketplaceInsightPlanForResearchFlow(
+    state.marketplaceInsightPlan,
+    {
+      exploration: state.multiAngleExploration,
+      ordinaryContext: {
+        eventId: selectedRestoreEvent.id,
+        categoryId: selectedRestoreCategory.id,
+        eventSnapshot: researchEventSnapshot(selectedRestoreEvent),
+        categorySnapshot: selectedRestoreCategory,
+      },
+    },
+  )
+  if (!compatibleMarketplaceInsightPlan) state.marketplaceInsightMessage = ''
+  state.marketplaceInsightPlan = compatibleMarketplaceInsightPlan
+  state.savedSeasonalReferences = restoreSavedSeasonalReferences({
+    saved: state.savedSeasonalReferences,
+    legacyKeys: state.savedSeasonalReferenceKeys,
+    availableCandidates: restorableSeasonalReferenceCandidates(),
+  })
+  state.savedSeasonalReferenceKeys = [...new Set([
+    ...state.savedSeasonalReferenceKeys,
+    ...state.savedSeasonalReferences.map(explorationResultKey),
+  ])]
+  const savedPendingTargets = Array.isArray(savedState.pendingEvidenceAutomation?.targetKeywords)
+    ? savedState.pendingEvidenceAutomation.targetKeywords
+    : []
+  const restoredMultiAngleTargets = restoredMultiAngleTargetKeywords(
+    state.multiAngleExploration,
+    savedPendingTargets,
+  )
+  const savedPendingForContext = restoringMultiAngleWork
+    ? {
+        ...savedState.pendingEvidenceAutomation,
+        active: savedState.pendingEvidenceAutomation?.active === true
+          && restoredMultiAngleTargets.length > 0,
+        targetKeywords: restoredMultiAngleTargets,
+      }
+    : savedState.pendingEvidenceAutomation
+  const legacyRestoreAutomation = restoringMultiAngleWork
+    ? {
+        status: state.multiAngleExploration.status,
+        queuedKeywords: restoredMultiAngleTargets,
+      }
+    : {
+        status: state.marketplaceInsightPlan
+          || savedState.pendingEvidenceAutomation?.active === true
+          ? 'running'
+          : state.winningNicheAutomation.status,
+        queuedKeywords: state.winningNicheAutomation.queuedKeywords,
+      }
   state.pendingEvidenceAutomation = restorePendingEvidenceAutomation({
-    saved: savedState.pendingEvidenceAutomation,
-    winningNicheAutomation: state.winningNicheAutomation,
+    saved: savedPendingForContext,
+    winningNicheAutomation: legacyRestoreAutomation,
     marketplaceInsightPlan: state.marketplaceInsightPlan,
   })
   state.marketplaceRetryState = normalizeMarketplaceRetryState(savedState.marketplaceRetryState)
-  if (
-    state.winningNicheAutomation.status === 'winner-found'
-    && state.winningNicheAutomation.winnerKeywords.length < restoredWinnerTarget
-  ) {
-    state.winningNicheAutomation = pauseWinningNicheAutomation({
-      ...state.winningNicheAutomation,
-      status: 'running',
-      completedAt: '',
-    }, `保存済みA/B候補は${state.winningNicheAutomation.winnerKeywords.length}/${restoredWinnerTarget}件です。目標まで探索を再開できます。`)
-  }
-  state.restoredAutomationPending = shouldAutoResumeEvidenceAutomation({
-    winningNicheAutomation: state.winningNicheAutomation,
-    pendingEvidenceAutomation: state.pendingEvidenceAutomation,
-  })
-  if (state.winningNicheAutomation.status === 'running' && !state.restoredAutomationPending) {
-    state.winningNicheAutomation = pauseWinningNicheAutomation(
-      state.winningNicheAutomation,
-      '前回の連続探索を復元しました。「探索を再開」を押すと続きから進みます。',
-    )
+  if (restoringMultiAngleWork) {
+    const reloadTransition = pauseMultiAngleWorkAfterReload({
+      exploration: state.multiAngleExploration,
+      pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+    })
+    state.multiAngleExploration = reloadTransition.exploration
+    state.pendingEvidenceAutomation = reloadTransition.pendingEvidenceAutomation
+    state.restoredAutomationPending = false
+  } else {
+    state.restoredAutomationPending = shouldAutoResumeEvidenceAutomation({
+      winningNicheAutomation: legacyRestoreAutomation,
+      pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+    })
   }
   state.seoPlan = savedState.seoPlan ?? null
   state.consoleUi = restoreResearchConsoleUiFromPayload(savedState)
@@ -916,6 +1055,50 @@ function selectedEvent() {
 
 function selectedCategory() {
   return PRODUCT_CATEGORIES.find((category) => category.id === elements.categorySelect.value) ?? PRODUCT_CATEGORIES[0]
+}
+
+function researchEventSnapshot(event = selectedEvent()) {
+  const timing = classifyProductionWindow(event)
+  return {
+    ...event,
+    peakDate: timing.peakDate instanceof Date
+      ? timing.peakDate.toISOString()
+      : String(timing.peakDate ?? ''),
+    peakStatus: timing.status,
+    peakDaysUntil: timing.daysUntil,
+  }
+}
+
+function activeResearchContext() {
+  const selected = {
+    event: selectedEvent(),
+    category: selectedCategory(),
+  }
+  const selectedEventSnapshot = researchEventSnapshot(selected.event)
+  const context = resolveMultiAngleResearchContext(state.multiAngleExploration, {
+    eventId: selected.event.id,
+    categoryId: selected.category.id,
+    eventSnapshot: selectedEventSnapshot,
+    categorySnapshot: selected.category,
+  })
+  return {
+    ...context,
+    event: context.eventSnapshot
+      ?? (context.eventId === selected.event.id
+        ? selectedEventSnapshot
+        : researchEventSnapshot(resolveMarketEvent({ eventId: context.eventId }))),
+    category: context.categorySnapshot
+      ?? PRODUCT_CATEGORIES.find((category) => category.id === context.categoryId)
+      ?? selected.category,
+  }
+}
+
+function activeResearchOptions() {
+  return resolveMultiAngleResearchOptions(state.multiAngleExploration, {
+    ...currentOptions(),
+    eventSnapshot: researchEventSnapshot(selectedEvent()),
+    categorySnapshot: selectedCategory(),
+  })
 }
 
 function selectedTargets() {
@@ -1233,9 +1416,9 @@ function currentOptions() {
 
 function marketTrackOptionsForRow(row = {}) {
   return {
-    ...currentOptions(),
-    eventId: row.researchEventId || elements.eventSelect.value,
-    categoryId: row.researchCategoryId || elements.categorySelect.value,
+    ...activeResearchOptions(),
+    eventId: row.researchEventId || activeResearchContext().eventId,
+    categoryId: row.researchCategoryId || activeResearchContext().categoryId,
   }
 }
 
@@ -1283,7 +1466,7 @@ function syncResearchMarketHistory() {
   state.researchedMarketHistory = buildResearchMarketHistory(
     state.researchedMarketHistory,
     state.researchRows,
-    currentOptions(),
+    activeResearchOptions(),
   )
 }
 
@@ -1310,7 +1493,7 @@ const analyzeResearchRows = createMemoizedAnalysis((rows, options) => {
 })
 
 function currentResearchAnalysis() {
-  return analyzeResearchRows(state.researchRows, currentOptions())
+  return analyzeResearchRows(state.researchRows, activeResearchOptions())
 }
 
 // Both sides of the measurement come from work the operator has already paid for: Etsy's own
@@ -1319,6 +1502,10 @@ function currentResearchAnalysis() {
 function modifierEvidenceInput() {
   const plan = state.marketplaceInsightPlan
   const planItems = Array.isArray(plan?.items) ? plan.items : []
+  const researchContext = activeResearchContext()
+  const contextualResearchRows = state.researchRows.filter((row) => (
+    candidateMatchesResearchContext(row, researchContext, { requireContext: true })
+  ))
   const demandKeywords = [
     ...planItems
       .filter((item) => item.status === 'completed')
@@ -1329,11 +1516,12 @@ function modifierEvidenceInput() {
     )),
   ].filter((row) => normalizePhrase(row?.keyword))
 
-  const supplyListings = state.researchRows.flatMap((row) => (
+  const supplyListings = contextualResearchRows.flatMap((row) => (
     Array.isArray(row.productRows) ? row.productRows : []
   )).map((product) => ({
     title: product?.title ?? product?.label,
     monthlySales: product?.monthlySales,
+    listingAgeMonths: product?.listingAgeMonths,
   })).filter((row) => normalizePhrase(row.title))
 
   return { demandKeywords, supplyListings }
@@ -1358,7 +1546,7 @@ function marketplaceLearningRecords() {
 
 function currentModifierAnalysis() {
   return analyzeMarketplaceVocabulary(marketplaceLearningRecords(), {
-    ...currentOptions(),
+    ...activeResearchOptions(),
     identitySeeds: elements.buyerIdentityInput?.value ?? '',
     now: new Date().toISOString(),
   })
@@ -1379,7 +1567,11 @@ function currentEvidenceRunId() {
 }
 
 function evidenceArchiveRecord() {
+  const researchContext = activeResearchContext()
   const evidence = modifierEvidenceInput()
+  const contextualResearchRows = state.researchRows.filter((row) => (
+    candidateMatchesResearchContext(row, researchContext, { requireContext: true })
+  ))
   const capturedAt = new Date().toISOString()
   const runId = currentEvidenceRunId()
   const previousNodes = state.evidenceArchives
@@ -1391,13 +1583,15 @@ function evidenceArchiveRecord() {
     runId,
     capturedAt,
     locale: 'en-US',
-    categoryId: selectedCategory().id,
-    eventId: selectedEvent().id,
+    categoryId: researchContext.categoryId,
+    eventId: researchContext.eventId,
+    eventSnapshot: researchContext.event,
     identitySeeds: buyerIdentityLines(),
     context: {
-      categoryId: selectedCategory().id,
-      eventId: selectedEvent().id,
-      eventTerm: normalizePhrase(selectedEvent().searchTerm),
+      categoryId: researchContext.categoryId,
+      eventId: researchContext.eventId,
+      eventSnapshot: researchContext.event,
+      eventTerm: normalizePhrase(researchContext.event.searchTerm),
       buyerIdentities: buyerIdentityLines(),
     },
     demandKeywords: evidence.demandKeywords.map((row) => ({
@@ -1405,15 +1599,14 @@ function evidenceArchiveRecord() {
       etsySearches30d: parseOptionalNumber(row.etsySearches30d),
       etsyListings: parseOptionalNumber(row.etsyListings),
     })),
-    supplyListings: evidence.supplyListings.map((row) => ({
-      title: String(row.title ?? '').trim(),
-      monthlySales: parseOptionalNumber(row.monthlySales),
-    })),
+    supplyListings: normalizeArchivedSupplyListings(evidence.supplyListings),
+    multiAngleExploration: createMultiAngleExplorationState(state.multiAngleExploration),
+    explorationProvenance: state.multiAngleExploration.provenance,
     drilldownNodes: mergeNicheDrilldownNodes(previousNodes, buildNicheDrilldownGraph({
-      rows: state.researchRows,
+      rows: contextualResearchRows,
       candidates: [...state.candidateCatalog, ...drilldown.candidates],
-      categoryId: selectedCategory().id,
-      eventId: selectedEvent().id,
+      categoryId: researchContext.categoryId,
+      eventId: researchContext.eventId,
       createdAt: capturedAt,
     })),
   }
@@ -1433,6 +1626,9 @@ function evidenceRecordFingerprint(record = {}) {
   const supplyListings = (record.supplyListings ?? []).map((row) => [
     normalizePhrase(row.title),
     parseOptionalNumber(row.monthlySales),
+    row.listingAgeMonths === null || row.listingAgeMonths === undefined
+      ? null
+      : parseOptionalNumber(row.listingAgeMonths),
   ]).sort((left, right) => left[0].localeCompare(right[0], 'en'))
   const drilldownNodes = (record.drilldownNodes ?? []).map((node) => [
     normalizePhrase(node.keyword),
@@ -1448,6 +1644,20 @@ function evidenceRecordFingerprint(record = {}) {
     runId: String(record.runId ?? '').trim(),
     categoryId: record.categoryId ?? '',
     eventId: record.eventId ?? '',
+    eventSnapshot: [
+      String(record.eventSnapshot?.id ?? record.context?.eventSnapshot?.id ?? '').trim(),
+      normalizePhrase(
+        record.eventSnapshot?.searchTerm
+        ?? record.context?.eventSnapshot?.searchTerm
+        ?? '',
+      ),
+      String(record.eventSnapshot?.label ?? record.context?.eventSnapshot?.label ?? '').trim(),
+      String(
+        record.eventSnapshot?.displayTerm
+        ?? record.context?.eventSnapshot?.displayTerm
+        ?? '',
+      ).trim(),
+    ],
     identitySeeds: String(record.identitySeeds ?? '')
       .split(/[\n,;]+/)
       .map(normalizePhrase)
@@ -1455,6 +1665,8 @@ function evidenceRecordFingerprint(record = {}) {
       .sort(),
     demandKeywords,
     supplyListings,
+    multiAngleExploration: createMultiAngleExplorationState(record.multiAngleExploration),
+    explorationProvenance: record.explorationProvenance ?? {},
     drilldownNodes,
   })
 }
@@ -1476,7 +1688,7 @@ function scheduleEvidenceAutoArchive() {
   }, 1200)
 }
 
-function evidenceArchiveBlockReason() {
+function evidenceArchiveBlockReason(options = {}) {
   if (!window.location.origin.startsWith('http')) {
     return 'file:// で開いています。保存にはローカルサーバが必要です: node market-finder/scripts/static-server.mjs . 4174'
   }
@@ -1484,7 +1696,11 @@ function evidenceArchiveBlockReason() {
     return 'このサーバは保管庫に対応していません。node market-finder/scripts/static-server.mjs . 4174 で起動してください。'
   }
   const evidence = modifierEvidenceInput()
-  if (evidence.demandKeywords.length === 0 && evidence.supplyListings.length === 0) {
+  if (
+    options.allowEmptyEvidence !== true
+    && evidence.demandKeywords.length === 0
+    && evidence.supplyListings.length === 0
+  ) {
     return '保管できる実測データがまだありません。3「Etsy公式」かEverBee確認を実行してください。'
   }
   return ''
@@ -1526,17 +1742,21 @@ async function saveEvidenceArchive(options = {}) {
     clearTimeout(evidenceAutoArchiveTimer)
     evidenceAutoArchiveTimer = null
   }
-  const blocked = evidenceArchiveBlockReason()
+  const blocked = evidenceArchiveBlockReason({
+    allowEmptyEvidence: options.allowEmptyEvidence === true,
+  })
   if (blocked) {
     if (!automatic) elements.evidenceArchiveStatus.textContent = blocked
-    return
+    return false
   }
   elements.evidenceArchiveBtn.disabled = true
   try {
-    const record = evidenceArchiveRecord()
+    const record = options.record && typeof options.record === 'object'
+      ? options.record
+      : evidenceArchiveRecord()
     if (hasArchivedEvidenceRecord(record)) {
       if (!automatic) elements.evidenceArchiveStatus.textContent = '同じ調査内容はすでに保管済みです。'
-      return
+      return true
     }
     const response = await fetch('/market-finder/archive', {
       method: 'POST',
@@ -1551,8 +1771,10 @@ async function saveEvidenceArchive(options = {}) {
     ]
     elements.evidenceArchiveStatus.textContent = `${automatic ? '自動保管' : '保管'}: ${name} / 検索語${record.demandKeywords.length}件、商品${record.supplyListings.length}件。`
     renderModifierEvidence()
+    return true
   } catch (error) {
     elements.evidenceArchiveStatus.textContent = `${automatic ? '自動保管' : '保管'}に失敗しました: ${error instanceof Error ? error.message : String(error)}`
+    return false
   } finally {
     elements.evidenceArchiveBtn.disabled = false
   }
@@ -1644,7 +1866,7 @@ function learnedBuyerIdentitySuggestions(exclude = []) {
 
 function automaticBuyerIdentityAnalysis() {
   return analyzeMarketplaceVocabulary(marketplaceLearningRecords(), {
-    ...currentOptions(),
+    ...activeResearchOptions(),
     identitySeeds: '',
     now: new Date().toISOString(),
   })
@@ -1783,9 +2005,33 @@ function appendSeedLine(input, phrase) {
   resetCandidatesForInputChange()
 }
 
-function findResearchRow(keyword) {
+function findResearchRow(keyword, contextCandidate = null) {
   const normalized = normalizePhrase(keyword)
-  return state.researchRows.find((row) => normalizePhrase(row.keyword) === normalized)
+  const keywordRows = state.researchRows.filter(
+    (row) => normalizePhrase(row.keyword) === normalized,
+  )
+  const multiAngleCandidate = contextCandidate ?? currentMultiAngleBatchCandidates()
+    .find((candidate) => normalizePhrase(candidate.keyword) === normalized)
+  if (multiAngleCandidate) {
+    return researchRowForMultiAngleCandidate(keywordRows, multiAngleCandidate)
+  }
+  const researchContext = activeResearchContext()
+  return keywordRows.find((row) => (
+    row.resultLane !== 'seasonal-reference'
+    && row.intentTrack !== 'seasonal-reference'
+    && candidateMatchesResearchContext(row, researchContext, { requireContext: true })
+  )) ?? keywordRows.find((row) => (
+    !Object.hasOwn(row, 'researchEventId')
+    && !Object.hasOwn(row, 'researchCategoryId')
+  ))
+}
+
+function isCurrentResearchRow(row = {}) {
+  const current = findResearchRow(row.keyword)
+  return Boolean(
+    current
+    && researchRowContextKey(current) === researchRowContextKey(row)
+  )
 }
 
 function readyKeywords() {
@@ -1871,8 +2117,9 @@ function removePhraseFromTokens(tokens, phrase) {
 }
 
 function erankProbeKeyword(keyword) {
-  const category = selectedCategory()
-  const eventTerm = normalizePhrase(selectedEvent().searchTerm)
+  const { event, category } = activeResearchContext()
+  const eventTerm = normalizePhrase(event.searchTerm)
+  const researchOptions = activeResearchOptions()
   let tokens = normalizePhrase(keyword).split(' ').filter(Boolean)
   if (eventTerm) tokens = removePhraseFromTokens(tokens, eventTerm)
   tokens = tokens.filter((token) => !/^(?:20\d{2}|\d{2})$/.test(token) || /\b(?:est|class|senior|grad)\b/.test(keyword))
@@ -1883,7 +2130,7 @@ function erankProbeKeyword(keyword) {
     probe = normalizePhrase(`${probe} ${category.searchTerm}`)
   }
   if (detectRiskTerms(probe, elements.riskInput.value.split(/\r?\n|,/)).length > 0) return ''
-  if (keywordClass(probe).action !== 'candidate') return ''
+  if (classifyCandidateKeyword(probe, researchOptions).action !== 'candidate') return ''
 
   return probe
 }
@@ -1915,7 +2162,7 @@ function erankExploreRows() {
 }
 
 function erankRowsWithOpportunity() {
-  const rows = currentResearchAnalysis().erankRows
+  const rows = currentResearchAnalysis().erankRows.filter(isCurrentResearchRow)
   const batchKeywords = activeCrossNicheBatchKeywords()
   if (batchKeywords.size === 0) return rows
   return rows.filter((row) => [
@@ -1935,29 +2182,8 @@ function restoredResultsAwaitingConfirmation() {
 }
 
 function erankSpecificTokens(keyword) {
-  const eventTokens = selectedEvent().searchTerm.split(/\s+/)
-  const categoryTokens = [
-    selectedCategory().searchTerm,
-    ...(selectedCategory().tags ?? []),
-  ].flatMap((value) => normalizePhrase(value).split(/\s+/))
-  const stopWords = new Set([
-    ...eventTokens,
-    ...categoryTokens,
-    'for',
-    'and',
-    'the',
-    'with',
-    'from',
-    'to',
-    'by',
-    'of',
-    'a',
-    'an',
-  ].map((value) => normalizePhrase(value)).filter(Boolean))
-
-  return normalizePhrase(keyword)
-    .split(/\s+/)
-    .filter((token) => token.length >= 3 && !stopWords.has(token))
+  const { event, category } = activeResearchContext()
+  return extractErankSpecificTokens(keyword, { event, category })
 }
 
 function narrowEverbeeKeywordsFromErank() {
@@ -2007,8 +2233,7 @@ function uniqueRowsByKeyword(rows) {
 }
 
 function buildEverbeeKeywordsFromErankRows(rows) {
-  const event = selectedEvent()
-  const category = selectedCategory()
+  const { event, category } = activeResearchContext()
   const product = normalizePhrase(category.searchTerm)
   const eventTerm = normalizePhrase(event.searchTerm)
   const eventSignals = event.searchTerm
@@ -2018,7 +2243,7 @@ function buildEverbeeKeywordsFromErankRows(rows) {
   const year = selectedYearOption()
   const seedKeywords = rows.map((row) => row.keyword).join('\n')
   const generated = generateKeywordCandidates({
-    ...currentOptions(),
+    ...activeResearchOptions(),
     seedKeywords,
     limit: Math.max(40, Math.min(Number(elements.limitInput.value) || 80, 120)),
   })
@@ -2048,12 +2273,13 @@ function salesCheckKeywords() {
 }
 
 function buildCurrentErankQueryPlan(candidates = state.candidates, options = {}) {
+  const { event } = activeResearchContext()
   const candidateLimit = Math.max(1, Math.min(
     FINAL_EVIDENCE_BATCH_SIZE,
     Number(options.candidateLimit) || ERANK_RESEARCH_LIMIT,
   ))
   return buildErankQueryPlan(candidates, {
-    eventTerm: selectedEvent().searchTerm,
+    eventTerm: event.searchTerm,
     candidateLimit,
     baseQueryFor: (keyword, candidate) => candidate.queryStrategy === 'cross-niche'
       ? keyword
@@ -2078,8 +2304,9 @@ function erankRowHasDemand(keyword) {
 // Second stage of the daily-lookup budget: only candidates whose full phrase came back
 // without demand are worth spending another lookup on their base phrase.
 function buildErankFollowUpQueryPlan() {
+  const { event } = activeResearchContext()
   return buildErankBaseFollowUpPlan(state.candidates, {
-    eventTerm: selectedEvent().searchTerm,
+    eventTerm: event.searchTerm,
     candidateLimit: ERANK_RESEARCH_LIMIT,
     baseQueryFor: (keyword, candidate) => candidate.queryStrategy === 'cross-niche'
       ? keyword
@@ -2252,7 +2479,7 @@ function ingestBroadSnippetsFromExtensionState(extensionState) {
   }
 }
 
-function applyBroadHintsToSeeds() {
+async function applyBroadHintsToSeeds() {
   const selected = Array.from(elements.broadHintList.querySelectorAll('input:checked'))
     .map((input) => normalizePhrase(input.value))
     .filter(Boolean)
@@ -2262,6 +2489,7 @@ function applyBroadHintsToSeeds() {
     return
   }
 
+  if (!await prepareForNewCandidateDiscovery()) return
   const merged = cleanKeywordList([
     ...elements.seedInput.value.split(/\r?\n|,/),
     ...selected,
@@ -2391,6 +2619,7 @@ function renderDiscoveryControls() {
 
 function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = [] } = {}) {
   const mode = state.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
+  const researchOptions = activeResearchOptions()
   const quota = mode === 'plus' ? 60 : 15
   const previous = preserveExisting ? state.marketplaceInsightPlan : null
   const requestedKeywords = Array.isArray(keywords) && keywords.length > 0
@@ -2418,7 +2647,7 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = []
     capturedRelatedMetrics,
   )
   const built = buildMarketplaceInsightPlan(validationCandidates, {
-    ...currentOptions(),
+    ...researchOptions,
     marketplaceInsightMode: mode,
     relatedKeywordMetrics,
   })
@@ -2458,8 +2687,10 @@ function rebuildMarketplaceInsightPlan({ preserveExisting = false, keywords = []
     ...built,
     mode,
     counts,
-    eventId: selectedEvent().id,
-    categoryId: selectedCategory().id,
+    eventId: researchOptions.eventId,
+    categoryId: researchOptions.categoryId,
+    eventSnapshot: researchOptions.eventSnapshot,
+    categorySnapshot: researchOptions.categorySnapshot,
     createdAt: new Date().toISOString(),
     officialRemaining: previous?.officialRemaining ?? null,
     relatedKeywordMetrics,
@@ -2524,7 +2755,7 @@ function marketplaceNextBatchState(plan = state.marketplaceInsightPlan) {
 function releaseMarketplaceInsightBatch() {
   const plan = state.marketplaceInsightPlan
   if (!plan || state.marketplaceInsightMode !== 'plus') return
-  const result = advanceMarketplaceInsightResearch(plan, currentOptions())
+  const result = advanceMarketplaceInsightResearch(plan, activeResearchOptions())
   const items = (result.plan.items ?? []).map((item, index) => ({ ...item, id: `etsy-insight-${index + 1}` }))
   const counts = ['discovery', 'validation', 'reserve', 'followup'].reduce((summary, stage) => ({
     ...summary,
@@ -2781,7 +3012,7 @@ function renderCandidates() {
 
   elements.candidateList.innerHTML = visibleCandidates.map((candidate) => {
     const researched = findResearchRow(candidate.keyword)
-    const resultScore = researched ? scoreEverbeeResult(researched, currentOptions()) : null
+    const resultScore = researched ? scoreEverbeeResult(researched, activeResearchOptions()) : null
     const erankCheckedAt = formatDateTime(researched?.erankCheckedAt)
     const erankTitle = `eRankの検索数・クリック・競合・KDを取得済みです。人気確定ではありません。${erankCheckedAt ? ` 確認: ${erankCheckedAt}` : ''}`
     const resultPill = resultScore?.validation.hasEverbeeData
@@ -2934,7 +3165,7 @@ function erankCaptureStateRows() {
     ? normalizePhrase(state.extensionState.currentKeyword)
     : ''
   return state.erankQueryPlan.flatMap((item) => {
-    const row = state.researchRows.find((candidate) => normalizePhrase(candidate.keyword) === normalizePhrase(item.query))
+    const row = findResearchRow(item.query)
     const uiState = deriveErankCaptureUiState(row, {
       active: Boolean(activeKeyword) && activeKeyword === normalizePhrase(item.query),
     })
@@ -3496,7 +3727,7 @@ function selectedRoundEverbeeRows() {
   if (!selected || selected === 'all') return everbeeResultRows()
   const round = state.researchRounds.rounds.find((item) => item.id === selected)
   if (!round) return everbeeResultRows()
-  return analyzeResearchRows(researchRowsForRound(state.researchRows, round), currentOptions()).everbeeRows
+  return analyzeResearchRows(researchRowsForRound(state.researchRows, round), activeResearchOptions()).everbeeRows
 }
 
 function researchRoundLabel(round) {
@@ -3505,6 +3736,7 @@ function researchRoundLabel(round) {
 
 function renderResearchRoundControls() {
   const rounds = state.researchRounds.rounds
+  const researchOptions = activeResearchOptions()
   elements.researchRoundTabs.innerHTML = [
     { id: 'all', label: '総合' },
     ...rounds.map((round) => ({ id: round.id, label: researchRoundLabel(round) })),
@@ -3513,7 +3745,7 @@ function renderResearchRoundControls() {
   `).join('')
 
   const summaries = rounds.map((round) => {
-    const rows = analyzeResearchRows(researchRowsForRound(state.researchRows, round), currentOptions()).everbeeRows
+    const rows = analyzeResearchRows(researchRowsForRound(state.researchRows, round), researchOptions).everbeeRows
     const counts = summarizeOpportunityCounts(rows)
     state.researchRounds = updateResearchRound(state.researchRounds, round.id, {
       resultKeywords: rows.map((row) => row.keyword),
@@ -3634,7 +3866,7 @@ function renderListingResearchTarget() {
     || !elements.listingResearchTargetProgress
   ) return
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
-  const winnerCount = state.winningNicheAutomation.winnerKeywords.length
+  const winnerCount = state.multiAngleExploration.winnerKeywords.length
   const remaining = Math.max(0, target.targetWinnerCount - winnerCount)
   elements.listingResearchTargetSummary.textContent = `月${target.monthlyListingTarget}商品 ÷ ${target.researchRunsPerMonth}回 ÷ ${target.listingsPerWinner}商品 = 今回A/Bを${target.targetWinnerCount}件確保（1回${target.listingsPerRun}商品）`
   elements.listingResearchTargetProgress.textContent = `A/B候補 ${winnerCount} / ${target.targetWinnerCount}件・残り${remaining}件`
@@ -3663,22 +3895,22 @@ function saveListingResearchTargetSettings() {
 
   state.listingResearchTargetSettings = result.settings
   const target = calculateListingResearchTarget(result.settings)
-  const winnerCount = state.winningNicheAutomation.winnerKeywords.length
+  const winnerCount = state.multiAngleExploration.winnerKeywords.length
   const targetReached = winnerCount >= target.targetWinnerCount
-  state.winningNicheAutomation = createWinningNicheAutomation({
-    ...state.winningNicheAutomation,
+  state.multiAngleExploration = createMultiAngleExplorationState({
+    ...state.multiAngleExploration,
     status: targetReached
       ? 'winner-found'
-      : state.winningNicheAutomation.status === 'winner-found'
+      : state.multiAngleExploration.status === 'winner-found'
         ? 'paused'
-        : state.winningNicheAutomation.status,
+        : state.multiAngleExploration.status,
     targetWinnerCount: target.targetWinnerCount,
-    completedAt: targetReached ? state.winningNicheAutomation.completedAt : '',
+    completedAt: targetReached ? state.multiAngleExploration.completedAt : '',
     pauseReason: targetReached
       ? ''
-      : state.winningNicheAutomation.status === 'winner-found'
+      : state.multiAngleExploration.status === 'winner-found'
         ? `A/B候補は${winnerCount}/${target.targetWinnerCount}件です。残り${target.targetWinnerCount - winnerCount}件を探索できます。`
-        : state.winningNicheAutomation.pauseReason,
+        : state.multiAngleExploration.pauseReason,
   })
   setInputValue(elements.monthlyListingTargetInput, result.settings.monthlyListingTarget)
   setInputValue(elements.researchRunsPerMonthInput, result.settings.researchRunsPerMonth)
@@ -3697,50 +3929,302 @@ function renderWinningNicheAutomation() {
     || !elements.winningNicheAutomationToggle
   ) return
 
-  const automation = state.winningNicheAutomation
+  const automation = state.multiAngleExploration
   const status = automation.status || 'idle'
-  const axisLabel = NICHE_TAXONOMY[automation.currentAxis]?.label || '未開始'
-  const nextAxisLabel = NICHE_TAXONOMY[automation.nextAxis]?.label || NICHE_TAXONOMY[NICHE_AXIS_ORDER[0]]?.label || '職業'
-  const researchedCount = automation.researchedKeywords.length
-  const queuedCount = automation.queuedKeywords.length
+  const angleLabels = EXPLORATION_ANGLE_LABELS
+  const axisLabel = angleLabels[automation.currentAngleId] || '未開始'
+  const routeProgress = explorationRouteProgress(automation)
+  const nextAngleId = routeProgress.nextAngleId
+  const nextAxisLabel = angleLabels[nextAngleId] || '需要周辺'
+  const nextAngleProgressCopy = routeProgress.isFinal
+    ? '最終角度です。完了後は今回の探索を終了します。'
+    : `次は「${nextAxisLabel}」へ進みます。`
+  const researchedCount = automation.evidenceKeys.length
+  const queuedCount = automation.queuedEvidenceKeys.length
   const targetWinnerCount = automation.targetWinnerCount
   const winnerCount = automation.winnerKeywords.length
   const remainingWinnerCount = Math.max(0, targetWinnerCount - winnerCount)
+  const automationWorkActive = status === 'running'
+    || state.pendingEvidenceAutomation.active
+    || state.pendingEvidenceAutomation.scheduled
+    || state.marketplaceInsightAutoRunning
+    || state.marketplaceInsightBusy
   const statusCopy = {
     idle: `未開始です。A/B候補${targetWinnerCount}件を目標に、最初の未調査カテゴリ「${nextAxisLabel}」から始めます。`,
-    running: `勝ち候補を探索中（${winnerCount}/${targetWinnerCount}件）。第${Math.max(automation.round, 1)}回は「${axisLabel}」を検証し、残り${remainingWinnerCount}件へ向けて「${nextAxisLabel}」へ進みます。`,
+    running: `勝ち候補を探索中（${winnerCount}/${targetWinnerCount}件）。「${axisLabel}」を検証し、残り${remainingWinnerCount}件へ向けています。${nextAngleProgressCopy}`,
     paused: `一時停止中: ${automation.pauseReason || '外部確認を再開できる状態になるまで待機します。'}`,
     stopped: `停止中。調査済み${researchedCount}件、待機${queuedCount}件を保持しています。次の未調査カテゴリから再開できます。`,
     'winner-found': `A/Bの勝ち候補を${winnerCount}/${targetWinnerCount}件確保し、今回の出品目標を達成しました。`,
     exhausted: `安全な未調査候補を使い切りました。A/B候補は${winnerCount}/${targetWinnerCount}件で、残り${remainingWinnerCount}件です。`,
   }
-  const action = status === 'running'
-    ? 'stop'
-    : status === 'idle'
-      ? 'start'
-      : status === 'winner-found'
-        ? 'new-cycle'
-      : 'resume'
-  const buttonLabel = status === 'running'
-    ? '探索を停止'
-    : status === 'idle'
-      ? '目標まで勝ち候補を探す'
-      : status === 'winner-found'
-        ? '次週の探索を始める'
-        : '目標まで探索を再開'
+  const control = multiAngleAutomationControl(automation, automationWorkActive)
 
   elements.winningNicheAutomationPanel.className = `winning-niche-automation-panel is-${status}`
   elements.winningNicheAutomationStatus.textContent = statusCopy[status] || statusCopy.idle
-  elements.winningNicheAutomationToggle.dataset.winningNicheAction = action
-  elements.winningNicheAutomationToggle.textContent = buttonLabel
+  elements.winningNicheAutomationToggle.dataset.winningNicheAction = control.action
+  elements.winningNicheAutomationToggle.textContent = control.label
   renderListingResearchTarget()
-  renderHtmlIfChanged(elements.winningNicheAutomationRail, NICHE_AXIS_ORDER.map((axisId, index) => {
-    const label = NICHE_TAXONOMY[axisId]?.label || axisId
-    const active = axisId === automation.currentAxis
-    const next = axisId === automation.nextAxis || (status === 'idle' && index === 0)
-    const className = active ? 'is-active' : next ? 'is-next' : ''
-    return `<span data-winning-niche-axis="${escapeHtml(axisId)}" class="${className}"><small>${String(index + 1).padStart(2, '0')}</small><strong>${escapeHtml(label)}</strong></span>`
-  }).join('<i aria-hidden="true">→</i>'))
+  renderMarketTimingGate()
+  renderExplorationAngleRail()
+  renderExplorationResultLanes()
+}
+
+function renderMarketTimingGate() {
+  if (
+    !elements.marketTimingGate
+    || !elements.marketTimingStatus
+    || !elements.marketTimingDetail
+    || !elements.marketTimingOverrideBtn
+  ) return
+
+  const { event } = activeResearchContext()
+  const timing = classifyProductionWindow(event)
+  const blocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
+  const peakDetail = timing.peakDate
+    ? `需要ピーク: ${timing.peakDate.toLocaleDateString('ja-JP')}（あと${timing.daysUntil}日）`
+    : ''
+  const statusCopy = {
+    timely: `今作る時期です。需要ピークまで${timing.daysUntil}日`,
+    early: state.timingOverrideConfirmed
+      ? 'まだ早い時期ですが、このイベントを続けて調査します'
+      : 'まだ早い時期です。別イベントへは移動しません',
+    late: state.timingOverrideConfirmed
+      ? '制作開始が遅い時期ですが、このイベントを続けて調査します'
+      : '制作開始が遅い時期です。別イベントへは移動しません',
+    evergreen: '通年市場として調査できます',
+  }
+  const detailCopy = {
+    timely: `${peakDetail}。${event.jpLabel}を固定したまま、自動調査を開始できます。`,
+    early: blocked
+      ? `${peakDetail}。自動調査は開始しません。続ける場合だけ、右のボタンで明示してください。`
+      : `${peakDetail}。明示的な続行を受け付けました。イベントは変更しません。`,
+    late: blocked
+      ? `${peakDetail}。自動調査は開始しません。続ける場合だけ、右のボタンで明示してください。`
+      : `${peakDetail}。明示的な続行を受け付けました。イベントは変更しません。`,
+    evergreen: 'イベントなしのため、制作時期の制限はありません。',
+  }
+
+  elements.marketTimingGate.className = `market-timing-gate is-${timing.status}${blocked ? ' is-blocked' : ''}`
+  elements.marketTimingStatus.textContent = statusCopy[timing.status] || statusCopy.evergreen
+  elements.marketTimingDetail.textContent = detailCopy[timing.status] || detailCopy.evergreen
+  elements.marketTimingOverrideBtn.hidden = !blocked
+  const canStopActiveResearch = elements.winningNicheAutomationToggle.dataset.winningNicheAction === 'stop'
+  elements.winningNicheAutomationToggle.disabled = blocked && !canStopActiveResearch
+  elements.winningNicheAutomationToggle.title = blocked && !canStopActiveResearch
+    ? '制作時期を確認し、「このイベントを続けて調査する」を押してください。'
+    : ''
+}
+
+function explorationAngleState(automation, angleId, index) {
+  const isCurrent = automation.currentAngleId === angleId
+  const hasCurrentBatch = (automation.currentBatchCandidates ?? [])
+    .some((candidate) => !candidate.angleId || candidate.angleId === angleId)
+  const hasCurrentRetry = (automation.retryQueue ?? [])
+    .some((entry) => !entry.candidate?.angleId || entry.candidate.angleId === angleId)
+  const isCurrentInProgress = isCurrent && (
+    hasCurrentBatch
+    || hasCurrentRetry
+    || ['running', 'paused'].includes(automation.status)
+  )
+  if (isCurrentInProgress) return 'active'
+  if ((automation.completedAngles ?? []).includes(angleId)) return 'complete'
+  if ((automation.emptyAngles ?? []).includes(angleId)) return 'empty'
+  if (isCurrent) return 'active'
+  return 'idle'
+}
+
+function explorationRouteProgress(automation) {
+  const currentAngleId = String(automation?.currentAngleId ?? '')
+  const currentIndex = EXPLORATION_ANGLE_ORDER.indexOf(currentAngleId)
+  const finishedAngles = new Set([
+    ...(automation?.completedAngles ?? []),
+    ...(automation?.emptyAngles ?? []),
+  ])
+  const nextAngleId = EXPLORATION_ANGLE_ORDER
+    .slice(currentIndex >= 0 ? currentIndex + 1 : 0)
+    .find((angleId) => !finishedAngles.has(angleId)) ?? ''
+  return {
+    currentAngleId,
+    nextAngleId,
+    isFinal: Boolean(currentAngleId)
+      && currentIndex === EXPLORATION_ANGLE_ORDER.length - 1,
+  }
+}
+
+function explorationRouteCopy(automation) {
+  if (automation.status === 'winner-found') {
+    return '探索完了: A/B目標を達成しました。「新しい調査を始める」から別のサイクルを開始できます。'
+  }
+  if (automation.status === 'exhausted') {
+    return '探索完了: 安全な未調査候補を確認し終えました。「新しい調査を始める」から別のサイクルを開始できます。'
+  }
+  const currentAngleId = String(automation?.currentAngleId ?? '')
+  const currentIndex = EXPLORATION_ANGLE_ORDER.indexOf(currentAngleId)
+  const finishedAngles = new Set([
+    ...(automation?.completedAngles ?? []),
+    ...(automation?.emptyAngles ?? []),
+  ])
+  const nextAngleId = EXPLORATION_ANGLE_ORDER
+    .slice(currentIndex >= 0 ? currentIndex + 1 : 0)
+    .find((angleId) => !finishedAngles.has(angleId)) ?? ''
+  const currentLabel = EXPLORATION_ANGLE_LABELS[currentAngleId] || '未開始'
+  const nextLabel = EXPLORATION_ANGLE_LABELS[nextAngleId] || ''
+  if (automation.status === 'idle') {
+    return `現在: 未開始。最初に「${EXPLORATION_ANGLE_LABELS[EXPLORATION_ANGLE_ORDER[0]]}」から需要の近い候補を確認します。`
+  }
+  if (nextLabel) {
+    return `現在: ${currentLabel}。未確認の切り口を広げるため、完了後は「${nextLabel}」へ進みます。`
+  }
+  return `現在: ${currentLabel}。最終角度です。完了後は今回の探索を終了します。`
+}
+
+function renderExplorationAngleRail() {
+  if (!elements.multiAngleRail || !elements.explorationAngleStatus) return
+  const automation = state.multiAngleExploration
+  const routeCopy = explorationRouteCopy(automation)
+  const stateLabels = {
+    idle: '未開始',
+    active: '調査中',
+    complete: '完了',
+    empty: '候補なし',
+  }
+
+  renderHtmlIfChanged(elements.multiAngleRail, EXPLORATION_ANGLE_ORDER.map((angleId, index) => {
+    const angleState = explorationAngleState(automation, angleId, index)
+    return `
+      <span
+        class="exploration-angle-step is-${angleState}"
+        data-exploration-angle="${escapeHtml(angleId)}"
+        data-winning-niche-axis="${escapeHtml(angleId)}"
+      >
+        <small>${index + 1} / 6</small>
+        <strong>${escapeHtml(EXPLORATION_ANGLE_LABELS[angleId])}</strong>
+        <em>${stateLabels[angleState]}</em>
+      </span>
+    `
+  }).join(''))
+  elements.explorationAngleStatus.textContent = routeCopy
+}
+
+function explorationResultKey(item = {}) {
+  const eventId = String(item.eventId ?? item.event?.id ?? '').trim()
+  const keyword = normalizePhrase(item.keyword ?? item.event?.jpLabel ?? item.event?.label)
+  return `${eventId}|${keyword}`
+}
+
+function seasonalReferenceCandidate(item = {}, options = {}) {
+  const context = activeResearchContext()
+  const legacyKey = explorationResultKey(item)
+  const event = item.event ?? (item.eventId
+    ? resolveMarketEvent({ eventId: item.eventId })
+    : null)
+  if (!event?.id || (!options.allowActiveEvent && event.id === context.eventId)) return null
+  const keyword = normalizePhrase(item.keyword)
+    || normalizePhrase(`${event.searchTerm} ${context.category.searchTerm}`)
+  if (!keyword) return null
+  return {
+    ...item,
+    event,
+    keyword,
+    eventId: event.id,
+    categoryId: String(item.categoryId ?? context.categoryId).trim(),
+    ...(String(item.originEventId ?? '').trim()
+      ? { originEventId: String(item.originEventId).trim() }
+      : {}),
+    ...(String(item.originCategoryId ?? '').trim()
+      ? { originCategoryId: String(item.originCategoryId).trim() }
+      : {}),
+    timingStatus: String(item.timingStatus ?? item.status ?? '').trim(),
+    source: String(item.source ?? 'timely-seasonal-suggestion').trim(),
+    legacyKeys: [legacyKey].filter(Boolean),
+  }
+}
+
+function availableSeasonalReferenceCandidates() {
+  const context = activeResearchContext()
+  const timelySuggestions = buildTimelySeasonalSuggestions(MARKET_EVENTS, {
+    selectedEventId: context.eventId,
+  })
+  const byKey = new Map()
+  ;[
+    ...state.multiAngleExploration.resultLanes.seasonalReference,
+    ...timelySuggestions,
+  ].forEach((item) => {
+    const candidate = seasonalReferenceCandidate(item)
+    if (candidate) byKey.set(explorationResultKey(candidate), candidate)
+  })
+  return [...byKey.values()]
+}
+
+function restorableSeasonalReferenceCandidates() {
+  return [
+    ...state.multiAngleExploration.resultLanes.seasonalReference,
+    ...MARKET_EVENTS
+      .map((event) => ({
+        event,
+        ...classifyProductionWindow(event),
+      })),
+  ].map((item) => seasonalReferenceCandidate(item, {
+    allowActiveEvent: true,
+  })).filter(Boolean)
+}
+
+function explorationResultItemHtml(item = {}, options = {}) {
+  const event = item.event ?? (item.eventId ? resolveMarketEvent({ eventId: item.eventId }) : null)
+  const label = normalizePhrase(item.keyword) || event?.jpLabel || event?.label || '名称未設定'
+  const grade = String(item.opportunityLabel ?? '').trim().toUpperCase()
+  const detail = options.seasonalReference
+    ? item.daysUntil !== undefined && item.daysUntil !== null
+      ? `需要ピークまで${item.daysUntil}日`
+      : `${event?.jpLabel || '別季節'}の参考候補`
+    : grade
+      ? `判定 ${grade} / 検証済み`
+      : `${EXPLORATION_ANGLE_LABELS[item.angleId] || '探索候補'}から追加`
+  const key = explorationResultKey(item)
+  const saved = state.savedSeasonalReferenceKeys.includes(key)
+  const action = options.seasonalReference
+    ? `<button type="button" class="text-btn" data-save-seasonal-reference="${escapeHtml(key)}" ${saved ? 'disabled' : ''}>${saved ? '保存済み' : '次回候補に保存'}</button>`
+    : ''
+  return `
+    <div class="exploration-result-item">
+      <span>
+        <strong>${escapeHtml(label)}</strong>
+        <small>${escapeHtml(detail)}</small>
+      </span>
+      ${action}
+    </div>
+  `
+}
+
+function renderExplorationResultLane(lane, items, options = {}) {
+  const list = lane?.querySelector('[data-result-lane-list]')
+  if (!list) return
+  const html = items.length > 0
+    ? items.map((item) => explorationResultItemHtml(item, options)).join('')
+    : `<div class="exploration-result-empty">${escapeHtml(options.emptyText || '候補はまだありません。')}</div>`
+  renderHtmlIfChanged(list, html)
+}
+
+function renderExplorationResultLanes() {
+  if (!elements.activeEventResultLane || !elements.evergreenResultLane || !elements.seasonalReferenceLane) return
+  const context = activeResearchContext()
+  const resultLanes = state.multiAngleExploration.resultLanes
+  const activeEventRows = resultLanes.event.filter((item) => (
+    (!item.eventId || item.eventId === context.eventId)
+    && ['A', 'B', 'C', 'D'].includes(String(item.opportunityLabel ?? '').trim().toUpperCase())
+  ))
+  const seasonalReferences = availableSeasonalReferenceCandidates()
+
+  renderExplorationResultLane(elements.activeEventResultLane, activeEventRows, {
+    emptyText: '今回イベントの検証済み結果はまだありません。',
+  })
+  renderExplorationResultLane(elements.evergreenResultLane, resultLanes.evergreen, {
+    emptyText: 'エバーグリーン候補はまだありません。',
+  })
+  renderExplorationResultLane(elements.seasonalReferenceLane, seasonalReferences, {
+    seasonalReference: true,
+    emptyText: '今作る別季節の参考候補はありません。',
+  })
 }
 
 function renderExplorationMode() {
@@ -4076,17 +4560,36 @@ function currentDesignClusterPlan() {
 
 function finalEvidenceRows() {
   const analysis = currentResearchAnalysis()
-  const scoredByKeyword = new Map(analysis.scoredRows.map((row) => [normalizePhrase(row.keyword), row]))
-  const everbeeByKeyword = new Map(everbeeResultRows().map((row) => [normalizePhrase(row.score.normalized.keyword), row]))
+  const currentEverbeeRows = everbeeResultRows()
+  const everbeeByContext = new Map(
+    currentEverbeeRows.map((row) => [researchRowContextKey(row), row]),
+  )
+  const currentMultiAngleCandidates = currentMultiAngleBatchCandidates()
+    .filter((candidate) => candidate.resultLane !== 'seasonal-reference')
   const captureByKeyword = new Map(
     erankCaptureStateRows()
       .filter((row) => hasCollectedEvidence({ ...row, erankCaptureStatus: row.status }))
       .map((row) => [normalizePhrase(row.query), row])
   )
   const candidateByKeyword = new Map()
-  ;[...state.candidateCatalog, ...state.candidates, ...currentCrossNicheDrilldown().candidates].forEach((candidate) => {
+  const candidateByContext = new Map()
+  ;[
+    ...state.candidateCatalog,
+    ...state.candidates,
+    ...currentCrossNicheDrilldown().candidates,
+    ...currentMultiAngleCandidates,
+  ].forEach((candidate) => {
     const keyword = normalizePhrase(candidate?.keyword)
-    if (keyword) candidateByKeyword.set(keyword, { ...candidateByKeyword.get(keyword), ...candidate, keyword })
+    if (!keyword) return
+    const normalizedCandidate = { ...candidate, keyword }
+    candidateByKeyword.set(keyword, { ...candidateByKeyword.get(keyword), ...normalizedCandidate })
+    const contextKey = researchRowContextKey(normalizedCandidate)
+    if (!contextKey.includes(':legacy')) {
+      candidateByContext.set(contextKey, {
+        ...candidateByContext.get(contextKey),
+        ...normalizedCandidate,
+      })
+    }
   })
   const eligibleForEtsy = new Set(
     etsyValidationCandidates().map((candidate) => normalizePhrase(candidate.keyword ?? candidate.query))
@@ -4117,10 +4620,65 @@ function finalEvidenceRows() {
     hasSelection,
     fallbackLimit: ERANK_RESEARCH_LIMIT,
   }))
+  currentMultiAngleCandidates.forEach((candidate) => {
+    const keyword = normalizePhrase(candidate.keyword)
+    if (keyword) keywords.add(keyword)
+  })
+  const evidenceSourceByContext = new Map()
+  analysis.scoredRows.forEach((row) => {
+    const keyword = normalizePhrase(row.keyword)
+    if (!keywords.has(keyword)) return
+    const contextKey = researchRowContextKey(row)
+    evidenceSourceByContext.set(contextKey, {
+      keyword,
+      contextKey,
+      raw: row,
+      scoredRow: row,
+      candidate: candidateByContext.get(contextKey),
+    })
+  })
+  currentMultiAngleCandidates.forEach((candidate) => {
+    const keyword = normalizePhrase(candidate.keyword)
+    if (!keywords.has(keyword)) return
+    const scoredRow = researchRowForMultiAngleCandidate(analysis.scoredRows, candidate)
+    const raw = scoredRow
+      ?? researchRowForMultiAngleCandidate(state.researchRows, candidate)
+      ?? {
+        keyword,
+        researchEventId: candidate.eventId,
+        researchCategoryId: candidate.categoryId,
+        intentTrack: candidate.resultLane === 'evergreen' ? 'evergreen' : 'event-specific',
+        resultLane: candidate.resultLane,
+      }
+    const contextKey = researchRowContextKey(raw)
+    evidenceSourceByContext.set(contextKey, {
+      ...evidenceSourceByContext.get(contextKey),
+      keyword,
+      contextKey,
+      raw,
+      scoredRow,
+      candidate,
+    })
+  })
+  keywords.forEach((keyword) => {
+    const alreadyIncluded = [...evidenceSourceByContext.values()]
+      .some((source) => source.keyword === keyword)
+    if (alreadyIncluded) return
+    const raw = findResearchRow(keyword) ?? { keyword }
+    const contextKey = researchRowContextKey(raw)
+    evidenceSourceByContext.set(contextKey, {
+      keyword,
+      contextKey,
+      raw,
+      scoredRow: analysis.scoredRows.find(
+        (row) => researchRowContextKey(row) === contextKey,
+      ),
+      candidate: candidateByContext.get(contextKey) ?? candidateByKeyword.get(keyword),
+    })
+  })
+  const evidenceSources = [...evidenceSourceByContext.values()]
   const etsyConfirmationKeywords = new Set(selectEtsyConfirmationKeywords(
-    [...keywords].map((keyword) => {
-      const candidate = candidateByKeyword.get(keyword) ?? {}
-      const raw = scoredByKeyword.get(keyword) ?? findResearchRow(keyword) ?? { keyword }
+    evidenceSources.map(({ keyword, raw, candidate = {} }) => {
       return {
         keyword,
         queryStrategy: candidate.queryStrategy ?? raw.queryStrategy,
@@ -4130,21 +4688,33 @@ function finalEvidenceRows() {
     8,
   ))
 
-  const rows = [...keywords].map((keyword) => {
-    const scoredRow = scoredByKeyword.get(keyword)
-    const everbeeRow = everbeeByKeyword.get(keyword)
-    const candidate = candidateByKeyword.get(keyword) ?? {}
-    const capture = captureByKeyword.get(keyword) ?? {}
-    const raw = scoredRow ?? findResearchRow(keyword) ?? { keyword }
+  const activeContext = activeResearchContext()
+  const rows = evidenceSources.map((source) => {
+    const { keyword, contextKey, raw } = source
+    const scoredRow = source.scoredRow
+    const everbeeRow = everbeeByContext.get(contextKey)
+    const candidate = source.candidate ?? candidateByContext.get(contextKey) ?? {}
+    const hasExplicitContext = Object.hasOwn(raw, 'researchEventId')
+      || Object.hasOwn(raw, 'researchCategoryId')
+    const currentContextCompatible = !hasExplicitContext || candidateMatchesResearchContext(
+      raw,
+      activeContext,
+      { requireContext: true },
+    )
+    const capture = currentContextCompatible ? captureByKeyword.get(keyword) ?? {} : {}
     const normalized = scoredRow?.score?.normalized ?? raw
     const captureUi = deriveErankCaptureUiState(raw, {
-      active: Boolean(state.extensionState?.active && normalizePhrase(state.extensionState.currentKeyword) === keyword),
+      active: Boolean(
+        currentContextCompatible
+        && state.extensionState?.active
+        && normalizePhrase(state.extensionState.currentKeyword) === keyword
+      ),
     })
     const erankAttempted = captureUi.status !== 'unsearched' || Boolean(capture.erankAttemptedAt)
     const erankDemandUnknown = captureUi.status === 'no-data'
       || (captureUi.status === 'partial'
         && ![raw.erankSearchVolume, raw.erankClicks].some((value) => String(value ?? '').trim() !== ''))
-    const planItem = marketplaceByKeyword.get(keyword)
+    const planItem = currentContextCompatible ? marketplaceByKeyword.get(keyword) : undefined
     const etsyChecked = isEtsyEvidenceChecked(raw, planItem)
     const hasEtsyData = rowHasEtsyMarketplaceInput(raw)
       || [planItem?.result?.etsySearches30d, planItem?.result?.etsyListings]
@@ -4166,13 +4736,13 @@ function finalEvidenceRows() {
       hasEverbeeData,
       hasEtsyData,
       etsyChecked,
-      eligibleForEtsy: eligibleForEtsy.has(keyword),
-      selectedForEtsyConfirmation: etsyConfirmationKeywords.has(keyword),
+      eligibleForEtsy: currentContextCompatible && eligibleForEtsy.has(keyword),
+      selectedForEtsyConfirmation: currentContextCompatible && etsyConfirmationKeywords.has(keyword),
     })
 
     const excluded = Boolean(hasEverbeeData && scoredRow?.score?.opportunityLabel === 'D')
       || Boolean(erankAttempted && !erankDemandUnknown && !failed && !hasEverbeeData
-        && !hasEtsyData && !eligibleForEtsy.has(keyword))
+        && !hasEtsyData && !(currentContextCompatible && eligibleForEtsy.has(keyword)))
     const evidenceState = deriveFinalEvidenceState({
       nextStage,
       erankStatus: erankDemandUnknown ? 'unknown' : captureUi.status,
@@ -4192,7 +4762,7 @@ function finalEvidenceRows() {
 
     return {
       keyword,
-      key: keyword,
+      key: contextKey,
       raw,
       normalized,
       everbeeRow,
@@ -4245,7 +4815,7 @@ function renderFinalEvidenceMatrixRow(row) {
     ? `<small>探索優先度 ${escapeHtml(row.scoreState.explorationPriority)}</small>`
     : row.scoreState.type === 'reference' ? '<small>売上確認前</small>' : ''
   const action = row.evidenceState.actionLabel
-    ? `<button type="button" class="text-btn final-evidence-action" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
+    ? `<button type="button" class="text-btn final-evidence-action" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}" data-final-verify-key="${escapeHtml(row.key)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
     : ''
   const topShare = data.topSalesShare === null || data.topSalesShare === undefined
     ? data.topSalesShare
@@ -4293,7 +4863,7 @@ function renderFinalEvidenceDetail(row) {
   if (row?.everbeeRow) return renderEverbeeDetail(row.everbeeRow)
   if (!row) return '<div class="empty-state">表示する候補がありません。</div>'
   const nextAction = row.evidenceState.actionLabel
-    ? `<button type="button" class="primary-btn" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
+    ? `<button type="button" class="primary-btn" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}" data-final-verify-key="${escapeHtml(row.key)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
     : ''
   return `
     <article class="result-detail-card final-evidence-detail">
@@ -4500,10 +5070,19 @@ function crossNicheSourceLabel(source) {
 }
 
 function currentCrossNicheDrilldown() {
-  return buildCrossNicheDrilldown(state.researchRows, currentOptions())
+  const researchContext = activeResearchContext()
+  return buildCrossNicheDrilldown(
+    state.researchRows.filter((row) => candidateMatchesResearchContext(
+      row,
+      researchContext,
+      { requireContext: true },
+    )),
+    activeResearchOptions(),
+  )
 }
 
 function currentNicheDrilldownNodes() {
+  const researchContext = activeResearchContext()
   const drilldown = currentCrossNicheDrilldown()
   const runId = currentEvidenceRunId()
   const previousNodes = state.evidenceArchives
@@ -4513,8 +5092,8 @@ function currentNicheDrilldownNodes() {
     rows: state.researchRows,
     candidates: [...state.candidateCatalog, ...drilldown.candidates],
     previousNodes,
-    categoryId: selectedCategory().id,
-    eventId: selectedEvent().id,
+    categoryId: researchContext.categoryId,
+    eventId: researchContext.eventId,
   })
 }
 
@@ -4602,24 +5181,6 @@ function syncCrossNicheWorkflow({ announce = false } = {}) {
       parentKeywords: [...new Set(result.queuedCandidates.map((candidate) => candidate.parentKeyword).filter(Boolean))],
       createdAt: new Date().toISOString(),
     }
-    if (winningNicheSearchIsRunning()) {
-      const continuousKeywords = state.crossNicheProposal.candidates.map((candidate) => candidate.keyword)
-      state.winningNicheAutomation = createWinningNicheAutomation({
-        ...state.winningNicheAutomation,
-        queuedKeywords: [...state.winningNicheAutomation.queuedKeywords, ...continuousKeywords],
-      })
-      applyCrossNicheProposal()
-      state.pendingEvidenceAutomation = {
-        active: true,
-        scheduled: false,
-        initialCount: continuousKeywords.length,
-        completedBatches: 0,
-        currentStage: '',
-        targetKeywords: continuousKeywords,
-      }
-      schedulePendingEvidenceAutomation(0)
-      return { didQueue: true, queuedCandidates: result.queuedCandidates, proposed: false }
-    }
     if (announce) setSimpleStatus(crossNicheProposalMessage())
     return { didQueue: false, queuedCandidates: [], proposed: true }
   }
@@ -4651,7 +5212,7 @@ function applyCrossNicheProposal() {
   if (previousRound) {
     const previousRows = analyzeResearchRows(
       researchRowsForRound(state.researchRows, previousRound),
-      currentOptions(),
+      activeResearchOptions(),
     ).everbeeRows
     state.researchRounds = updateResearchRound(state.researchRounds, previousRound.id, {
       status: 'complete',
@@ -4843,10 +5404,19 @@ function pendingEvidenceRows(rows = finalEvidenceRows(), allowedKeywords = []) {
       .map(normalizePhrase)
       .filter(Boolean),
   )
+  const batchCandidates = multiAngleSearchIsRunning()
+    ? currentMultiAngleBatchCandidates()
+    : []
   return rows.filter((row) => (
     row.evidenceState.status === 'pending'
     && isAutomatableEvidenceRow(row)
     && (allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword)))
+    && (
+      batchCandidates.length === 0
+      || batchCandidates.some(
+        (candidate) => researchRowForMultiAngleCandidate([row], candidate),
+      )
+    )
   ))
 }
 
@@ -4912,91 +5482,283 @@ function renderNextResearchAction() {
   }
 }
 
-function winningNicheSearchIsRunning() {
-  return state.winningNicheAutomation?.status === 'running'
+function multiAngleSearchIsRunning() {
+  return state.multiAngleExploration?.status === 'running'
 }
 
-function continuousDiscoveryLane(axisId) {
-  if (axisId === 'style') return 'aesthetic'
-  if (['career', 'relationship', 'buyer-context'].includes(axisId)) return 'audience'
-  if (axisId === 'hobby') return 'moment'
-  return 'adjacent'
+function currentMultiAngleBatchCandidates() {
+  const persisted = state.multiAngleExploration.currentBatchCandidates
+  if (persisted.length > 0) return persisted
+
+  const targetKeys = new Set(
+    state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase),
+  )
+  const context = activeResearchContext()
+  const byKeyword = new Map()
+  ;[
+    ...state.multiAngleExploration.retryQueue.map((entry) => entry.candidate),
+    ...state.candidateCatalog,
+    ...state.candidates,
+  ].forEach((candidate) => {
+    const keyword = normalizePhrase(candidate?.keyword)
+    if (!keyword || !targetKeys.has(keyword)) return
+    if (candidate?.categoryId && candidate.categoryId !== context.categoryId) return
+    if (candidate?.eventId && candidate.eventId !== context.eventId) return
+    if (!byKeyword.has(keyword)) byKeyword.set(keyword, candidate)
+  })
+  return [...byKeyword.values()]
 }
 
-function continuousCandidateForResearch(candidate) {
-  const event = selectedEvent()
-  const category = selectedCategory()
+function marketplaceRelatedTerms() {
+  return marketplaceRelatedTermCandidates(
+    state.marketplaceInsightPlan,
+    activeResearchContext(),
+  )
+}
+
+function evidenceLearningRecords() {
+  return state.evidenceArchives.map(normalizeLearningRecord)
+}
+
+function nextTaxonomyCandidates() {
+  const { event, category } = activeResearchContext()
+  const evidenceKeys = new Set([
+    ...state.multiAngleExploration.evidenceKeys,
+    ...state.multiAngleExploration.queuedEvidenceKeys,
+  ])
+  const contextSuffix = `|${category.id}|${event.id}`
+  const keywordFromEvidenceKey = (evidenceKey) => {
+    const normalizedKey = String(evidenceKey ?? '')
+    return normalizedKey.endsWith(contextSuffix)
+      ? normalizedKey.slice(0, -contextSuffix.length)
+      : ''
+  }
+  const automation = startWinningNicheAutomation(
+    createWinningNicheAutomation({
+      researchedKeywords: state.multiAngleExploration.evidenceKeys
+        .map(keywordFromEvidenceKey)
+        .filter(Boolean),
+      queuedKeywords: state.multiAngleExploration.queuedEvidenceKeys
+        .map(keywordFromEvidenceKey)
+        .filter(Boolean),
+    }),
+    {
+      eventId: event.id,
+      eventTerm: event.searchTerm,
+      categoryId: category.id,
+      productTerm: category.searchTerm,
+    },
+  )
+  const batch = buildNextWinningNicheBatch({
+    automation,
+    batchSize: 50,
+    customRiskTerms: String(elements.riskInput.value ?? '')
+      .split(',')
+      .map((term) => term.trim())
+      .filter(Boolean),
+  })
+  return batch.candidates
+    .map((candidate) => ({
+      ...candidate,
+      categoryId: category.id,
+      eventId: event.id,
+      angleId: 'attribute-combination',
+      source: candidate.source,
+      sources: [candidate.source],
+      sourceKeywords: [candidate.axisTerm].filter(Boolean),
+      specificityAxis: candidate.axisId,
+      priorityScore: 70,
+    }))
+    .filter((candidate) => !evidenceKeys.has(candidateEvidenceKey(candidate)))
+}
+
+function measuredEventlessCandidates() {
+  const { category } = activeResearchContext()
+  return finalEvidenceRows()
+    .filter((row) => row.evidenceState.status === 'verified')
+    .filter((row) => !String(row.raw?.researchEventId ?? '').trim() || row.raw?.intentTrack === 'evergreen')
+    .filter((row) => (
+      String(row.raw?.researchCategoryId ?? row.researchCategoryId ?? '').trim()
+      === category.id
+    ))
+    .map((row) => ({
+      keyword: row.keyword,
+      eventId: '',
+      categoryId: category.id,
+      source: 'measured-evergreen',
+      priorityScore: row.scoreState.score,
+    }))
+}
+
+function currentSeasonalReferenceCandidates() {
+  const { eventId: activeEventId } = activeResearchContext()
+  return evidenceLearningRecords().flatMap((record) => {
+    const eventId = String(record.eventId ?? '').trim()
+    if (!eventId || eventId === activeEventId) return []
+    const event = resolveMarketEvent({ eventId })
+    const timingStatus = classifyProductionWindow(event).status
+    return (record.demandKeywords ?? []).map((row) => ({
+      keyword: row.keyword,
+      categoryId: record.categoryId,
+      eventId,
+      timingStatus,
+      source: 'seasonal-evidence-archive',
+    }))
+  })
+}
+
+function currentMultiAnglePools() {
+  const { event, category } = activeResearchContext()
+  const measuredRows = finalEvidenceRows()
+  return buildMultiAngleCandidatePools({
+    event,
+    category,
+    timingStatus: classifyProductionWindow(event).status,
+    relatedTerms: marketplaceRelatedTerms(),
+    taxonomyCandidates: nextTaxonomyCandidates(),
+    drilldownCandidates: currentCrossNicheDrilldown().candidates,
+    adjacentProductListings: adjacentProductListingsFromLearningRecords(
+      evidenceLearningRecords(),
+      {
+        categoryId: category.id,
+        eventId: event.id,
+        eventSnapshot: event,
+      },
+    ),
+    measuredRows,
+    evergreenCandidates: measuredEventlessCandidates(),
+    seasonalReferenceCandidates: currentSeasonalReferenceCandidates(),
+    savedNextCycleCandidates: state.savedSeasonalReferences,
+  })
+}
+
+function multiAngleCandidateForResearch(candidate) {
+  const context = activeResearchContext()
+  const candidateContext = resolveMultiAngleCandidateResearchContext(
+    state.multiAngleExploration,
+    candidate,
+    {
+      eventId: context.eventId,
+      categoryId: context.categoryId,
+      eventSnapshot: context.event,
+      categorySnapshot: context.category,
+    },
+  )
+  const event = candidateContext.eventSnapshot ?? resolveMarketEvent({
+    eventId: candidateContext.eventId,
+  })
+  const category = candidateContext.categorySnapshot ?? PRODUCT_CATEGORIES.find(
+    (item) => item.id === candidateContext.categoryId,
+  ) ?? context.category
   const keyword = normalizePhrase(candidate.keyword)
+  const riskTerms = detectRiskTerms(keyword, elements.riskInput.value.split(/\r?\n|,/))
   return {
+    ...candidate,
     keyword,
     categoryId: category.id,
-    categoryLabel: `連続探索 / ${candidate.axisLabel}`,
-    eventId: event.id,
-    eventLabel: event.jpLabel,
+    categoryLabel: category.label,
+    categorySearchTerm: category.searchTerm,
+    eventId: candidate.resultLane === 'evergreen' ? '' : event.id,
+    eventLabel: candidate.resultLane === 'evergreen' ? 'Evergreen' : event.jpLabel,
+    eventSearchTerm: candidate.resultLane === 'evergreen' ? '' : event.searchTerm,
     year: selectedYearOption(),
     targets: selectedTargets(),
     wordCount: keyword.split(' ').filter(Boolean).length,
-    score: 70,
-    reasons: [`${candidate.axisLabel}辞書から未調査の切り口を選択`],
-    riskTerms: [],
-    status: 'ready',
-    source: candidate.source,
+    score: candidate.priorityScore ?? 70,
+    reasons: [`${candidate.angleId}から既存エビデンス候補を選択`],
+    riskTerms,
+    status: riskTerms.length > 0 ? 'review' : 'ready',
     queryStrategy: 'cross-niche',
-    discoveryLane: continuousDiscoveryLane(candidate.axisId),
-    intentTrack: classifyEventMarketTrack(keyword, currentOptions()),
-    specificityAxis: candidate.axisId,
-    axisTerms: [candidate.axisTerm],
-    buyerIntentAxes: [candidate.axisLabel],
-    crossNicheDepth: candidate.depth,
-    crossNicheRoot: normalizePhrase(`${event.searchTerm} ${category.searchTerm}`),
+    discoveryLane: candidate.angleId === 'demand-neighborhood' ? 'adjacent' : 'aesthetic',
+    specificityAxis: candidate.angleId,
+    intentTrack: candidate.resultLane === 'evergreen'
+      ? 'evergreen'
+      : classifyEventMarketTrack(keyword, {
+          ...activeResearchOptions(),
+          eventId: event.id,
+          categoryId: category.id,
+        }),
+    timing: getMarketTiming(event),
+    candidateStage: 'idea',
   }
 }
 
-function queueNextWinningNicheBatch() {
-  if (!winningNicheSearchIsRunning()) return false
-  const result = buildNextWinningNicheBatch({
-    automation: state.winningNicheAutomation,
-    batchSize: 8,
-    customRiskTerms: elements.riskInput.value.split(/\r?\n|,/),
+function nextAppMultiAngleBatch() {
+  const pools = currentMultiAnglePools()
+  return nextMultiAngleBatch({
+    state: state.multiAngleExploration,
+    pools,
+    limit: 8,
+    preferNormalCandidates: state.multiAngleExploration.retryQueue.length > 0,
   })
-  state.winningNicheAutomation = result.automation
+}
+
+function invalidateMultiAngleRetrySchedule() {
+  multiAngleRetryScheduler.invalidate()
+}
+
+function scheduleMultiAngleRetry(delayMs) {
+  multiAngleRetryScheduler.schedule({
+    delayMs,
+    isCurrent: () => (
+      multiAngleSearchIsRunning()
+      && state.multiAngleExploration.retryQueue.length > 0
+    ),
+    dispatch: () => queueNextMultiAngleBatch(),
+  })
+}
+
+function queueNextMultiAngleBatch() {
+  if (!multiAngleSearchIsRunning()) return false
+  invalidateMultiAngleRetrySchedule()
+  const result = nextAppMultiAngleBatch()
+  state.multiAngleExploration = result.state
   if (result.candidates.length === 0) {
     state.pendingEvidenceAutomation.active = false
     state.pendingEvidenceAutomation.scheduled = false
     state.pendingEvidenceAutomation.currentStage = ''
     state.pendingEvidenceAutomation.targetKeywords = []
-    setSimpleStatus(result.reason === 'candidate-pool-exhausted'
-      ? '安全な未調査候補を使い切ったため、連続探索を一時停止しました。'
-      : state.winningNicheAutomation.pauseReason)
+    if (result.reason === 'retry-wait') {
+      const nextRetryAt = state.multiAngleExploration.retryQueue
+        .map((entry) => Date.parse(entry.retryAt))
+        .filter(Number.isFinite)
+        .sort((left, right) => left - right)[0]
+      const delayMs = Math.max(250, (nextRetryAt ?? Date.now()) - Date.now())
+      setSimpleStatus('通常候補を確認しました。時間切れ候補は再試行時刻になったら続けます。')
+      scheduleMultiAngleRetry(delayMs)
+    } else {
+      setSimpleStatus(result.reason === 'all-angles-exhausted'
+        ? 'すべての探索角度を確認しました。'
+        : state.multiAngleExploration.pauseReason)
+    }
     renderAll()
     persistMarketFinderState()
-    return false
+    return result.reason === 'retry-wait'
   }
 
-  const candidates = result.candidates.map(continuousCandidateForResearch)
+  const candidates = result.candidates.map(multiAngleCandidateForResearch)
   const previousRound = currentResearchRound()
   if (previousRound && previousRound.status !== 'complete') {
     state.researchRounds = updateResearchRound(state.researchRounds, previousRound.id, {
       status: 'complete',
       completedAt: new Date().toISOString(),
-      stopReason: 'A/B候補がなかったため、次の探索カテゴリへ移行',
+      stopReason: '現在角度のバッチを完了し、次の探索へ移行',
     })
   }
   state.candidates = candidates
   mergeCandidateCatalog(candidates)
   state.researchRounds = startResearchRound(state.researchRounds, {
-    type: 'continuous-niche',
-    depth: state.winningNicheAutomation.round,
+    type: 'multi-angle',
+    angleId: state.multiAngleExploration.currentAngleId || candidates[0].angleId,
+    depth: state.multiAngleExploration.angleIndex + 1,
     candidateKeywords: candidates.map((candidate) => candidate.keyword),
     status: 'pending-everbee',
     startedAt: new Date().toISOString(),
-    startReason: `${candidates[0].categoryLabel}から未調査候補を自動生成`,
+    startReason: `${candidates[0].angleId}の既存エビデンスから候補を選択`,
   })
   state.candidateRoundId = state.researchRounds.activeRoundId
   state.researchRounds.selectedRoundId = 'all'
   state.activeDiscoveryLane = 'all'
-  state.marketplaceInsightPlan = null
-  state.marketplaceInsightMessage = ''
   state.selectedResultKey = ''
   state.seoPlan = null
   state.erankQueryPlan = []
@@ -5010,132 +5772,302 @@ function queueNextWinningNicheBatch() {
     targetKeywords: candidates.map((candidate) => candidate.keyword),
   }
   state.finalEvidenceFilter = 'pending'
-  state.candidateMessage = `連続探索${state.winningNicheAutomation.round}: ${candidates[0].categoryLabel}を調査します。`
+  state.candidateMessage = `${candidates[0].angleId}: ${candidates.length}件を調査します。`
   setFlowMode('auto', { persist: false })
-  setSimpleStatus(`${candidates[0].categoryLabel}から${candidates.length}件を作成しました。EverBeeで実売候補を絞ってからEtsy公式で確認します。`)
+  setSimpleStatus(`${candidates[0].angleId}から${candidates.length}件を既存の検証パイプラインへ追加しました。`)
   renderAll()
   persistMarketFinderState()
   schedulePendingEvidenceAutomation(0)
   return true
 }
 
-async function startWinningNicheSearch() {
+async function startMultiAngleSearch() {
+  invalidateMultiAngleRetrySchedule()
+  const researchContext = activeResearchContext()
+  const timing = classifyProductionWindow(researchContext.event)
+  if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+    setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は開始しません。')
+    renderAll()
+    return false
+  }
   if (!await confirmExtensionConnection()) return false
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
-  state.winningNicheAutomation = startWinningNicheAutomation(
-    state.winningNicheAutomation,
+  state.multiAngleExploration = startMultiAngleExploration(
+    state.multiAngleExploration,
     {
-      eventId: selectedEvent().id,
-      eventTerm: selectedEvent().searchTerm,
-      categoryId: selectedCategory().id,
-      productTerm: selectedCategory().searchTerm,
+      activeEventId: researchContext.eventId,
+      categoryId: researchContext.categoryId,
+      eventSnapshot: researchContext.event,
+      categorySnapshot: researchContext.category,
       targetWinnerCount: target.targetWinnerCount,
     },
   )
-  return queueNextWinningNicheBatch()
+  return queueNextMultiAngleBatch()
 }
 
-async function startNewWinningNicheCycle() {
-  if (!await confirmExtensionConnection()) return false
-  state.winningNicheAutomation = resetWinningNicheCycle(state.winningNicheAutomation)
+async function startNewMultiAngleCycle() {
+  const terminalEvidencePersisted = await preserveTerminalMultiAngleEvidenceForNewDiscovery()
+  if (!terminalEvidencePersisted) return false
+  invalidateMultiAngleRetrySchedule()
+  const nextCycleContext = {
+    event: selectedEvent(),
+    category: selectedCategory(),
+  }
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
-  state.winningNicheAutomation = startWinningNicheAutomation(
-    state.winningNicheAutomation,
-    {
-      eventId: selectedEvent().id,
-      eventTerm: selectedEvent().searchTerm,
-      categoryId: selectedCategory().id,
-      productTerm: selectedCategory().searchTerm,
-      targetWinnerCount: target.targetWinnerCount,
-    },
+  const cycleContext = {
+    activeEventId: nextCycleContext.event.id,
+    categoryId: nextCycleContext.category.id,
+    eventSnapshot: researchEventSnapshot(nextCycleContext.event),
+    categorySnapshot: nextCycleContext.category,
+    targetWinnerCount: target.targetWinnerCount,
+  }
+  const prepared = prepareNewMultiAngleCycle({
+    exploration: state.multiAngleExploration,
+    pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+    savedSeasonalReferenceKeys: state.savedSeasonalReferenceKeys,
+    savedSeasonalReferences: state.savedSeasonalReferences,
+    evidenceArchives: state.evidenceArchives,
+    marketplaceInsightPlan: state.marketplaceInsightPlan,
+    marketplaceInsightMessage: state.marketplaceInsightMessage,
+    candidates: state.candidates,
+    candidateCatalog: state.candidateCatalog,
+    researchRows: state.researchRows,
+    researchRounds: state.researchRounds,
+    candidateRoundId: state.candidateRoundId,
+    erankQueryPlan: state.erankQueryPlan,
+    restoredResearchSavedAt: state.restoredResearchSavedAt,
+    restoredResultsAccepted: state.restoredResultsAccepted,
+    acceptExtensionResults: state.acceptExtensionResults,
+    selectedResultKey: state.selectedResultKey,
+    seoPlan: state.seoPlan,
+    crossNicheProposal: state.crossNicheProposal,
+  }, cycleContext)
+  state.multiAngleExploration = prepared.exploration
+  state.pendingEvidenceAutomation = prepared.pendingEvidenceAutomation
+  state.marketplaceInsightPlan = prepared.marketplaceInsightPlan
+  state.marketplaceInsightMessage = prepared.marketplaceInsightMessage
+  state.candidates = prepared.candidates
+  state.candidateCatalog = prepared.candidateCatalog
+  state.researchRows = prepared.researchRows
+  state.researchRounds = prepared.researchRounds
+  state.candidateRoundId = prepared.candidateRoundId
+  state.erankQueryPlan = prepared.erankQueryPlan
+  state.restoredResearchSavedAt = prepared.restoredResearchSavedAt
+  state.restoredResultsAccepted = prepared.restoredResultsAccepted
+  state.acceptExtensionResults = prepared.acceptExtensionResults
+  state.selectedResultKey = prepared.selectedResultKey
+  state.seoPlan = prepared.seoPlan
+  state.crossNicheProposal = prepared.crossNicheProposal
+  state.crossNicheWorkflow = createCrossNicheWorkflowState()
+  renderAll()
+  persistMarketFinderState()
+
+  const timing = classifyProductionWindow(nextCycleContext.event)
+  if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+    setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は開始しません。')
+    renderAll()
+    return false
+  }
+  if (!await confirmExtensionConnection()) return false
+  state.multiAngleExploration = startMultiAngleExploration(
+    state.multiAngleExploration,
+    cycleContext,
   )
-  return queueNextWinningNicheBatch()
+  return queueNextMultiAngleBatch()
 }
 
-function pauseWinningNicheSearch(reason = '') {
-  if (!winningNicheSearchIsRunning()) return
-  state.winningNicheAutomation = pauseWinningNicheAutomation(state.winningNicheAutomation, reason)
+function pauseMultiAngleSearch(reason = '', failureCode = '') {
+  invalidateMultiAngleRetrySchedule()
+  if (!multiAngleSearchIsRunning()) return
+  const candidate = currentMultiAngleBatchCandidates().find((item) => (
+    state.pendingEvidenceAutomation.targetKeywords.includes(item.keyword)
+  ))
+  const globalFailure = ['service-unavailable', 'login-required', 'rate-limited'].includes(failureCode)
+  state.multiAngleExploration = globalFailure && candidate
+    ? recordMultiAngleFailure(state.multiAngleExploration, candidate, { code: failureCode })
+    : pauseMultiAngleExploration(state.multiAngleExploration, reason)
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
   state.pendingEvidenceAutomation.currentStage = ''
-  setSimpleStatus(state.winningNicheAutomation.pauseReason)
+  setSimpleStatus(reason || state.multiAngleExploration.pauseReason)
   renderAll()
   persistMarketFinderState()
 }
 
-async function stopWinningNicheSearch() {
-  state.winningNicheAutomation = stopWinningNicheAutomation(state.winningNicheAutomation)
-  state.pendingEvidenceAutomation.active = false
-  state.pendingEvidenceAutomation.scheduled = false
-  state.pendingEvidenceAutomation.currentStage = ''
-  if (state.marketplaceInsightAutoRunning) stopMarketplaceInsightAutomation()
-  else if (state.extensionState?.active) await stopExtensionResearch()
-  setSimpleStatus('勝ち候補の連続探索を停止しました。取得済み結果と待機候補は保持しています。')
-  renderAll()
-  persistMarketFinderState()
+function multiAngleWorkHasCurrentBatch() {
+  const status = state.multiAngleExploration?.status
+  if (status === 'running') return true
+  return ['paused', 'stopped'].includes(status) && (
+    state.multiAngleExploration.currentBatchCandidates.length > 0
+    || state.pendingEvidenceAutomation.targetKeywords.length > 0
+    || state.multiAngleExploration.queuedEvidenceKeys.length > 0
+  )
 }
 
-async function resumeWinningNicheSearch() {
+async function stopMultiAngleOrchestration(source = 'global') {
+  invalidateMultiAngleRetrySchedule()
+  const transition = stopMultiAngleWork({
+    exploration: state.multiAngleExploration,
+    pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+  }, source)
+  state.multiAngleExploration = transition.exploration
+  state.pendingEvidenceAutomation = transition.pendingEvidenceAutomation
+  const marketplaceWasActive = state.marketplaceInsightAutoRunning
+  const extensionWasActive = state.extensionState?.active
+  if (marketplaceWasActive) stopMarketplaceInsightAutomation({ skipMultiAngle: true })
+  if (extensionWasActive) await stopExtensionResearch({ skipMultiAngle: true })
+  setSimpleStatus('複数角度の探索を停止しました。取得済み結果と現在バッチは保持しています。')
+  renderAll()
+  persistMarketFinderState()
+  return true
+}
+
+async function stopMultiAngleSearch() {
+  return stopMultiAngleOrchestration('global')
+}
+
+async function resumeMultiAngleSearch() {
+  const researchContext = activeResearchContext()
+  const timing = classifyProductionWindow(researchContext.event)
+  if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+    setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は再開しません。')
+    renderAll()
+    return false
+  }
   if (!await confirmExtensionConnection()) return false
-  state.winningNicheAutomation = resumeWinningNicheAutomation(state.winningNicheAutomation)
-  const queuedKeywords = state.winningNicheAutomation.queuedKeywords
+  state.multiAngleExploration = resumeMultiAngleExploration(state.multiAngleExploration)
+  const queuedKeywords = state.pendingEvidenceAutomation.targetKeywords
   if (queuedKeywords.length > 0) {
     state.pendingEvidenceAutomation = {
+      ...state.pendingEvidenceAutomation,
       active: true,
       scheduled: false,
-      initialCount: queuedKeywords.length,
-      completedBatches: 0,
+      initialCount: Math.max(queuedKeywords.length, state.pendingEvidenceAutomation.initialCount),
       currentStage: '',
-      targetKeywords: [...queuedKeywords],
     }
-    setSimpleStatus(`${queuedKeywords.length}件の待機候補から連続探索を再開します。`)
+    setSimpleStatus(`${queuedKeywords.length}件の現在バッチから探索を再開します。`)
     renderAll()
     persistMarketFinderState()
     schedulePendingEvidenceAutomation(0)
     return true
   }
-  return queueNextWinningNicheBatch()
+  return queueNextMultiAngleBatch()
 }
 
-function completeWinningNicheBatch() {
-  if (!winningNicheSearchIsRunning()) return false
-  const targetKeys = new Set(state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase))
-  const batchRows = finalEvidenceRows().filter((row) => targetKeys.has(normalizePhrase(row.keyword)))
-  state.winningNicheAutomation = evaluateWinningNicheRows(state.winningNicheAutomation, batchRows)
+function multiAngleFailureCode(value = '') {
+  const message = String(value ?? '')
+  if (isExtensionResponseTimeout(message)) return 'service-unavailable'
+  if (/EverBee.*(?:timeout|time out)|page(?: load)?[ -]?timeout|page-timeout|ページ.*(?:時間切れ|タイムアウト)/i.test(message)) return 'page-timeout'
+  if (/rate.?limit|429|検索上限|アクセス制限/i.test(message)) return 'rate-limited'
+  if (/login|sign.?in|ログイン/i.test(message)) return 'login-required'
+  if (/unavailable|connection|接続|service/i.test(message)) return 'service-unavailable'
+  return 'unknown'
+}
 
-  if (state.winningNicheAutomation.status === 'winner-found') {
-    state.pendingEvidenceAutomation.active = false
-    state.pendingEvidenceAutomation.scheduled = false
-    state.pendingEvidenceAutomation.currentStage = ''
-    state.pendingEvidenceAutomation.targetKeywords = []
-    setSimpleStatus(`A/B候補を${state.winningNicheAutomation.winnerKeywords.length}/${state.winningNicheAutomation.targetWinnerCount}件確保しました。今回の探索を停止します。`)
-    renderAll()
-    persistMarketFinderState()
-    return true
+function continueAfterMultiAnglePageTimeout(message = '') {
+  const targetKeys = new Set(state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase))
+  const activeKeyword = normalizePhrase(state.extensionState?.currentKeyword)
+  const batchCandidates = currentMultiAngleBatchCandidates()
+  const candidate = batchCandidates.find((item) => (
+    targetKeys.has(normalizePhrase(item.keyword))
+    && (!activeKeyword || normalizePhrase(item.keyword) === activeKeyword)
+  )) ?? batchCandidates.find((item) => targetKeys.has(normalizePhrase(item.keyword)))
+  if (!candidate) {
+    pauseMultiAngleSearch('現在バッチの候補情報を復元できないため、対象ワードを保持して一時停止しました。')
+    return false
   }
 
-  const etsyConfirmationRows = pendingEvidenceBatch(
-    finalEvidenceRows(),
-    'pending-etsy',
-    8,
+  state.multiAngleExploration = recordMultiAngleFailure(
+    state.multiAngleExploration,
+    candidate,
+    { code: 'page-timeout', retryAfterMs: 60_000 },
   )
-  if (etsyConfirmationRows.length > 0) {
-    state.pendingEvidenceAutomation = {
-      active: true,
-      scheduled: false,
-      initialCount: etsyConfirmationRows.length,
-      completedBatches: 0,
-      currentStage: 'pending-etsy',
-      targetKeywords: etsyConfirmationRows.map((row) => row.keyword),
-    }
-    setSimpleStatus(`保存済みEverBee結果から有望な${etsyConfirmationRows.length}件をEtsy公式で確認します。`)
-    renderAll()
+  state.pendingEvidenceAutomation.targetKeywords = state.pendingEvidenceAutomation.targetKeywords
+    .filter((keyword) => normalizePhrase(keyword) !== normalizePhrase(candidate.keyword))
+  state.pendingEvidenceAutomation.scheduled = false
+  setSimpleStatus(`${candidate.keyword}はページ応答待ちで再試行へ移しました。ほかの通常候補を続けます。${message}`)
+  if (state.pendingEvidenceAutomation.targetKeywords.length > 0) {
+    state.pendingEvidenceAutomation.active = true
     persistMarketFinderState()
     schedulePendingEvidenceAutomation(0)
     return true
   }
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  persistMarketFinderState()
+  return queueNextMultiAngleBatch()
+}
 
-  return queueNextWinningNicheBatch()
+function completeMultiAngleBatch() {
+  if (!multiAngleSearchIsRunning()) return false
+  const originalTargetKeywords = [...state.pendingEvidenceAutomation.targetKeywords]
+  const targetKeys = new Set(originalTargetKeywords.map(normalizePhrase))
+  const unresolvedTargetKeys = new Set(targetKeys)
+  const batchCandidates = currentMultiAngleBatchCandidates()
+  if (targetKeys.size > 0 && batchCandidates.length === 0) {
+    pauseMultiAngleSearch('現在バッチの候補情報を復元できないため、対象ワードを保持して一時停止しました。')
+    return false
+  }
+  const evidenceRows = finalEvidenceRows()
+    .filter((row) => targetKeys.has(normalizePhrase(row.keyword)))
+  const successfulRows = []
+  for (const candidate of batchCandidates
+    .filter((item) => targetKeys.has(normalizePhrase(item.keyword)))) {
+    const row = researchRowForMultiAngleCandidate(evidenceRows, candidate)
+    if (!row) {
+      state.multiAngleExploration = recordMultiAngleFailure(
+        state.multiAngleExploration,
+        candidate,
+        { code: 'page-timeout', retryAfterMs: 60_000 },
+      )
+      unresolvedTargetKeys.delete(normalizePhrase(candidate.keyword))
+      continue
+    }
+    if (row.evidenceState.status === 'failed') {
+      const failureCode = multiAngleFailureCode(row.raw?.error)
+      state.multiAngleExploration = recordMultiAngleFailure(
+        state.multiAngleExploration,
+        candidate,
+        {
+          code: failureCode,
+          retryAfterMs: 60_000,
+        },
+      )
+      if (state.multiAngleExploration.status === 'paused') break
+      unresolvedTargetKeys.delete(normalizePhrase(candidate.keyword))
+      continue
+    }
+    successfulRows.push({ ...candidate, ...row })
+    unresolvedTargetKeys.delete(normalizePhrase(candidate.keyword))
+  }
+  if (successfulRows.length > 0) {
+    state.multiAngleExploration = recordMultiAngleBatch(
+      state.multiAngleExploration,
+      successfulRows,
+    )
+  }
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.scheduled = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  const unresolvedTargetKeywords = originalTargetKeywords
+    .filter((keyword) => unresolvedTargetKeys.has(normalizePhrase(keyword)))
+
+  if (state.multiAngleExploration.status === 'paused') {
+    state.pendingEvidenceAutomation.targetKeywords = unresolvedTargetKeywords
+    setSimpleStatus(`探索を一時停止しました: ${state.multiAngleExploration.pauseReason}`)
+    renderAll()
+    persistMarketFinderState()
+    return false
+  }
+  state.pendingEvidenceAutomation.targetKeywords = []
+  if (state.multiAngleExploration.status === 'winner-found') {
+    invalidateMultiAngleRetrySchedule()
+    setSimpleStatus(`A/B候補を${state.multiAngleExploration.winnerKeywords.length}/${state.multiAngleExploration.targetWinnerCount}件確保しました。今回の探索を停止します。`)
+    renderAll()
+    persistMarketFinderState()
+    return true
+  }
+  return queueNextMultiAngleBatch()
 }
 
 function renderPendingEvidenceAutomationButton(pendingCount = pendingEvidenceRows().length) {
@@ -5167,6 +6099,7 @@ function extensionBlockReason() {
 }
 
 function stopPendingEvidenceAutomation(message = '') {
+  invalidateMultiAngleRetrySchedule()
   if (!state.pendingEvidenceAutomation.active && !state.pendingEvidenceAutomation.scheduled) return
   state.pendingEvidenceAutomation.active = false
   state.pendingEvidenceAutomation.scheduled = false
@@ -5177,13 +6110,105 @@ function stopPendingEvidenceAutomation(message = '') {
   renderPendingEvidenceAutomationButton()
 }
 
+function pauseMultiAngleForBlockedTimingChange() {
+  const researchContext = activeResearchContext()
+  const timing = classifyProductionWindow(researchContext.event)
+  const blocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
+  if (!blocked) return false
+
+  const pendingWasActive = state.pendingEvidenceAutomation.active
+    || state.pendingEvidenceAutomation.scheduled
+  const explorationWasActive = multiAngleSearchIsRunning()
+  const marketplaceWasActive = state.marketplaceInsightAutoRunning
+    || state.marketplaceInsightBusy
+  if (!pendingWasActive && !explorationWasActive && !marketplaceWasActive) return false
+
+  invalidateMultiAngleRetrySchedule()
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.scheduled = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  state.restoredAutomationPending = false
+  if (explorationWasActive) {
+    state.multiAngleExploration = pauseMultiAngleExploration(
+      state.multiAngleExploration,
+      '制作時期が対象外へ変わったため、現在の候補を保持して一時停止しました。',
+    )
+  }
+  if (state.marketplaceInsightAutoRunning) {
+    stopMarketplaceInsightAutomation({ skipMultiAngle: true })
+  }
+  setSimpleStatus('制作時期が対象外へ変わったため、自動調査を一時停止しました。候補は保持しています。')
+  renderAll()
+  persistMarketFinderState()
+
+  if ((pendingWasActive || marketplaceWasActive) && state.extensionState?.active) {
+    stopExtensionResearch({ skipMultiAngle: true })
+      .catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+  }
+  return true
+}
+
+function pauseMultiAngleForInputChange() {
+  invalidateMultiAngleRetrySchedule()
+  const selectedContext = {
+    eventId: selectedEvent().id,
+    categoryId: selectedCategory().id,
+    eventSnapshot: researchEventSnapshot(selectedEvent()),
+    categorySnapshot: selectedCategory(),
+  }
+  const previousStatus = state.multiAngleExploration.status
+  const fixedContext = resolveMultiAngleResearchContext(
+    state.multiAngleExploration,
+    selectedContext,
+  )
+  const contextChanged = fixedContext.fixed && (
+    fixedContext.eventId !== selectedContext.eventId
+    || fixedContext.categoryId !== selectedContext.categoryId
+  )
+  if (previousStatus !== 'running' && !contextChanged) return false
+  if (!multiAngleWorkHasCurrentBatch() && !contextChanged) return false
+
+  state.multiAngleExploration = pauseMultiAngleForContextChange(
+    state.multiAngleExploration,
+    selectedContext,
+    '条件が変更されたため、現在バッチを保持して一時停止しました。新しい選択は次回サイクルで使います。',
+  )
+  if (state.multiAngleExploration.status === 'running') {
+    state.multiAngleExploration = pauseMultiAngleExploration(
+      state.multiAngleExploration,
+      '条件が変更されたため、現在バッチを保持して一時停止しました。新しい選択は次回サイクルで使います。',
+    )
+  }
+  state.pendingEvidenceAutomation.active = false
+  state.pendingEvidenceAutomation.scheduled = false
+  state.pendingEvidenceAutomation.currentStage = ''
+  state.restoredAutomationPending = false
+  if (state.marketplaceInsightAutoRunning) {
+    stopMarketplaceInsightAutomation({ skipMultiAngle: true })
+  }
+  if (state.extensionState?.active) {
+    stopExtensionResearch({ skipMultiAngle: true })
+      .catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+  }
+  setSimpleStatus('現在の探索を一時停止しました。変更した条件は次回サイクルで使います。')
+  renderAll()
+  persistMarketFinderState()
+  return true
+}
+
 function schedulePendingEvidenceAutomation(delayMs = 500) {
   if (!state.pendingEvidenceAutomation.active || state.pendingEvidenceAutomation.scheduled) return
+  const researchContext = activeResearchContext()
   state.pendingEvidenceAutomation.scheduled = true
   persistMarketFinderState()
   window.setTimeout(async () => {
     state.pendingEvidenceAutomation.scheduled = false
     if (!state.pendingEvidenceAutomation.active) return
+    const timing = classifyProductionWindow(researchContext.event)
+    if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+      pauseMultiAngleForBlockedTimingChange()
+      return
+    }
     if (state.extensionState?.active || state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) {
       schedulePendingEvidenceAutomation(2000)
       return
@@ -5194,8 +6219,8 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
       state.pendingEvidenceAutomation.targetKeywords,
     )
     if (remainingRows.length === 0) {
-      if (winningNicheSearchIsRunning() && state.pendingEvidenceAutomation.targetKeywords.length > 0) {
-        completeWinningNicheBatch()
+      if (multiAngleSearchIsRunning() && state.pendingEvidenceAutomation.targetKeywords.length > 0) {
+        completeMultiAngleBatch()
         return
       }
       const checked = Math.max(0, state.pendingEvidenceAutomation.initialCount)
@@ -5214,23 +6239,47 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
         allowedKeywords: state.pendingEvidenceAutomation.targetKeywords,
       })
       if (!started && state.pendingEvidenceAutomation.active) {
-        pauseWinningNicheSearch('次に開始できる検証がないため、連続探索を一時停止しました。')
-        stopPendingEvidenceAutomation('次に開始できる検証がないため、自動検証を停止しました。')
+        const failureCode = multiAngleFailureCode(state.progress.message)
+        if (failureCode === 'page-timeout' && multiAngleSearchIsRunning()) {
+          continueAfterMultiAnglePageTimeout()
+        } else {
+          pauseMultiAngleSearch(
+            '次に開始できる検証がないため、複数角度の探索を一時停止しました。',
+            failureCode,
+          )
+        }
       }
     } catch (error) {
-      pauseWinningNicheSearch(`連続探索を一時停止しました。${friendlyExtensionError(error)}`)
-      stopPendingEvidenceAutomation(`自動検証を停止しました。${friendlyExtensionError(error)}`)
+      const message = friendlyExtensionError(error)
+      const failureCode = multiAngleFailureCode(message)
+      if (failureCode === 'page-timeout' && multiAngleSearchIsRunning()) {
+        continueAfterMultiAnglePageTimeout(message)
+      } else {
+        pauseMultiAngleSearch(
+          `複数角度の探索を一時停止しました。${message}`,
+          failureCode,
+        )
+      }
     }
   }, delayMs)
 }
 
 function resumePersistedEvidenceAutomationIfReady() {
   if (!state.restoredAutomationPending || !state.extensionConnected) return false
+  const researchContext = activeResearchContext()
+  const timing = classifyProductionWindow(researchContext.event)
+  if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
+    setSimpleStatus('前回の未完了調査は自動再開しません。制作時期を確認して、続行を明示してください。')
+    renderAll()
+    return false
+  }
   state.restoredAutomationPending = false
   state.pendingEvidenceAutomation = normalizePendingEvidenceAutomation(
     state.pendingEvidenceAutomation,
   )
-  if (!state.pendingEvidenceAutomation.active) return false
+  if (!state.pendingEvidenceAutomation.active) {
+    return multiAngleSearchIsRunning() ? queueNextMultiAngleBatch() : false
+  }
 
   const delayMs = marketplaceRetryDelay(state.marketplaceRetryState)
   if (delayMs > 0) {
@@ -5246,7 +6295,10 @@ function resumePersistedEvidenceAutomationIfReady() {
 
 async function togglePendingEvidenceAutomation() {
   if (state.pendingEvidenceAutomation.active) {
-    state.winningNicheAutomation = stopWinningNicheAutomation(state.winningNicheAutomation)
+    if (multiAngleSearchIsRunning()) {
+      await stopMultiAngleSearch()
+      return
+    }
     stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
     if (state.marketplaceInsightAutoRunning) {
       stopMarketplaceInsightAutomation()
@@ -5265,22 +6317,6 @@ async function togglePendingEvidenceAutomation() {
   }
   if (!await confirmExtensionConnection()) return
 
-  state.winningNicheAutomation = startWinningNicheAutomation(
-    state.winningNicheAutomation,
-    {
-      eventId: selectedEvent().id,
-      eventTerm: selectedEvent().searchTerm,
-      categoryId: selectedCategory().id,
-      productTerm: selectedCategory().searchTerm,
-    },
-  )
-  state.winningNicheAutomation = createWinningNicheAutomation({
-    ...state.winningNicheAutomation,
-    queuedKeywords: [
-      ...state.winningNicheAutomation.queuedKeywords,
-      ...initialPendingRows.map((row) => row.keyword),
-    ],
-  })
   state.pendingEvidenceAutomation = {
     active: true,
     scheduled: false,
@@ -5301,10 +6337,20 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '',
       .map(normalizePhrase)
       .filter(Boolean),
   )
+  const batchCandidates = multiAngleSearchIsRunning()
+    ? currentMultiAngleBatchCandidates()
+    : []
   const rows = finalEvidenceRows().filter((row) => (
-    allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword))
+    (allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword)))
+    && (
+      batchCandidates.length === 0
+      || batchCandidates.some(
+        (candidate) => researchRowForMultiAngleCandidate([row], candidate),
+      )
+    )
   ))
   const requested = normalizePhrase(requestedKeyword)
+  const requestedContextKey = String(options.requestedContextKey ?? '').trim()
   const stageOrder = ['pending-etsy', 'pending-everbee', 'pending-erank']
   const batchLimit = Math.max(1, Math.min(
     FINAL_EVIDENCE_BATCH_SIZE,
@@ -5314,7 +6360,10 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '',
   let batch = []
 
   if (requested) {
-    const row = rows.find((item) => item.keyword === requested)
+    const row = rows.find((item) => (
+      item.keyword === requested
+      && (!requestedContextKey || item.key === requestedContextKey)
+    ))
     if (row && (row.evidenceState.status === 'pending' || row.evidenceState.status === 'failed')) {
       stage = stage || row.evidenceState.nextStage
       batch = [row]
@@ -5374,6 +6423,7 @@ function handleResultListClick(event) {
     verifyPendingEvidence(
       verifyButton.dataset.finalVerifyStage,
       verifyButton.dataset.finalVerifyKeyword,
+      { requestedContextKey: verifyButton.dataset.finalVerifyKey },
     ).catch((error) => setSimpleStatus(friendlyExtensionError(error)))
     return
   }
@@ -5428,7 +6478,7 @@ function bucketInputsAreEmpty() {
 }
 
 function autoBucketKeywords(showStatus = true) {
-  const options = currentOptions()
+  const options = activeResearchOptions()
   const allRanked = currentResearchAnalysis().scoredRows
   const everbeeRanked = allRanked.filter((row) => row.score.validation.hasEverbeeData)
   const ranked = everbeeRanked.length > 0 ? everbeeRanked : allRanked
@@ -5491,7 +6541,7 @@ function buildSeoPlan() {
     visibility: elements.visibilityBucketInput.value,
     reach: elements.reachBucketInput.value,
     bestSeller: elements.bestSellerBucketInput.value,
-  }, currentOptions())
+  }, activeResearchOptions())
 
   renderSeoPlan()
   elements.seoStatus.textContent = `SEO案を作成しました。タイトル ${state.seoPlan.titleLength}文字 / タグ ${state.seoPlan.tags.length}個`
@@ -5552,7 +6602,7 @@ function researchQueueRows(stageId = state.consoleUi.activeStage) {
   }
 
   if (stageId === 'erank') {
-    const completed = erankResultRows().map((row) => ({
+    const completed = erankResultRows().filter(isCurrentResearchRow).map((row) => ({
       keyword: row.keyword,
       ...deriveErankCaptureUiState(findResearchRow(row.keyword) ?? row, {
         active: Boolean(state.extensionState?.active)
@@ -5591,7 +6641,7 @@ function researchQueueRows(stageId = state.consoleUi.activeStage) {
   }
 
   if (stageId === 'everbee') {
-    const completed = everbeeResultRows()
+    const completed = everbeeResultRows().filter(isCurrentResearchRow)
     const completedByKeyword = new Map(
       completed.map((row) => [normalizePhrase(row.score?.normalized?.keyword ?? row.keyword), row])
     )
@@ -5744,8 +6794,7 @@ function renderResearchInspector() {
 }
 
 function researchHeaderState() {
-  const category = selectedCategory()
-  const event = selectedEvent()
+  const { category, event } = activeResearchContext()
   const year = selectedYearOption()
   const condition = [category.label, event.jpLabel, year ? `${year}年` : '年指定なし'].filter(Boolean).join(' / ')
   const marketplaceKeyword = openedMarketplaceInsightItem()?.query ?? nextMarketplaceInsightItem()?.query ?? ''
@@ -5755,6 +6804,7 @@ function researchHeaderState() {
     extensionState: state.extensionState,
     marketplaceActive: state.marketplaceInsightAutoRunning,
     marketplaceKeyword,
+    multiAngleStatus: state.multiAngleExploration.status,
   })
 }
 
@@ -5774,9 +6824,11 @@ function renderGlobalResearchStatus() {
 }
 
 function stopActiveResearch() {
+  if (multiAngleWorkHasCurrentBatch()) return stopMultiAngleOrchestration('global')
   const headerState = researchHeaderState()
   if (headerState.stopKind === 'marketplace') return stopMarketplaceInsightAutomation()
   if (headerState.stopKind === 'extension') return stopExtensionResearch()
+  if (headerState.stopKind === 'multi-angle') return stopMultiAngleOrchestration('global')
 }
 
 function researchConsoleMetrics() {
@@ -6060,6 +7112,7 @@ function generateCandidates({ preserveMarketplacePlan = false } = {}) {
 }
 
 function resetCandidatesForInputChange(message = '条件を変更しました。もう一度「候補を自動で探す」を押してください。') {
+  if (pauseMultiAngleForInputChange()) return
   state.candidates = []
   state.activeDiscoveryLane = 'all'
   state.marketplaceInsightPlan = null
@@ -6069,8 +7122,7 @@ function resetCandidatesForInputChange(message = '条件を変更しました。
 }
 
 function crossNicheCandidateForResearch(candidate) {
-  const event = selectedEvent()
-  const category = selectedCategory()
+  const { event, category } = activeResearchContext()
   const riskTerms = detectRiskTerms(candidate.keyword, elements.riskInput.value.split(/\r?\n|,/))
   const parentRow = findResearchRow(candidate.parentKeyword)
   const sourceAt = parentRow?.everbeeCheckedAt || parentRow?.etsyCheckedAt || parentRow?.erankCheckedAt || ''
@@ -6112,7 +7164,7 @@ function crossNicheCandidateForResearch(candidate) {
   return prioritizeEventCandidates(
     [researchCandidate],
     state.researchedMarketHistory,
-    currentOptions(),
+    activeResearchOptions(),
   )[0]
 }
 
@@ -6127,6 +7179,8 @@ function limitNextResearchCandidates(candidates, limit = 8) {
 }
 
 function buildMergedResearchRow(existingRow, row, keyword) {
+  const researchContext = activeResearchContext()
+  const researchOptions = activeResearchOptions()
   const keepExistingWhenBlank = (field) => {
     const incoming = row[field]
     return String(incoming ?? '').trim() !== '' ? incoming : existingRow?.[field]
@@ -6144,11 +7198,30 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     || existingRow?.sourceKeyword
     || erankSourceKeyword(existingRow ?? {})
   const candidate = state.candidates.find((item) => normalizePhrase(item.keyword) === keyword)
-  const researchEvent = selectedEvent()
-  const researchEventId = String(row.researchEventId ?? existingRow?.researchEventId ?? candidate?.eventId ?? researchEvent.id)
-  const researchCategoryId = String(row.researchCategoryId ?? existingRow?.researchCategoryId ?? candidate?.categoryId ?? elements.categorySelect.value)
+  const importedResearchContext = resolveMultiAngleImportedResearchContext(
+    state.multiAngleExploration,
+    {
+      row,
+      existingRow,
+      candidate,
+      selected: {
+        eventId: researchContext.eventId,
+        categoryId: researchContext.categoryId,
+        eventSnapshot: researchContext.event,
+        categorySnapshot: researchContext.category,
+      },
+    },
+  )
+  const researchEventId = importedResearchContext.eventId
+  const researchCategoryId = importedResearchContext.categoryId
+  const resultLane = String(
+    row.resultLane
+      ?? existingRow?.resultLane
+      ?? candidate?.resultLane
+      ?? (researchEventId ? 'event' : 'evergreen'),
+  ).trim()
   const intentTrack = classifyEventMarketTrack(keyword, {
-    ...currentOptions(),
+    ...researchOptions,
     eventId: researchEventId,
     categoryId: researchCategoryId,
   }, {
@@ -6173,8 +7246,11 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     researchRoundDepth: String(row.researchRoundDepth ?? existingRow?.researchRoundDepth ?? currentResearchRound()?.depth ?? ''),
     researchRoundStatus: String(row.researchRoundStatus ?? existingRow?.researchRoundStatus ?? currentResearchRound()?.status ?? ''),
     researchEventId,
-    researchEventLabel: String(row.researchEventLabel ?? existingRow?.researchEventLabel ?? candidate?.eventLabel ?? researchEvent.jpLabel),
+    researchEventLabel: importedResearchContext.eventLabel,
+    researchEventSearchTerm: importedResearchContext.eventSearchTerm,
     researchCategoryId,
+    researchCategoryLabel: importedResearchContext.categoryLabel,
+    researchCategorySearchTerm: importedResearchContext.categorySearchTerm,
     discoveryLane: String(row.discoveryLane ?? existingRow?.discoveryLane ?? candidate?.discoveryLane ?? ''),
     queryStrategy: String(row.queryStrategy ?? existingRow?.queryStrategy ?? candidate?.queryStrategy ?? ''),
     buyerIntentAxes: Array.isArray(row.buyerIntentAxes)
@@ -6186,6 +7262,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     occasion: String(row.occasion ?? existingRow?.occasion ?? candidate?.occasion ?? ''),
     personalization: String(row.personalization ?? existingRow?.personalization ?? candidate?.personalization ?? ''),
     intentTrack,
+    resultLane,
     historyClusterKey,
     listingsAnalyzed: keepExistingWhenBlank('listingsAnalyzed'),
     topMonthlySales: keepExistingWhenBlank('topMonthlySales'),
@@ -6254,9 +7331,14 @@ function buildMergedResearchRow(existingRow, row, keyword) {
 }
 
 function addResearchRows(rows) {
-  state.researchRows = mergeRowsByKey(state.researchRows, rows, {
-    keyOf: (row) => normalizePhrase(row.keyword),
-    merge: buildMergedResearchRow,
+  state.researchRows = mergeResearchRowsByContext(state.researchRows, rows, {
+    contextualize: (row) => buildMergedResearchRow(null, row, normalizePhrase(row.keyword)),
+    keyOf: researchRowContextKey,
+    merge: (existingRow, row) => buildMergedResearchRow(
+      existingRow,
+      row,
+      normalizePhrase(row.keyword),
+    ),
   })
   syncResearchMarketHistory()
   scheduleEvidenceAutoArchive()
@@ -6479,7 +7561,7 @@ async function copySeoTags() {
 }
 
 async function downloadJob() {
-  const options = currentOptions()
+  const options = activeResearchOptions()
   const job = {
     app: 'Market Finder',
     version: 2,
@@ -6550,7 +7632,7 @@ function researchRoundForRow(row) {
 function researchMetadataCsvValues(row) {
   const round = researchRoundForRow(row)
   const roundRows = round
-    ? analyzeResearchRows(researchRowsForRound(state.researchRows, round), currentOptions()).everbeeRows
+    ? analyzeResearchRows(researchRowsForRound(state.researchRows, round), activeResearchOptions()).everbeeRows
     : []
   const counts = round ? summarizeOpportunityCounts(roundRows) : { A: 0, B: 0, C: 0, D: 0 }
   const overallStatus = state.researchRounds.rounds.length > 0
@@ -6591,14 +7673,40 @@ function researchMetadataCsvValues(row) {
   ]
 }
 
+function researchExportContextForRow(row = {}) {
+  const context = activeResearchContext()
+  return resolveMultiAngleExportResearchContext(
+    state.multiAngleExploration,
+    {
+      row,
+      selected: {
+        eventId: context.eventId,
+        categoryId: context.categoryId,
+        eventSnapshot: context.event,
+        categorySnapshot: context.category,
+      },
+    },
+  )
+}
+
 function evidenceCsvValue(value, checked = false) {
   const metric = formatEvidenceMetric(value, { checked })
   return metric.kind === 'pending' ? '' : metric.text
 }
 
-function finalEvidenceMetadataCsvValues(row, evidenceByKeyword) {
-  const keyword = normalizePhrase(row?.keyword ?? row?.query)
-  const evidence = evidenceByKeyword.get(keyword)
+function researchExportRowContextKey(row = {}) {
+  const exportContext = researchExportContextForRow(row)
+  return researchRowContextKey({
+    ...row,
+    keyword: row?.keyword ?? row?.query,
+    researchEventId: exportContext.eventId,
+    researchCategoryId: exportContext.categoryId,
+    resultLane: row.resultLane ?? (exportContext.eventId ? 'event' : 'evergreen'),
+  })
+}
+
+function finalEvidenceMetadataCsvValues(row, evidenceByContext) {
+  const evidence = evidenceByContext.get(researchExportRowContextKey(row))
   const captureStatus = String(row?.erankCaptureStatus ?? '').trim()
     || (evidence?.erankChecked ? 'captured' : '')
   return [
@@ -6614,7 +7722,9 @@ function exportErankCsv() {
   const captureStates = erankCaptureStateRows()
     .filter((row) => !rowHasErankInput(findResearchRow(row.query) ?? {}))
   if (rows.length === 0 && captureStates.length === 0) return
-  const evidenceByKeyword = new Map(finalEvidenceRows().map((row) => [row.keyword, row]))
+  const evidenceByContext = new Map(
+    finalEvidenceRows().map((row) => [researchRowContextKey(row), row]),
+  )
 
   const header = [
     'Source Type',
@@ -6645,7 +7755,12 @@ function exportErankCsv() {
   const lines = rows.map((row) => {
     const normalized = row.erankOpportunity.normalized
     const sourceKeyword = erankSourceKeyword(row)
-    const track = marketTrackMetadataForRow(row)
+    const exportContext = researchExportContextForRow(row)
+    const track = marketTrackMetadataForRow({
+      ...row,
+      researchEventId: exportContext.eventId,
+      researchCategoryId: exportContext.categoryId,
+    })
     return [
       row.queryKind === 'base'
         ? 'eRank base query'
@@ -6655,8 +7770,8 @@ function exportErankCsv() {
       sourceKeyword,
       normalized.keyword,
       track.intentTrack,
-      track.researchEventId,
-      row.researchCategoryId || elements.categorySelect.value,
+      exportContext.eventId,
+      exportContext.categoryId,
       track.historyClusterKey,
       row.erankOpportunity.label,
       row.erankOpportunity.score,
@@ -6669,20 +7784,25 @@ function exportErankCsv() {
       row.crossNicheParent ?? '',
       row.crossNicheDepth ?? '',
       row.notes ?? '',
-      ...finalEvidenceMetadataCsvValues(row, evidenceByKeyword),
+      ...finalEvidenceMetadataCsvValues(row, evidenceByContext),
       ...researchMetadataCsvValues(row),
     ].map(csvCell).join(',')
   })
   const stateLines = captureStates.map((row) => {
-    const track = marketTrackMetadataForRow(row)
+    const exportContext = researchExportContextForRow(row)
+    const track = marketTrackMetadataForRow({
+      ...row,
+      researchEventId: exportContext.eventId,
+      researchCategoryId: exportContext.categoryId,
+    })
     const unknownMetric = row.status === 'no-data' ? 'Unknown' : ''
     return [
       'eRank planned query',
       row.sourceKeyword,
       row.query,
       track.intentTrack,
-      track.researchEventId,
-      elements.categorySelect.value,
+      exportContext.eventId,
+      exportContext.categoryId,
       track.historyClusterKey,
       row.status === 'failed' ? '検索済み・数値取得失敗' : row.status === 'no-data' ? 'Unknown' : '未検索',
       '',
@@ -6693,7 +7813,7 @@ function exportErankCsv() {
         ...row,
         keyword: row.query,
         erankCaptureStatus: row.status,
-      }, evidenceByKeyword),
+      }, evidenceByContext),
       ...researchMetadataCsvValues({
         ...row,
         keyword: row.query,
@@ -6719,7 +7839,9 @@ function exportDesignShortlistCsv() {
 
 function exportResultRowsCsv(rows, fileBaseName) {
   if (rows.length === 0) return
-  const evidenceByKeyword = new Map(finalEvidenceRows().map((row) => [row.keyword, row]))
+  const evidenceByContext = new Map(
+    finalEvidenceRows().map((row) => [researchRowContextKey(row), row]),
+  )
 
   const header = [
     'Rank',
@@ -6795,14 +7917,19 @@ function exportResultRowsCsv(rows, fileBaseName) {
     const brief = row.idea.nounBrief ?? {}
     const route = row.productRoute ?? {}
     const blockedForProduct = route.decision === 'Do not use'
-    const track = marketTrackMetadataForRow(row)
+    const exportContext = researchExportContextForRow(row)
+    const track = marketTrackMetadataForRow({
+      ...row,
+      researchEventId: exportContext.eventId,
+      researchCategoryId: exportContext.categoryId,
+    })
     return [
       index + 1,
       normalized.keyword,
       erankSourceKeyword(row),
       track.intentTrack,
-      track.researchEventId,
-      row.researchCategoryId || elements.categorySelect.value,
+      exportContext.eventId,
+      exportContext.categoryId,
       track.historyClusterKey,
       row.score.score,
       row.score.label,
@@ -6858,7 +7985,7 @@ function exportResultRowsCsv(rows, fileBaseName) {
       scoreReasonLabels(row.score).join(' / '),
       row.score.exclusionReasons.join(' / '),
       row.notes ?? '',
-      ...finalEvidenceMetadataCsvValues(row, evidenceByKeyword),
+      ...finalEvidenceMetadataCsvValues(row, evidenceByContext),
       ...researchMetadataCsvValues(row),
     ].map(csvCell).join(',')
   })
@@ -6911,7 +8038,7 @@ function confirmExportBeforeClearingResults({ scope = 'all', label = '前回結�
 
 function clearResearchResults(scope = 'all') {
   if (scope === 'everbee') {
-    state.researchRows = state.researchRows.filter((row) => !scoreEverbeeResult(row, currentOptions()).validation.hasEverbeeData)
+    state.researchRows = state.researchRows.filter((row) => !scoreEverbeeResult(row, activeResearchOptions()).validation.hasEverbeeData)
   } else {
     state.researchRows = []
     state.crossNicheWorkflow = createCrossNicheWorkflowState()
@@ -6955,8 +8082,8 @@ function fillTrendSample() {
   setTrendStatus('サンプルの流行語を入れました。まだ候補一覧には入っていません。', 'warn')
 }
 
-function applyTrendScoutTerms() {
-  if (!prepareForNewCandidateDiscovery()) return
+async function applyTrendScoutTerms() {
+  if (!await prepareForNewCandidateDiscovery()) return
   const count = trendScoutTerms().length
   generateCandidates()
   const made = state.candidates.length
@@ -6970,11 +8097,67 @@ function applyTrendScoutTerms() {
     : `流行語なしで調査候補を${made}件作りました。次は「Etsy公式確認を自動実行」です。`, 'ready')
 }
 
-function prepareForNewCandidateDiscovery() {
+async function preserveTerminalMultiAngleEvidenceForNewDiscovery() {
+  const exploration = createMultiAngleExplorationState(state.multiAngleExploration)
+  const record = evidenceArchiveRecord()
+  const result = await persistTerminalMultiAngleEvidenceBeforeReset({
+    exploration,
+    archiveRecord: record,
+    hasArchivedRecord: hasArchivedEvidenceRecord,
+    persistArchiveRecord: (terminalRecord) => saveEvidenceArchive({
+      automatic: true,
+      allowEmptyEvidence: true,
+      record: terminalRecord,
+    }),
+  })
+  if (result.ok) return true
+  const message = '前回の連続探索結果を保存できませんでした。結果は消していません。ローカルサーバーを確認して、もう一度「候補を自動で探す」を押してください。'
+  elements.evidenceArchiveStatus.textContent = message
+  setTrendStatus(message, 'warn')
+  setSimpleStatus(message)
+  return false
+}
+
+async function prepareForNewCandidateDiscovery() {
+  if (
+    state.researchRows.length > 0
+    && !confirmExportBeforeClearingResults({ scope: 'all', label: '前回のeRank・Etsy・EverBee結果' })
+  ) return false
+  const terminalEvidencePersisted = await preserveTerminalMultiAngleEvidenceForNewDiscovery()
+  if (!terminalEvidencePersisted) return false
   state.acceptExtensionResults = false
-  if (state.researchRows.length === 0) return true
-  if (!confirmExportBeforeClearingResults({ scope: 'all', label: '前回のeRank・Etsy・EverBee結果' })) return false
-  clearResearchResults('all')
+  if (state.researchRows.length > 0) clearResearchResults('all')
+  const event = selectedEvent()
+  const category = selectedCategory()
+  const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
+  const prepared = prepareNewMultiAngleCycle({
+    exploration: state.multiAngleExploration,
+    pendingEvidenceAutomation: state.pendingEvidenceAutomation,
+    savedSeasonalReferenceKeys: state.savedSeasonalReferenceKeys,
+    savedSeasonalReferences: state.savedSeasonalReferences,
+    evidenceArchives: state.evidenceArchives,
+    marketplaceInsightPlan: state.marketplaceInsightPlan,
+    marketplaceInsightMessage: state.marketplaceInsightMessage,
+    candidates: state.candidates,
+    candidateCatalog: state.candidateCatalog,
+    crossNicheProposal: state.crossNicheProposal,
+  }, {
+    activeEventId: event.id,
+    categoryId: category.id,
+    eventSnapshot: researchEventSnapshot(event),
+    categorySnapshot: category,
+    targetWinnerCount: target.targetWinnerCount,
+  })
+  state.multiAngleExploration = prepared.exploration
+  state.pendingEvidenceAutomation = prepared.pendingEvidenceAutomation
+  state.evidenceArchives = prepared.evidenceArchives
+  state.marketplaceInsightPlan = prepared.marketplaceInsightPlan
+  state.marketplaceInsightMessage = prepared.marketplaceInsightMessage
+  state.candidates = prepared.candidates
+  state.candidateCatalog = prepared.candidateCatalog
+  state.crossNicheProposal = prepared.crossNicheProposal
+  state.crossNicheWorkflow = createCrossNicheWorkflowState()
+  state.erankQueryPlan = []
   return true
 }
 
@@ -7003,7 +8186,7 @@ function appendTrendScoutCandidates(candidates) {
 }
 
 async function collectTrendScoutTerms() {
-  if (!prepareForNewCandidateDiscovery()) return
+  if (!await prepareForNewCandidateDiscovery()) return
   autoSelectBuyerIdentities({ persist: false })
   const originalLabel = elements.trendAutoBtn.textContent
   state.lastTrendRunStartedAt = new Date().toISOString()
@@ -7440,7 +8623,7 @@ function renderProgressModal(extensionState = state.extensionState) {
     } else if (state.progress.mode === 'keyword') {
       const round = currentResearchRound()
       if (round?.type === 'initial' && !isCrossNicheWorkflowPending(state.crossNicheWorkflow)) {
-        const rows = analyzeResearchRows(researchRowsForRound(state.researchRows, round), currentOptions()).everbeeRows
+        const rows = analyzeResearchRows(researchRowsForRound(state.researchRows, round), activeResearchOptions()).everbeeRows
         syncActiveRoundStatus('complete', {
           resultKeywords: rows.map((row) => row.keyword),
           opportunityCounts: summarizeOpportunityCounts(rows),
@@ -7587,8 +8770,10 @@ function handleExtensionMessage(event) {
     resumePersistedEvidenceAutomationIfReady()
     if (state.pendingEvidenceAutomation?.active && wasActive && !data.state?.active) {
       if (erankDailyLimitReached) {
-        pauseWinningNicheSearch('eRankの1日あたりの検索上限に達しました。翌日のリセット後に探索を再開してください。')
-        stopPendingEvidenceAutomation('eRankの1日あたりの検索上限に達したため停止しました。未検証は残しています。翌日のリセット後に再開してください。')
+        pauseMultiAngleSearch(
+          'eRankの1日あたりの検索上限に達しました。翌日のリセット後に探索を再開してください。',
+          'rate-limited',
+        )
       } else {
         schedulePendingEvidenceAutomation()
       }
@@ -7669,7 +8854,7 @@ async function pollExtensionState() {
     const message = friendlyExtensionError(error)
     state.extensionPollFailureCount = 0
     state.extensionConnected = false
-    pauseWinningNicheSearch(`Chrome拡張との接続が切れました。${message}`)
+    pauseMultiAngleSearch(`Chrome拡張との接続が切れました。${message}`, 'service-unavailable')
     releaseRunningControls()
     renderExtensionStateUpdate()
     elements.extensionStatus.textContent = message
@@ -8034,9 +9219,13 @@ async function runMarketplaceInsightAutomation() {
     if (state.pendingEvidenceAutomation.active) {
       if (stoppedByError || stoppedByUser) {
         if (stoppedByError) {
-          pauseWinningNicheSearch('Etsy公式確認でエラーが発生したため、連続探索を一時停止しました。')
+          pauseMultiAngleSearch(
+            'Etsy公式確認でエラーが発生したため、複数角度の探索を一時停止しました。',
+            multiAngleFailureCode(state.marketplaceInsightMessage),
+          )
+        } else {
+          stopPendingEvidenceAutomation('Etsy公式確認が停止したため、未検証の自動検証も停止しました。')
         }
-        stopPendingEvidenceAutomation('Etsy公式確認が停止したため、未検証の自動検証も停止しました。')
       } else {
         schedulePendingEvidenceAutomation()
       }
@@ -8044,7 +9233,10 @@ async function runMarketplaceInsightAutomation() {
   }
 }
 
-function stopMarketplaceInsightAutomation() {
+function stopMarketplaceInsightAutomation(options = {}) {
+  if (!options.skipMultiAngle && multiAngleWorkHasCurrentBatch()) {
+    return stopMultiAngleOrchestration('marketplace')
+  }
   if (!state.marketplaceInsightAutoRunning) return
   if (state.pendingEvidenceAutomation?.active) {
     stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
@@ -8188,7 +9380,10 @@ function skipMarketplaceInsight() {
   persistMarketFinderState()
 }
 
-async function stopExtensionResearch() {
+async function stopExtensionResearch(options = {}) {
+  if (!options.skipMultiAngle && multiAngleWorkHasCurrentBatch()) {
+    return stopMultiAngleOrchestration('extension')
+  }
   if (state.pendingEvidenceAutomation?.active) {
     stopPendingEvidenceAutomation('未検証の自動検証を停止しました。取得済み結果は保持しています。')
   }
@@ -8225,18 +9420,23 @@ function bindEvents() {
     persistMarketFinderState()
   })
   elements.eventSelect.addEventListener('change', () => {
+    state.timingOverrideConfirmed = false
+    const pausedForContext = pauseMultiAngleForInputChange()
     renderTargets({ syncYear: true })
     autoSelectBuyerIdentities({ refresh: true })
-    resetCandidatesForInputChange()
+    if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.customEventInput.addEventListener('input', () => {
+    state.timingOverrideConfirmed = false
+    const pausedForContext = pauseMultiAngleForInputChange()
     renderTargets({ syncYear: false })
     autoSelectBuyerIdentities({ refresh: true })
-    resetCandidatesForInputChange()
+    if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.categorySelect.addEventListener('change', () => {
+    const pausedForContext = pauseMultiAngleForInputChange()
     autoSelectBuyerIdentities({ refresh: true })
-    resetCandidatesForInputChange()
+    if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.yearInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.limitInput.addEventListener('input', () => resetCandidatesForInputChange())
@@ -8248,6 +9448,36 @@ function bindEvents() {
     resetCandidatesForInputChange()
   })
   elements.buyerActionInput.addEventListener('input', () => resetCandidatesForInputChange())
+  elements.marketTimingOverrideBtn?.addEventListener('click', () => {
+    state.timingOverrideConfirmed = true
+    setSimpleStatus('このイベントを固定したまま調査を続けます。')
+    renderAll()
+    resumePersistedEvidenceAutomationIfReady()
+  })
+  elements.seasonalReferenceLane?.addEventListener('click', (event) => {
+    const button = event.target?.closest?.('[data-save-seasonal-reference]')
+    if (!button) return
+    const key = String(button.dataset.saveSeasonalReference ?? '').trim()
+    if (!key || state.savedSeasonalReferenceKeys.includes(key)) return
+    const context = activeResearchContext()
+    const displayedReference = availableSeasonalReferenceCandidates()
+      .find((candidate) => explorationResultKey(candidate) === key)
+    if (!displayedReference) return
+    const reference = {
+      eventId: displayedReference.eventId,
+      categoryId: displayedReference.categoryId,
+      originEventId: context.eventId,
+      originCategoryId: context.categoryId,
+      keyword: displayedReference.keyword,
+      timingStatus: displayedReference.timingStatus,
+      source: displayedReference.source,
+    }
+    state.savedSeasonalReferenceKeys = [...state.savedSeasonalReferenceKeys, key]
+    state.savedSeasonalReferences = [...state.savedSeasonalReferences, reference]
+    setSimpleStatus('参考候補を次回用に保存しました。今回のA/B目標には追加していません。')
+    renderExplorationResultLanes()
+    persistMarketFinderState()
+  })
   elements.evidenceArchiveBtn?.addEventListener('click', saveEvidenceArchive)
   elements.buyerIdentityShuffleBtn?.addEventListener('click', () => {
     state.buyerIdentitySuggestOffset += 1
@@ -8391,21 +9621,21 @@ function bindEvents() {
     handleResultListClick(event)
   })
   elements.listingResearchTargetSaveBtn?.addEventListener('click', saveListingResearchTargetSettings)
-  elements.winningNicheAutomationToggle?.addEventListener('click', (event) => {
+  elements.winningNicheAutomationToggle?.addEventListener('click', async (event) => {
     const action = event.currentTarget.dataset.winningNicheAction
     if (action === 'stop') {
-      stopWinningNicheSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      await stopMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
     if (action === 'resume') {
-      resumeWinningNicheSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      await resumeMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
     if (action === 'new-cycle') {
-      startNewWinningNicheCycle().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+      await startNewMultiAngleCycle().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
       return
     }
-    startWinningNicheSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+    await startMultiAngleSearch().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
   })
   elements.finalEvidenceScrollProxy.addEventListener('scroll', () => {
     if (elements.finalEvidenceTable.scrollLeft !== elements.finalEvidenceScrollProxy.scrollLeft) {

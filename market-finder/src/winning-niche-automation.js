@@ -7,6 +7,8 @@ import {
   NICHE_TAXONOMY,
   taxonomyTerms,
 } from './niche-taxonomy.js'
+import { candidateEvidenceKey } from './multi-angle-candidates.js'
+import { createMultiAngleExplorationState } from './multi-angle-exploration.js'
 
 const VALID_STATUSES = new Set([
   'idle',
@@ -87,6 +89,34 @@ export function createWinningNicheAutomation(saved = {}) {
     startedAt: String(saved?.startedAt ?? '').trim(),
     updatedAt: String(saved?.updatedAt ?? '').trim(),
   }
+}
+
+export function migrateWinningNicheState(saved = {}) {
+  const legacy = createWinningNicheAutomation(saved)
+  const context = {
+    categoryId: legacy.categoryId,
+    eventId: legacy.eventId,
+  }
+  return createMultiAngleExplorationState({
+    status: legacy.status === 'exhausted' ? 'running' : legacy.status,
+    activeEventId: legacy.eventId,
+    categoryId: legacy.categoryId,
+    currentAngleId: legacy.currentAxis ? 'attribute-combination' : '',
+    evidenceKeys: legacy.researchedKeywords.map((keyword) => (
+      candidateEvidenceKey({ ...context, keyword })
+    )),
+    queuedEvidenceKeys: legacy.queuedKeywords.map((keyword) => (
+      candidateEvidenceKey({ ...context, keyword })
+    )),
+    retryQueue: [],
+    failedEvidenceKeys: [],
+    winnerKeywords: legacy.winnerKeywords,
+    targetWinnerCount: legacy.targetWinnerCount,
+    startedAt: legacy.startedAt,
+    updatedAt: legacy.updatedAt,
+    completedAt: legacy.completedAt,
+    pauseReason: legacy.pauseReason,
+  })
 }
 
 export function startWinningNicheAutomation(state = {}, context = {}, now = '') {

@@ -1,0 +1,248 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { readFile } from 'node:fs/promises'
+
+const [rawHtml, rawApp, rawCss] = await Promise.all([
+  readFile(new URL('../index.html', import.meta.url), 'utf8'),
+  readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
+  readFile(new URL('../styles.css', import.meta.url), 'utf8'),
+])
+const html = rawHtml.replace(/\r\n/g, '\n')
+const app = rawApp.replace(/\r\n/g, '\n')
+const css = rawCss.replace(/\r\n/g, '\n')
+
+test('shows production timing and requires explicit override outside 45-75 days', () => {
+  assert.match(html, /id="marketTimingGate"/)
+  assert.match(html, /id="marketTimingStatus"/)
+  assert.match(html, /id="marketTimingOverrideBtn"/)
+  assert.match(app, /function renderMarketTimingGate\(/)
+  assert.match(app, /timingOverrideConfirmed:\s*false/)
+  assert.match(app, /timingOverrideConfirmed\s*=\s*true/)
+  assert.match(app, /timingOverrideConfirmed\s*=\s*false/)
+  assert.match(app, /if \(\['early', 'late'\]\.includes\(timing\.status\) && !state\.timingOverrideConfirmed\)/)
+  for (const functionName of [
+    'startMultiAngleSearch',
+    'startNewMultiAngleCycle',
+    'resumeMultiAngleSearch',
+    'resumePersistedEvidenceAutomationIfReady',
+  ]) {
+    const body = app.match(new RegExp(`(?:async )?function ${functionName}\\(\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+    assert.match(body, /\['early', 'late'\]\.includes\(timing\.status\) && !state\.timingOverrideConfirmed/)
+  }
+})
+
+test('shows the selected event peak date and remaining days in the timing gate', () => {
+  const timingBody = app.slice(
+    app.indexOf('function renderMarketTimingGate()'),
+    app.indexOf('\nfunction ', app.indexOf('function renderMarketTimingGate()') + 1),
+  )
+  assert.match(timingBody, /timing\.peakDate/)
+  assert.match(timingBody, /timing\.daysUntil/)
+  assert.match(timingBody, /需要ピーク/)
+})
+
+test('shows the six exploration angles as one horizontal research route', () => {
+  assert.match(html, /id="multiAngleRail"/)
+  assert.match(html, /id="explorationAngleStatus"/)
+  assert.match(app, /function renderExplorationAngleRail\(/)
+  assert.match(app, /data-exploration-angle/)
+  for (const label of ['需要周辺', '属性組み合わせ', '新着販売', '別商品種', '市場の空白', '大市場・通年']) {
+    assert.match(app, new RegExp(label))
+  }
+  for (const status of ['未開始', '調査中', '完了', '候補なし']) {
+    assert.match(app, new RegExp(status))
+  }
+  assert.match(css, /\.multi-angle-rail\s*\{[\s\S]*grid-template-columns:\s*repeat\(6,/)
+})
+
+test('keeps event, evergreen, and seasonal-reference results in separate lanes', () => {
+  assert.match(html, /id="multiAngleResultLanes"/)
+  assert.match(html, /id="activeEventResultLane"/)
+  assert.match(html, /id="evergreenResultLane"/)
+  assert.match(html, /id="seasonalReferenceLane"/)
+  assert.match(html, /今回のA\/B目標には含みません/)
+  assert.match(app, /function renderExplorationResultLanes\(/)
+  assert.match(app, /buildTimelySeasonalSuggestions\(/)
+})
+
+test('seasonal references can only be saved for a later run', () => {
+  const seasonalLane = html.match(/<article id="seasonalReferenceLane"[\s\S]*?<\/article>/)?.[0] ?? ''
+  assert.doesNotMatch(seasonalLane, /自動検索|調査を開始|探索を開始/)
+  assert.match(app, /次回候補に保存/)
+  assert.match(app, /data-save-seasonal-reference/)
+  assert.doesNotMatch(app, /data-(?:start|search)-seasonal-reference/)
+})
+
+test('desktop route and result lanes protect readable Japanese columns', () => {
+  assert.match(css, /\.exploration-angle-step\s*\{[\s\S]*min-width:\s*\d+px/)
+  assert.match(css, /\.exploration-angle-status\s*\{[\s\S]*min-width:\s*\d+px/)
+  assert.match(css, /\.exploration-result-lanes\s*\{[\s\S]*display:\s*grid/)
+  assert.match(css, /\.exploration-result-item\s*\{[\s\S]*min-width:\s*\d+px/)
+})
+
+test('an event change pauses scheduled verification without losing its targets', () => {
+  const pauseBody = app.slice(
+    app.indexOf('function pauseMultiAngleForBlockedTimingChange()'),
+    app.indexOf('\nfunction ', app.indexOf('function pauseMultiAngleForBlockedTimingChange()') + 1),
+  )
+  const scheduleBody = app.slice(
+    app.indexOf('function schedulePendingEvidenceAutomation('),
+    app.indexOf('\nfunction ', app.indexOf('function schedulePendingEvidenceAutomation(') + 1),
+  )
+  const eventChangeBody = app.slice(
+    app.indexOf("elements.eventSelect.addEventListener('change'"),
+    app.indexOf("elements.customEventInput.addEventListener('input'"),
+  )
+
+  assert.match(pauseBody, /state\.pendingEvidenceAutomation\.active = false/)
+  assert.match(pauseBody, /state\.pendingEvidenceAutomation\.scheduled = false/)
+  assert.match(pauseBody, /pauseMultiAngleExploration\(/)
+  assert.doesNotMatch(pauseBody, /targetKeywords\s*=\s*\[\]/)
+  assert.match(eventChangeBody, /pauseMultiAngleForInputChange\(\)/)
+  assert.match(eventChangeBody, /const pausedForContext = pauseMultiAngleForInputChange\(\)/)
+  assert.match(eventChangeBody, /if \(!pausedForContext\) resetCandidatesForInputChange\(\)/)
+  assert.ok(
+    scheduleBody.indexOf('pauseMultiAngleForBlockedTimingChange()')
+      < scheduleBody.indexOf("verifyPendingEvidence('', '',"),
+  )
+})
+
+test('keeps Stop available while blocked work is still active', () => {
+  const automationBody = app.slice(
+    app.indexOf('function renderWinningNicheAutomation()'),
+    app.indexOf('\nfunction ', app.indexOf('function renderWinningNicheAutomation()') + 1),
+  )
+  const timingBody = app.slice(
+    app.indexOf('function renderMarketTimingGate()'),
+    app.indexOf('\nfunction ', app.indexOf('function renderMarketTimingGate()') + 1),
+  )
+  assert.match(automationBody, /state\.marketplaceInsightAutoRunning/)
+  assert.match(automationBody, /state\.marketplaceInsightBusy/)
+  assert.match(timingBody, /const canStopActiveResearch/)
+  assert.match(timingBody, /disabled = blocked && !canStopActiveResearch/)
+})
+
+test('a blocked event change stops the Marketplace Insights loop without clearing targets', () => {
+  const pauseBody = app.slice(
+    app.indexOf('function pauseMultiAngleForBlockedTimingChange()'),
+    app.indexOf('\nfunction ', app.indexOf('function pauseMultiAngleForBlockedTimingChange()') + 1),
+  )
+  assert.match(pauseBody, /const marketplaceWasActive/)
+  assert.match(pauseBody, /stopMarketplaceInsightAutomation\(\{ skipMultiAngle: true \}\)/)
+  assert.doesNotMatch(pauseBody, /targetKeywords\s*=\s*\[\]/)
+})
+
+test('renders researched and candidate-none angles from explicit state without shared provenance', () => {
+  const angleStateBody = app.slice(
+    app.indexOf('function explorationAngleState('),
+    app.indexOf('\nfunction ', app.indexOf('function explorationAngleState(') + 1),
+  )
+  const angleState = new Function(
+    `${angleStateBody}; return explorationAngleState`,
+  )()
+
+  const automation = {
+    status: 'running',
+    currentAngleId: 'recent-sales',
+    completedAngles: ['demand-neighborhood'],
+    emptyAngles: ['attribute-combination'],
+    provenance: {
+      shared: ['market-gap'],
+    },
+  }
+
+  assert.equal(angleState(automation, 'demand-neighborhood', 0), 'complete')
+  assert.equal(angleState(automation, 'attribute-combination', 1), 'empty')
+  assert.equal(angleState(automation, 'recent-sales', 2), 'active')
+  assert.equal(angleState(automation, 'market-gap', 4), 'idle')
+  assert.doesNotMatch(angleStateBody, /automation\.provenance|automation\.evidenceKeys/)
+})
+
+test('keeps a paused current angle active even if restored terminal markers disagree', () => {
+  const angleStateBody = app.slice(
+    app.indexOf('function explorationAngleState('),
+    app.indexOf('\nfunction ', app.indexOf('function explorationAngleState(') + 1),
+  )
+  const angleState = new Function(
+    `${angleStateBody}; return explorationAngleState`,
+  )()
+  const automation = {
+    status: 'paused',
+    currentAngleId: 'demand-neighborhood',
+    currentBatchCandidates: [{ keyword: 'unresolved' }],
+    retryQueue: [],
+    completedAngles: ['demand-neighborhood'],
+    emptyAngles: ['demand-neighborhood'],
+  }
+
+  assert.equal(angleState(automation, 'demand-neighborhood', 0), 'active')
+})
+
+test('treats the last evergreen angle as final instead of repeating it as next', () => {
+  const progressBody = app.slice(
+    app.indexOf('function explorationRouteProgress('),
+    app.indexOf('\nfunction ', app.indexOf('function explorationRouteProgress(') + 1),
+  )
+  const explorationRouteProgress = new Function(
+    'EXPLORATION_ANGLE_ORDER',
+    `${progressBody}; return explorationRouteProgress`,
+  )([
+    'demand-neighborhood',
+    'attribute-combination',
+    'recent-sales',
+    'adjacent-product',
+    'market-gap',
+    'evergreen',
+  ])
+  const progress = explorationRouteProgress({
+    currentAngleId: 'evergreen',
+    completedAngles: [],
+    emptyAngles: [],
+  })
+
+  assert.equal(progress.currentAngleId, 'evergreen')
+  assert.equal(progress.nextAngleId, '')
+  assert.equal(progress.isFinal, true)
+  assert.match(app, /最終角度です。完了後は今回の探索を終了します。/)
+})
+
+test('uses terminal route copy without promising another angle', () => {
+  const copyBody = app.slice(
+    app.indexOf('function explorationRouteCopy('),
+    app.indexOf('\nfunction ', app.indexOf('function explorationRouteCopy(') + 1),
+  )
+  const explorationRouteCopy = new Function(
+    'EXPLORATION_ANGLE_LABELS',
+    'EXPLORATION_ANGLE_ORDER',
+    `${copyBody}; return explorationRouteCopy`,
+  )({
+    'demand-neighborhood': '需要周辺',
+    'attribute-combination': '属性掛け合わせ',
+  }, [
+    'demand-neighborhood',
+    'attribute-combination',
+  ])
+
+  const winnerCopy = explorationRouteCopy({
+    status: 'winner-found',
+    currentAngleId: 'demand-neighborhood',
+    completedAngles: [],
+    emptyAngles: [],
+  })
+  const exhaustedCopy = explorationRouteCopy({
+    status: 'exhausted',
+    currentAngleId: '',
+    completedAngles: [],
+    emptyAngles: ['demand-neighborhood', 'attribute-combination'],
+  })
+
+  assert.match(winnerCopy, /探索完了|目標達成/)
+  assert.match(exhaustedCopy, /探索完了|候補.*確認/)
+  assert.doesNotMatch(winnerCopy, /完了後|へ進/)
+  assert.doesNotMatch(exhaustedCopy, /未開始|最終角度|完了後|へ進/)
+})
+
+test('has no hidden all-seasonal save control or dead all-handler branch', () => {
+  assert.doesNotMatch(html, /data-save-seasonal-reference="all"/)
+  assert.doesNotMatch(app, /saveSeasonalReference === 'all'/)
+})

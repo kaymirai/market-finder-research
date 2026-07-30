@@ -2,11 +2,25 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const [html, app, css] = await Promise.all([
+import {
+  createMultiAngleExplorationState,
+  nextMultiAngleBatch,
+  recordMultiAngleBatch,
+} from '../src/multi-angle-exploration.js'
+import * as multiAngleApi from '../src/multi-angle-exploration.js'
+import * as candidateApi from '../src/multi-angle-candidates.js'
+import {
+  restorePendingEvidenceAutomation,
+} from '../src/persistent-evidence-automation.js'
+
+const [rawHtml, rawApp, rawCss] = await Promise.all([
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
 ])
+const html = rawHtml.replace(/\r\n/g, '\n')
+const app = rawApp.replace(/\r\n/g, '\n')
+const css = rawCss.replace(/\r\n/g, '\n')
 
 test('provides a single final evidence matrix with filters and bulk verification', () => {
   assert.match(html, /id="finalEvidenceFilters"/)
@@ -68,28 +82,104 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /自動検証を停止/)
 })
 
-test('continues with a new taxonomy batch after a completed no-winner verification', () => {
+test('continues with the next evidence angle after a completed no-winner verification', () => {
   assert.match(app, /from '\.\/winning-niche-automation\.js\?v=/)
   assert.match(app, /winningNicheAutomation:\s*createWinningNicheAutomation\(\)/)
-  assert.match(app, /function queueNextWinningNicheBatch\(/)
-  assert.match(app, /function startWinningNicheSearch\(/)
-  assert.match(app, /function pauseWinningNicheSearch\(/)
-  assert.match(app, /function stopWinningNicheSearch\(/)
-  assert.match(app, /function resumeWinningNicheSearch\(/)
-  assert.match(app, /evaluateWinningNicheRows\(/)
-  assert.match(app, /queueNextWinningNicheBatch\(\)/)
+  assert.match(app, /multiAngleExploration:\s*createMultiAngleExplorationState\(\)/)
+  assert.match(app, /function queueNextMultiAngleBatch\(/)
+  assert.match(app, /function startMultiAngleSearch\(/)
+  assert.match(app, /function pauseMultiAngleSearch\(/)
+  assert.match(app, /function stopMultiAngleSearch\(/)
+  assert.match(app, /function resumeMultiAngleSearch\(/)
+  assert.match(app, /recordMultiAngleBatch\(/)
+  assert.match(app, /return queueNextMultiAngleBatch\(\)/)
 })
 
-test('confirms saved EverBee sellers on Etsy before generating another taxonomy batch', () => {
-  const completeBody = app.match(/function completeWinningNicheBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
-  assert.match(completeBody, /pendingEvidenceBatch\(\s*finalEvidenceRows\(\),\s*'pending-etsy',\s*8,\s*\)/)
-  assert.match(completeBody, /targetKeywords:\s*etsyConfirmationRows\.map\(\(row\) => row\.keyword\)/)
+test('prefers a later normal candidate without completing its retained retry angle', () => {
+  const nextAppBody = app.slice(
+    app.indexOf('function nextAppMultiAngleBatch()'),
+    app.indexOf('\nfunction ', app.indexOf('function nextAppMultiAngleBatch()') + 1),
+  )
+  const pools = {
+    'demand-neighborhood': [{
+      keyword: 'spooky nurse shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+      angleId: 'demand-neighborhood',
+    }],
+    'recent-sales': [{
+      keyword: 'ghost gardener shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+      angleId: 'recent-sales',
+    }],
+  }
+  const appState = {
+    multiAngleExploration: createMultiAngleExplorationState({
+      status: 'running',
+      activeEventId: 'halloween',
+      categoryId: 'shirt',
+      currentAngleId: 'demand-neighborhood',
+      angleIndex: 0,
+      attemptedAngles: ['demand-neighborhood'],
+      retryQueue: [{
+        evidenceKey: 'spooky nurse shirt|shirt|halloween',
+        candidate: pools['demand-neighborhood'][0],
+        attempts: 1,
+        retryAt: '1970-01-01T00:00:00.000Z',
+      }],
+    }),
+  }
+  const nextAppMultiAngleBatch = new Function(
+    'state',
+    'currentMultiAnglePools',
+    'nextMultiAngleBatch',
+    `${nextAppBody}; return nextAppMultiAngleBatch`,
+  )(appState, () => pools, nextMultiAngleBatch)
+
+  const normal = nextAppMultiAngleBatch()
+  assert.deepEqual(normal.candidates.map((candidate) => candidate.keyword), [
+    'ghost gardener shirt',
+  ])
+  assert.equal(normal.state.retryQueue.length, 1)
+  assert.doesNotMatch(
+    [...normal.state.completedAngles, ...normal.state.emptyAngles].join(','),
+    /demand-neighborhood/,
+  )
+
+  appState.multiAngleExploration = recordMultiAngleBatch(normal.state, [{
+    ...normal.candidates[0],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  }])
+  const retry = nextAppMultiAngleBatch()
+  assert.equal(retry.reason, 'retry-ready')
+  assert.deepEqual(retry.candidates.map((candidate) => candidate.keyword), [
+    'spooky nurse shirt',
+  ])
+  assert.doesNotMatch(retry.state.completedAngles.join(','), /demand-neighborhood/)
+
+  appState.multiAngleExploration = recordMultiAngleBatch(retry.state, [{
+    ...retry.candidates[0],
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'C',
+  }])
+  const finished = nextAppMultiAngleBatch()
+  assert.match(finished.state.completedAngles.join(','), /demand-neighborhood/)
+})
+
+test('keeps unresolved targets when a global batch failure pauses exploration', () => {
+  const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
+  assert.match(completeBody, /const unresolvedTargetKeywords/)
+  assert.match(completeBody, /if \(state\.multiAngleExploration\.status === 'paused'\)/)
+  assert.match(completeBody, /targetKeywords = unresolvedTargetKeywords/)
   assert.ok(
-    completeBody.indexOf("pendingEvidenceBatch(\n    finalEvidenceRows(),\n    'pending-etsy',\n    8,") < completeBody.lastIndexOf('queueNextWinningNicheBatch()'),
+    completeBody.indexOf("if (state.multiAngleExploration.status === 'paused')")
+      < completeBody.indexOf('targetKeywords = []'),
   )
 })
 
-test('prefilters continuous taxonomy batches with EverBee before limited Etsy confirmation', () => {
+test('routes multi-angle batches through the existing evidence providers', () => {
   assert.match(app, /sanitizeLegacyMarketplaceInsightRow/)
   assert.match(app, /isEtsyEvidenceChecked/)
   assert.match(app, /selectEtsyConfirmationKeywords/)
@@ -97,7 +187,7 @@ test('prefilters continuous taxonomy batches with EverBee before limited Etsy co
   assert.match(app, /etsyMetricCaptureVersion:\s*2/)
   assert.match(
     app,
-    /type:\s*'continuous-niche'[\s\S]*status:\s*'pending-everbee'/,
+    /type:\s*'multi-angle'[\s\S]*status:\s*'pending-everbee'/,
   )
   assert.match(
     app,
@@ -105,19 +195,586 @@ test('prefilters continuous taxonomy batches with EverBee before limited Etsy co
   )
 })
 
-test('persists continuous-search progress and restores running work as paused', () => {
+test('persists multi-angle progress and reconstructs legacy pending targets', () => {
   assert.match(app, /winningNicheAutomation:\s*state\.winningNicheAutomation/)
+  assert.match(app, /multiAngleExploration:\s*state\.multiAngleExploration/)
   assert.match(
     app,
     /createWinningNicheAutomation\(\{[\s\S]*savedState\.winningNicheAutomation[\s\S]*targetWinnerCount:\s*restoredWinnerTarget/,
   )
-  assert.match(app, /前回の連続探索を復元しました/)
+  assert.match(app, /const legacyRestoreAutomation = restoringMultiAngleWork/)
+  assert.match(app, /queuedKeywords:\s*state\.winningNicheAutomation\.queuedKeywords/)
+  assert.match(app, /winningNicheAutomation:\s*legacyRestoreAutomation/)
 })
 
-test('keeps manual cross-niche confirmation but auto-applies it during continuous search', () => {
-  assert.match(app, /winningNicheSearchIsRunning\(\)[\s\S]*applyCrossNicheProposal\(\)/)
+test('reload waits through extension connection and explicit resume dispatches once', async () => {
+  assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
+  const restored = multiAngleApi.pauseMultiAngleWorkAfterReload({
+    exploration: createMultiAngleExplorationState({
+      status: 'running',
+      activeEventId: 'halloween',
+      categoryId: 'shirt',
+      currentBatchCandidates: [{
+        keyword: 'spooky nurse shirt',
+        eventId: 'halloween',
+        categoryId: 'shirt',
+      }],
+    }),
+    pendingEvidenceAutomation: {
+      active: true,
+      scheduled: true,
+      initialCount: 1,
+      completedBatches: 0,
+      currentStage: 'pending-etsy',
+      targetKeywords: ['spooky nurse shirt'],
+    },
+  })
+  const appState = {
+    multiAngleExploration: restored.exploration,
+    pendingEvidenceAutomation: restored.pendingEvidenceAutomation,
+    restoredAutomationPending: false,
+    extensionConnected: true,
+    timingOverrideConfirmed: true,
+  }
+  let dispatchCount = 0
+  const resumePersistedBody = app.slice(
+    app.indexOf('function resumePersistedEvidenceAutomationIfReady()'),
+    app.indexOf('\nasync function ', app.indexOf('function resumePersistedEvidenceAutomationIfReady()') + 1),
+  )
+  const resumePersisted = new Function(
+    'state',
+    `${resumePersistedBody}; return resumePersistedEvidenceAutomationIfReady`,
+  )(appState)
+
+  assert.equal(resumePersisted(), false)
+  assert.equal(dispatchCount, 0)
+
+  const resumeBody = app.slice(
+    app.indexOf('async function resumeMultiAngleSearch()'),
+    app.indexOf('\nfunction ', app.indexOf('async function resumeMultiAngleSearch()') + 1),
+  )
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const resume = await new AsyncFunction(
+    'state',
+    'activeResearchContext',
+    'classifyProductionWindow',
+    'confirmExtensionConnection',
+    'resumeMultiAngleExploration',
+    'setSimpleStatus',
+    'renderAll',
+    'persistMarketFinderState',
+    'schedulePendingEvidenceAutomation',
+    'queueNextMultiAngleBatch',
+    `${resumeBody}; return resumeMultiAngleSearch`,
+  )(
+    appState,
+    () => ({
+      event: { id: 'halloween' },
+      category: { id: 'shirt' },
+    }),
+    () => ({ status: 'timely' }),
+    async () => true,
+    multiAngleApi.resumeMultiAngleExploration,
+    () => {},
+    () => {},
+    () => {},
+    () => {
+      dispatchCount += 1
+    },
+    () => {
+      dispatchCount += 1
+      return true
+    },
+  )
+
+  assert.equal(await resume(), true)
+  assert.equal(dispatchCount, 1)
+})
+
+test('reload ignores an old Marketplace plan before restoring and resumes the current context once', async () => {
+  assert.equal(typeof candidateApi.marketplaceInsightPlanForContext, 'function')
+  assert.equal(typeof multiAngleApi.restoredMultiAngleTargetKeywords, 'function')
+  const exploration = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'christmas',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'christmas',
+      label: 'Christmas',
+      searchTerm: 'christmas',
+    },
+    categorySnapshot: {
+      id: 'shirt',
+      label: 'Shirt',
+      searchTerm: 'shirt',
+    },
+    currentBatchCandidates: [{
+      keyword: 'christmas nurse shirt',
+      eventId: 'christmas',
+      categoryId: 'shirt',
+    }],
+  })
+  const oldPlan = {
+    eventId: 'halloween',
+    categoryId: 'mug',
+    items: [{
+      query: 'halloween nurse mug',
+      status: 'planned',
+    }],
+  }
+  const compatiblePlan = {
+    eventId: 'christmas',
+    categoryId: 'shirt',
+    items: [{
+      query: 'christmas teacher shirt',
+      status: 'planned',
+    }],
+  }
+  const oldSavedPending = {
+    active: false,
+    scheduled: true,
+    targetKeywords: ['halloween nurse mug'],
+  }
+  const queuedKeywords = multiAngleApi.restoredMultiAngleTargetKeywords(
+    exploration,
+    oldSavedPending.targetKeywords,
+  )
+  const gatedOldPlan = candidateApi.marketplaceInsightPlanForContext(
+    oldPlan,
+    exploration,
+  )
+  const restoredPending = restorePendingEvidenceAutomation({
+    saved: oldSavedPending,
+    winningNicheAutomation: {
+      status: exploration.status,
+      queuedKeywords,
+    },
+    marketplaceInsightPlan: gatedOldPlan,
+  })
+  const restored = multiAngleApi.pauseMultiAngleWorkAfterReload({
+    exploration,
+    pendingEvidenceAutomation: restoredPending,
+  })
+
+  assert.equal(gatedOldPlan, null)
+  assert.equal(restored.exploration.status, 'paused')
+  assert.equal(restored.exploration.pauseReason, 'reload-required')
+  assert.deepEqual(
+    restored.pendingEvidenceAutomation.targetKeywords,
+    ['christmas nurse shirt'],
+  )
+  assert.equal(restored.pendingEvidenceAutomation.active, false)
+  assert.equal(restored.pendingEvidenceAutomation.scheduled, false)
+
+  const compatiblePending = restorePendingEvidenceAutomation({
+    saved: { active: false, targetKeywords: [] },
+    winningNicheAutomation: {
+      status: exploration.status,
+      queuedKeywords,
+    },
+    marketplaceInsightPlan: candidateApi.marketplaceInsightPlanForContext(
+      compatiblePlan,
+      exploration,
+    ),
+  })
+  assert.deepEqual(compatiblePending.targetKeywords, ['christmas teacher shirt'])
+
+  const restoreBody = app.match(/function restorePersistedState\(\) \{([\s\S]*?)\n\}\n\nfunction migrateLegacyResearchRounds/)?.[1] ?? ''
+  assert.ok(
+    restoreBody.indexOf('marketplaceInsightPlanForContext(')
+      < restoreBody.indexOf('restorePendingEvidenceAutomation({'),
+  )
+
+  const appState = {
+    multiAngleExploration: restored.exploration,
+    pendingEvidenceAutomation: restored.pendingEvidenceAutomation,
+    extensionConnected: true,
+    timingOverrideConfirmed: true,
+  }
+  let dispatchCount = 0
+  const resumeBody = app.slice(
+    app.indexOf('async function resumeMultiAngleSearch()'),
+    app.indexOf('\nfunction ', app.indexOf('async function resumeMultiAngleSearch()') + 1),
+  )
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const resume = await new AsyncFunction(
+    'state',
+    'activeResearchContext',
+    'classifyProductionWindow',
+    'confirmExtensionConnection',
+    'resumeMultiAngleExploration',
+    'setSimpleStatus',
+    'renderAll',
+    'persistMarketFinderState',
+    'schedulePendingEvidenceAutomation',
+    'queueNextMultiAngleBatch',
+    `${resumeBody}; return resumeMultiAngleSearch`,
+  )(
+    appState,
+    () => ({
+      event: { id: 'christmas' },
+      category: { id: 'shirt' },
+    }),
+    () => ({ status: 'timely' }),
+    async () => true,
+    multiAngleApi.resumeMultiAngleExploration,
+    () => {},
+    () => {},
+    () => {},
+    () => {
+      dispatchCount += 1
+    },
+    () => {
+      dispatchCount += 1
+      return true
+    },
+  )
+
+  assert.equal(await resume(), true)
+  assert.equal(dispatchCount, 1)
+})
+
+test('ordinary Marketplace reload keeps compatible and legacy plans outside multi-angle pausing', () => {
+  assert.equal(typeof multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow, 'function')
+  const exploration = createMultiAngleExplorationState({ status: 'idle' })
+  const ordinaryContext = {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'halloween',
+      label: 'Halloween',
+      searchTerm: 'halloween',
+    },
+  }
+  const matchingPlan = {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    items: [{
+      query: 'halloween nurse shirt',
+      status: 'planned',
+    }],
+  }
+  const legacyPlan = {
+    items: [{
+      query: 'legacy halloween shirt',
+      status: 'planned',
+    }],
+  }
+  const restorePlan = (plan) => (
+    multiAngleApi.restoreMarketplaceInsightPlanForResearchFlow(plan, {
+      exploration,
+      ordinaryContext,
+    })
+  )
+  const pendingFor = (plan) => restorePendingEvidenceAutomation({
+    saved: {
+      active: false,
+      scheduled: false,
+      targetKeywords: [],
+    },
+    winningNicheAutomation: {
+      status: 'running',
+      queuedKeywords: [],
+    },
+    marketplaceInsightPlan: restorePlan(plan),
+  })
+
+  assert.deepEqual(
+    pendingFor(matchingPlan).targetKeywords,
+    ['halloween nurse shirt'],
+  )
+  assert.deepEqual(
+    pendingFor(legacyPlan).targetKeywords,
+    ['legacy halloween shirt'],
+  )
+  assert.equal(exploration.status, 'idle')
+
+  const restoreBody = app.match(/function restorePersistedState\(\) \{([\s\S]*?)\n\}\n\nfunction migrateLegacyResearchRounds/)?.[1] ?? ''
+  assert.match(restoreBody, /const restoringMultiAngleWork = hasMeaningfulMultiAngleContext\(/)
+  assert.match(
+    restoreBody,
+    /if \(restoringMultiAngleWork\) \{[\s\S]*pauseMultiAngleWorkAfterReload\(/,
+  )
+  assert.match(
+    restoreBody,
+    /else \{[\s\S]*shouldAutoResumeEvidenceAutomation\(/,
+  )
+})
+
+test('explicit normal candidate discovery persists terminal work before resetting its fixed context', () => {
+  const preserveBody = app.match(/async function preserveTerminalMultiAngleEvidenceForNewDiscovery\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const prepareBody = app.match(/async function prepareForNewCandidateDiscovery\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const autoBody = app.match(/async function collectTrendScoutTerms\(\) \{([\s\S]*?)\n\}\n\nfunction/)?.[1] ?? ''
+  const applyBody = app.match(/async function applyTrendScoutTerms\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(preserveBody, /persistTerminalMultiAngleEvidenceBeforeReset\(/)
+  assert.match(preserveBody, /saveEvidenceArchive\(\{[\s\S]*record/)
+  assert.match(prepareBody, /await preserveTerminalMultiAngleEvidenceForNewDiscovery\(\)/)
+  assert.match(prepareBody, /if \(!terminalEvidencePersisted\) return false/)
+  assert.match(prepareBody, /prepareNewMultiAngleCycle\(/)
+  assert.ok(
+    prepareBody.indexOf('await preserveTerminalMultiAngleEvidenceForNewDiscovery()')
+      < prepareBody.indexOf('clearResearchResults'),
+  )
+  assert.ok(
+    prepareBody.indexOf('if (!terminalEvidencePersisted) return false')
+      < prepareBody.indexOf('prepareNewMultiAngleCycle('),
+  )
+  assert.ok(
+    autoBody.indexOf('await prepareForNewCandidateDiscovery()')
+      < autoBody.indexOf('generateCandidates()'),
+  )
+  assert.match(applyBody, /await prepareForNewCandidateDiscovery\(\)/)
+})
+
+test('new-cycle button persists terminal evidence before resetting or starting work', () => {
+  const newCycleBody = app.match(/async function startNewMultiAngleCycle\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const clickBody = app.match(/elements\.winningNicheAutomationToggle\?\.addEventListener\('click', async \(event\) => \{([\s\S]*?)\n  \}\)/)?.[1] ?? ''
+
+  assert.match(newCycleBody, /await preserveTerminalMultiAngleEvidenceForNewDiscovery\(\)/)
+  assert.match(newCycleBody, /if \(!terminalEvidencePersisted\) return false/)
+  assert.ok(
+    newCycleBody.indexOf('await preserveTerminalMultiAngleEvidenceForNewDiscovery()')
+      < newCycleBody.indexOf('prepareNewMultiAngleCycle('),
+  )
+  assert.ok(
+    newCycleBody.indexOf('if (!terminalEvidencePersisted) return false')
+      < newCycleBody.indexOf('state.multiAngleExploration = prepared.exploration'),
+  )
+  for (const field of [
+    'researchRows',
+    'researchRounds',
+    'candidateRoundId',
+    'erankQueryPlan',
+    'restoredResearchSavedAt',
+    'restoredResultsAccepted',
+    'acceptExtensionResults',
+    'selectedResultKey',
+    'seoPlan',
+  ]) {
+    assert.match(
+      newCycleBody,
+      new RegExp(`state\\.${field} = prepared\\.${field}`),
+      `new-cycle must install the prepared ${field} boundary`,
+    )
+  }
+  assert.match(clickBody, /await startNewMultiAngleCycle\(\)/)
+})
+
+test('completes a restored batch from persisted multi-angle candidates', () => {
+  const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
+  const timeoutBody = app.match(/function continueAfterMultiAnglePageTimeout\(message = ''\) \{([\s\S]*?)\n\}\n\nfunction completeMultiAngleBatch/)?.[1] ?? ''
+  assert.match(app, /function currentMultiAngleBatchCandidates\(/)
+  assert.match(app, /state\.multiAngleExploration\.currentBatchCandidates/)
+  assert.match(app, /const restoredMultiAngleTargets = restoredMultiAngleTargetKeywords\(/)
+  assert.match(app, /queuedKeywords:\s*restoredMultiAngleTargets/)
+  assert.match(completeBody, /currentMultiAngleBatchCandidates\(\)/)
+  assert.match(completeBody, /researchRowForMultiAngleCandidate\(/)
+  assert.match(timeoutBody, /currentMultiAngleBatchCandidates\(\)/)
+})
+
+test('scopes current multi-angle evidence rows before pending and completion decisions', () => {
+  const finalRowsBody = app.match(/function finalEvidenceRows\(\) \{([\s\S]*?)\n\}\n\nfunction finalEvidenceMetric/)?.[1] ?? ''
+  const completeBody = app.match(/function completeMultiAngleBatch\(\) \{([\s\S]*?)\n\}\n\nfunction renderPendingEvidenceAutomationButton/)?.[1] ?? ''
+
+  assert.match(finalRowsBody, /currentMultiAngleBatchCandidates\(\)/)
+  assert.match(finalRowsBody, /researchRowForMultiAngleCandidate\(/)
+  assert.match(completeBody, /researchRowForMultiAngleCandidate\(/)
+})
+
+test('keeps final evidence and CSV metadata indexed by research context instead of keyword alone', () => {
+  const finalRowsBody = app.match(/function finalEvidenceRows\(\) \{([\s\S]*?)\n\}\n\nfunction finalEvidenceMetric/)?.[1] ?? ''
+  const erankExportBody = app.match(/function exportErankCsv\(\) \{([\s\S]*?)\n\}\n\nfunction exportStep4Csv/)?.[1] ?? ''
+  const resultExportBody = app.match(/function exportResultRowsCsv\([^)]*\) \{([\s\S]*?)\n\}\n\nfunction exportAvailableResearchCsv/)?.[1] ?? ''
+
+  assert.match(finalRowsBody, /researchRowContextKey\(/)
+  assert.match(finalRowsBody, /key:\s*contextKey/)
+  assert.doesNotMatch(finalRowsBody, /const scoredByKeyword = new Map/)
+  assert.match(erankExportBody, /evidenceByContext/)
+  assert.match(resultExportBody, /evidenceByContext/)
+  assert.doesNotMatch(erankExportBody, /const evidenceByKeyword = new Map/)
+  assert.doesNotMatch(resultExportBody, /const evidenceByKeyword = new Map/)
+})
+
+test('assigns imported batch context before merging research rows', () => {
+  const addRowsBody = app.match(/function addResearchRows\(rows\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(addRowsBody, /mergeResearchRowsByContext\(/)
+  assert.match(addRowsBody, /contextualize:\s*\(row\)\s*=>\s*buildMergedResearchRow\(null,\s*row/)
+  assert.match(addRowsBody, /keyOf:\s*researchRowContextKey/)
+})
+
+test('archives learning rows only from the active research context', () => {
+  const modifierBody = app.match(/function modifierEvidenceInput\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const archiveBody = app.match(/function evidenceArchiveRecord\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(modifierBody, /candidateMatchesResearchContext\(/)
+  assert.match(modifierBody, /requireContext:\s*true/)
+  assert.match(archiveBody, /contextualResearchRows/)
+  assert.match(archiveBody, /rows:\s*contextualResearchRows/)
+})
+
+test('uses one fixed research context for gates pools resume results and archives', () => {
+  const activeContext = app.match(/function activeResearchContext\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(app, /function activeResearchContext\(/)
+  assert.match(app, /resolveMultiAngleResearchContext\(/)
+  assert.match(activeContext, /eventSnapshot/)
+  assert.match(activeContext, /categorySnapshot/)
+  assert.match(app, /eventSnapshot:\s*researchContext\.event/)
+  assert.match(app, /categorySnapshot:\s*researchContext\.category/)
+  for (const functionName of [
+    'evidenceArchiveRecord',
+    'renderMarketTimingGate',
+    'renderExplorationResultLanes',
+    'currentMultiAnglePools',
+    'resumeMultiAngleSearch',
+    'schedulePendingEvidenceAutomation',
+  ]) {
+    const body = app.match(new RegExp(`function ${functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+    assert.match(body, /activeResearchContext\(\)/, `${functionName} must use the fixed context`)
+  }
+  assert.match(app, /pauseMultiAngleForContextChange\(/)
+})
+
+test('routes analysis Marketplace planning and Etsy row metadata through fixed research options', () => {
+  const analysis = app.match(/function currentResearchAnalysis\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const plan = app.match(/function rebuildMarketplaceInsightPlan\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const mergedRow = app.match(/function buildMergedResearchRow\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(app, /function activeResearchOptions\(/)
+  assert.match(analysis, /activeResearchOptions\(\)/)
+  assert.match(plan, /activeResearchOptions\(\)/)
+  assert.match(plan, /eventId:\s*researchOptions\.eventId/)
+  assert.match(plan, /categoryId:\s*researchOptions\.categoryId/)
+  assert.match(mergedRow, /activeResearchContext\(\)/)
+  assert.match(mergedRow, /activeResearchOptions\(\)/)
+})
+
+test('keeps multi-angle candidate conversion and imported metadata on the frozen context', () => {
+  const candidate = app.match(/function multiAngleCandidateForResearch\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const mergedRow = app.match(/function buildMergedResearchRow\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(candidate, /resolveMultiAngleCandidateResearchContext\(/)
+  assert.match(candidate, /eventSearchTerm/)
+  assert.match(candidate, /categorySearchTerm/)
+  assert.match(mergedRow, /resolveMultiAngleImportedResearchContext\(/)
+  assert.match(mergedRow, /researchEventSearchTerm/)
+  assert.match(mergedRow, /researchCategorySearchTerm/)
+})
+
+test('uses frozen options for round summaries drilldown archives and next-batch scoring', () => {
+  for (const functionName of [
+    'selectedRoundEverbeeRows',
+    'renderResearchRoundControls',
+    'currentCrossNicheDrilldown',
+    'currentNicheDrilldownNodes',
+    'applyCrossNicheProposal',
+    'crossNicheCandidateForResearch',
+    'researchMetadataCsvValues',
+  ]) {
+    const body = app.match(new RegExp(`function ${functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+    assert.match(
+      body,
+      /activeResearchOptions\(\)|activeResearchContext\(\)/,
+      `${functionName} must use the frozen research context`,
+    )
+    assert.doesNotMatch(
+      body,
+      /currentOptions\(\)|selectedEvent\(\)|selectedCategory\(\)/,
+      `${functionName} must not rescore current work from live selectors`,
+    )
+  }
+
+  const completion = app.match(/if \(round\?\.type === 'initial'[\s\S]*?syncActiveRoundStatus\('complete', \{([\s\S]*?)\n\s*\}\)/)?.[0] ?? ''
+  assert.match(completion, /activeResearchOptions\(\)/)
+  assert.doesNotMatch(completion, /currentOptions\(\)/)
+})
+
+test('keeps eRank narrowing query plans and the EverBee handoff on the active research context', () => {
+  for (const functionName of [
+    'erankProbeKeyword',
+    'erankSpecificTokens',
+    'buildCurrentErankQueryPlan',
+    'buildErankFollowUpQueryPlan',
+    'buildEverbeeKeywordsFromErankRows',
+  ]) {
+    const body = app.match(new RegExp(`function ${functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+    assert.match(
+      body,
+      /activeResearchContext\(\)|activeResearchOptions\(\)/,
+      `${functionName} must use the active research context`,
+    )
+    assert.doesNotMatch(
+      body,
+      /selectedEvent\(\)|selectedCategory\(\)|keywordClass\(/,
+      `${functionName} must not narrow the active run from live selectors`,
+    )
+  }
+})
+
+test('exports row research metadata through the active-context fallback resolver', () => {
+  const erankExport = app.match(/function exportErankCsv\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const resultsExport = app.match(/function exportResultRowsCsv\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(app, /function researchExportContextForRow\(/)
+  assert.match(erankExport, /researchExportContextForRow\(/)
+  assert.match(resultsExport, /researchExportContextForRow\(/)
+  assert.doesNotMatch(erankExport, /elements\.categorySelect\.value/)
+  assert.doesNotMatch(resultsExport, /elements\.categorySelect\.value/)
+})
+
+test('routes marketplace extension and global stop controls through multi-angle orchestration', () => {
+  const hasWork = app.match(/function multiAngleWorkHasCurrentBatch\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const marketplaceStop = app.match(/function stopMarketplaceInsightAutomation\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const extensionStop = app.match(/async function stopExtensionResearch\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const globalStop = app.match(/function stopActiveResearch\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(app, /async function stopMultiAngleOrchestration\(/)
+  assert.match(app, /stopMultiAngleWork\(/)
+  assert.match(hasWork, /status === 'running'/)
+  assert.match(marketplaceStop, /stopMultiAngleOrchestration\('marketplace'\)/)
+  assert.match(extensionStop, /stopMultiAngleOrchestration\('extension'\)/)
+  assert.match(globalStop, /stopMultiAngleOrchestration\('global'\)/)
+})
+
+test('global research Stop receives multi-angle state including between-batch running work', () => {
+  const header = app.match(/function researchHeaderState\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const render = app.match(/function renderGlobalResearchStatus\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(header, /multiAngleStatus:\s*state\.multiAngleExploration\.status/)
+  assert.match(render, /headerState\.canStop/)
+})
+
+test('persists seasonal reference objects and feeds compatible later cycles', () => {
+  assert.match(app, /savedSeasonalReferences:\s*\[\]/)
+  assert.match(app, /savedSeasonalReferences:\s*state\.savedSeasonalReferences/)
+  assert.match(app, /restoreSavedSeasonalReferences\(/)
+  assert.match(app, /savedNextCycleCandidates:\s*state\.savedSeasonalReferences/)
+  assert.match(app, /state\.savedSeasonalReferences = \[\.\.\.state\.savedSeasonalReferences,\s*reference\]/)
+})
+
+test('legacy seasonal migration can reconstruct the event currently selected for a later cycle', () => {
+  const restorable = app.match(/function restorableSeasonalReferenceCandidates\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.doesNotMatch(restorable, /\.filter\(\(event\) => event\.id !== context\.eventId\)/)
+  assert.match(restorable, /allowActiveEvent:\s*true/)
+  assert.match(app, /originEventId:\s*context\.eventId/)
+  assert.match(app, /originCategoryId:\s*context\.categoryId/)
+})
+
+test('keeps manual cross-niche confirmation while using drilldown evidence in multi-angle pools', () => {
+  assert.match(app, /drilldownCandidates:\s*currentCrossNicheDrilldown\(\)\.candidates/)
   assert.match(app, /data-cross-niche-apply/)
   assert.match(app, /data-cross-niche-dismiss/)
+})
+
+test('feeds unresearched fixed-context winning-niche candidates into attribute combinations', () => {
+  const taxonomy = app.match(/function nextTaxonomyCandidates\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+  assert.match(taxonomy, /activeResearchContext\(\)/)
+  assert.match(taxonomy, /startWinningNicheAutomation\(/)
+  assert.match(taxonomy, /buildNextWinningNicheBatch\(/)
+  assert.match(taxonomy, /state\.multiAngleExploration\.evidenceKeys/)
+  assert.match(taxonomy, /state\.multiAngleExploration\.queuedEvidenceKeys/)
+  assert.match(taxonomy, /candidateEvidenceKey\(/)
+  assert.match(taxonomy, /source:\s*candidate\.source/)
+  assert.doesNotMatch(taxonomy, /finalEvidenceRows\(\)/)
 })
 
 test('shows a desktop exploration rail with one stop or resume control', () => {
@@ -127,10 +784,35 @@ test('shows a desktop exploration rail with one stop or resume control', () => {
   assert.match(html, /id="winningNicheAutomationToggle"/)
   assert.match(app, /function renderWinningNicheAutomation\(/)
   assert.match(app, /data-winning-niche-axis/)
-  assert.match(app, /stopWinningNicheSearch/)
-  assert.match(app, /resumeWinningNicheSearch/)
+  assert.match(app, /stopMultiAngleSearch/)
+  assert.match(app, /resumeMultiAngleSearch/)
   assert.match(css, /\.winning-niche-automation-panel/)
   assert.match(css, /\.winning-niche-rail/)
+})
+
+test('keeps seasonal references outside the verified A/B result target', () => {
+  assert.match(html, /id="activeEventResultLane"/)
+  assert.match(html, /id="evergreenResultLane"/)
+  assert.match(html, /id="seasonalReferenceLane"/)
+  assert.match(html, /今回のA\/B目標には含みません/)
+  assert.match(app, /resultLanes\.seasonalReference/)
+  assert.match(app, /data-save-seasonal-reference/)
+  assert.doesNotMatch(app, /data-(?:start|search)-seasonal-reference/)
+})
+
+test('treats extension bridge silence as a global service failure, not a page timeout', () => {
+  const body = app.match(/function multiAngleFailureCode\(value = ''\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(body, /isExtensionResponseTimeout\(message\)[\s\S]*return 'service-unavailable'/)
+  assert.match(body, /EverBee|page/i)
+  assert.ok(body.indexOf("return 'service-unavailable'") < body.indexOf("return 'page-timeout'"))
+})
+
+test('stopping automatic verification stops multi-angle state without dropping current targets', () => {
+  const toggleBody = app.match(/async function togglePendingEvidenceAutomation\(\) \{([\s\S]*?)\n\}\n\nasync function verifyPendingEvidence/)?.[1] ?? ''
+  const stopBody = app.match(/async function stopMultiAngleSearch\(\) \{([\s\S]*?)\n\}\n\nasync function resumeMultiAngleSearch/)?.[1] ?? ''
+  assert.match(toggleBody, /multiAngleSearchIsRunning\(\)[\s\S]*stopMultiAngleSearch\(\)/)
+  assert.doesNotMatch(stopBody, /targetKeywords\s*=\s*\[\]/)
+  assert.match(stopBody, /stopMultiAngleOrchestration\('global'\)/)
 })
 
 test('keeps continuous exploration visible outside every stage-specific panel', () => {

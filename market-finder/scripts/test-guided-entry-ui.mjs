@@ -5,11 +5,14 @@ import { extensionResultsImportMode } from '../src/research-flow.js'
 import { deriveErankCaptureUiState } from '../src/research-console-ui.js'
 
 const root = new URL('../', import.meta.url)
-const [html, app, styles] = await Promise.all([
+const [html, app, styles, extensionManifestText, readme] = await Promise.all([
   readFile(new URL('index.html', root), 'utf8'),
   readFile(new URL('src/app.js', root), 'utf8'),
   readFile(new URL('styles.css', root), 'utf8'),
+  readFile(new URL('../etsy-chrome-extension/manifest.json', root), 'utf8'),
+  readFile(new URL('README.md', root), 'utf8'),
 ])
+const extensionManifest = JSON.parse(extensionManifestText)
 
 function position(id) {
   const index = html.indexOf(`id="${id}"`)
@@ -128,6 +131,7 @@ test('keeps the EverBee queue populated and transitions planned keywords through
     'everbeeResultRows',
     'rowHasEverbeeInput',
     'findResearchRow',
+    'isCurrentResearchRow',
     `return function researchQueueRows(stageId = state.consoleUi.activeStage) {${body}\n}`,
   )
   const state = {
@@ -145,6 +149,7 @@ test('keeps the EverBee queue populated and transitions planned keywords through
     () => completed,
     (row) => Number(row?.topMonthlySales) > 0,
     () => null,
+    () => true,
   )
 
   assert.deepEqual(
@@ -206,18 +211,25 @@ test('executes eRank capture UI states from extension progress without changing 
     'state',
     'normalizePhrase',
     'deriveErankCaptureUiState',
+    'findResearchRow',
     `return function erankCaptureStateRows() {${body}\n}`,
   )
   const plan = [{ query: 'ghost shirt', queryKind: 'direct', sourceKeywords: ['ghost shirt'] }]
-  const statusFor = ({ researchRow, extensionState }) => createCaptureRows(
-    {
+  const statusFor = ({ researchRow, extensionState }) => {
+    const appState = {
       erankQueryPlan: plan,
       researchRows: researchRow ? [researchRow] : [],
       extensionState,
-    },
-    (value) => String(value ?? '').trim().toLowerCase(),
-    deriveErankCaptureUiState,
-  )()[0]?.status ?? 'completed'
+    }
+    return createCaptureRows(
+      appState,
+      (value) => String(value ?? '').trim().toLowerCase(),
+      deriveErankCaptureUiState,
+      (keyword) => appState.researchRows.find(
+        (row) => row.keyword === String(keyword ?? '').trim().toLowerCase(),
+      ),
+    )()[0]?.status ?? 'completed'
+  }
 
   assert.equal(statusFor({}), 'unsearched')
   assert.equal(statusFor({ extensionState: { active: true, mode: 'erank', currentKeyword: 'ghost shirt' } }), 'active')
@@ -311,6 +323,15 @@ test('always states the next action and why a control cannot be pressed', () => 
   // A version checked before the bridge has spoken is unknown, not wrong.
   assert.match(app, /if \(!state\.extensionVersion\) \{[\s\S]{0,240}await new Promise/)
   assert.match(styles, /\.action-block-reason/)
+})
+
+test('requires and documents the exact installed extension manifest version', () => {
+  const requiredVersion = app.match(/const REQUIRED_EXTENSION_VERSION = '([^']+)'/)?.[1]
+
+  assert.equal(extensionManifest.version, '1.39')
+  assert.equal(requiredVersion, extensionManifest.version)
+  assert.match(readme, /バージョンが `1\.39`/)
+  assert.match(html, /拡張バージョン 1\.39/)
 })
 
 test('dispatches only the selected stage detail renderers', () => {
@@ -1231,10 +1252,12 @@ test('keeps research stage tabs auto-route-only and ignores CSV stage selection'
   }
 })
 
-test('routes the global stop action to the existing active service stop behavior', () => {
+test('routes the global stop action through multi-angle orchestration before active service stops', () => {
   const body = app.match(/function stopActiveResearch\(\) \{([\s\S]*?)\n\}/)?.[1]
   assert.ok(body, 'global stop router must be extractable')
   const createStop = new Function(
+    'multiAngleWorkHasCurrentBatch',
+    'stopMultiAngleOrchestration',
     'researchHeaderState',
     'stopMarketplaceInsightAutomation',
     'stopExtensionResearch',
@@ -1243,22 +1266,35 @@ test('routes the global stop action to the existing active service stop behavior
   const calls = []
 
   createStop(
+    () => true,
+    (source) => calls.push(`multi:${source}`),
     () => ({ stopKind: 'marketplace' }),
     () => calls.push('marketplace'),
     () => calls.push('extension'),
   )()
   createStop(
+    () => false,
+    (source) => calls.push(`multi:${source}`),
+    () => ({ stopKind: 'marketplace' }),
+    () => calls.push('marketplace'),
+    () => calls.push('extension'),
+  )()
+  createStop(
+    () => false,
+    (source) => calls.push(`multi:${source}`),
     () => ({ stopKind: 'extension' }),
     () => calls.push('marketplace'),
     () => calls.push('extension'),
   )()
   createStop(
+    () => false,
+    (source) => calls.push(`multi:${source}`),
     () => ({ stopKind: '' }),
     () => calls.push('marketplace'),
     () => calls.push('extension'),
   )()
 
-  assert.deepEqual(calls, ['marketplace', 'extension'])
+  assert.deepEqual(calls, ['multi:global', 'marketplace', 'extension'])
 })
 
 test('derives every final-result toolbar action from one state function', () => {
