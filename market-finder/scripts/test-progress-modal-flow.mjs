@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 import {
+  pendingEvidenceWinnerTargetReached,
   completionModalBehavior,
   pendingAutomationToggleAction,
   resumePendingEvidenceAutomation,
+  shouldAutoStartPendingEvidenceAutomation,
   startSingleKeywordEvidenceAutomation,
 } from '../src/progress-modal-flow.js'
 
@@ -102,4 +104,45 @@ test('resume replaces stale saved targets with the candidates that are pending n
     currentStage: '',
     targetKeywords: ['halloween gothic shirt'],
   })
+})
+
+test('auto mode starts idle pending verification while the five-winner target is unmet', () => {
+  assert.equal(shouldAutoStartPendingEvidenceAutomation({
+    flowMode: 'auto',
+    actionablePendingCount: 128,
+    winnerCount: 0,
+    targetWinnerCount: 5,
+  }), true)
+  assert.equal(shouldAutoStartPendingEvidenceAutomation({
+    flowMode: 'csv',
+    actionablePendingCount: 128,
+    winnerCount: 0,
+    targetWinnerCount: 5,
+  }), false)
+  assert.equal(shouldAutoStartPendingEvidenceAutomation({
+    flowMode: 'auto',
+    actionablePendingCount: 128,
+    winnerCount: 5,
+    targetWinnerCount: 5,
+  }), false)
+  assert.equal(shouldAutoStartPendingEvidenceAutomation({
+    flowMode: 'auto',
+    actionablePendingCount: 128,
+    winnerCount: 0,
+    targetWinnerCount: 5,
+    activeWork: true,
+  }), false)
+  assert.equal(shouldAutoStartPendingEvidenceAutomation({
+    flowMode: 'auto',
+    actionablePendingCount: 128,
+    winnerCount: 0,
+    targetWinnerCount: 5,
+    blocked: true,
+  }), false)
+})
+
+test('pending verification stops as soon as the five-winner target is reached', () => {
+  assert.equal(pendingEvidenceWinnerTargetReached({ winnerCount: 4, targetWinnerCount: 5 }), false)
+  assert.equal(pendingEvidenceWinnerTargetReached({ winnerCount: 5, targetWinnerCount: 5 }), true)
+  assert.equal(pendingEvidenceWinnerTargetReached({ winnerCount: 7, targetWinnerCount: 5 }), true)
 })

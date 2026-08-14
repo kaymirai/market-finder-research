@@ -44,6 +44,30 @@ export function pendingAutomationToggleAction({
     : 'resume'
 }
 
+export function pendingEvidenceWinnerTargetReached({
+  winnerCount = 0,
+  targetWinnerCount = 5,
+} = {}) {
+  const target = Math.max(1, Math.floor(Number(targetWinnerCount) || 5))
+  return Math.max(0, Math.floor(Number(winnerCount) || 0)) >= target
+}
+
+export function shouldAutoStartPendingEvidenceAutomation({
+  flowMode = 'auto',
+  actionablePendingCount = 0,
+  winnerCount = 0,
+  targetWinnerCount = 5,
+  activeWork = false,
+  restoredAwaiting = false,
+  crossNichePending = false,
+  blocked = false,
+} = {}) {
+  if (flowMode !== 'auto') return false
+  if (Math.max(0, Number(actionablePendingCount) || 0) === 0) return false
+  if (pendingEvidenceWinnerTargetReached({ winnerCount, targetWinnerCount })) return false
+  return !activeWork && !restoredAwaiting && !crossNichePending && !blocked
+}
+
 
 export function resumePendingEvidenceAutomation(saved = {}, pendingKeywords = []) {
   const targetKeywords = [...new Set(

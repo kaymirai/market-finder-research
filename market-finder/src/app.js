@@ -259,10 +259,12 @@ import {
 } from './persistent-evidence-automation.js?v=20260814-4'
 import {
   completionModalBehavior,
+  pendingEvidenceWinnerTargetReached,
   pendingAutomationToggleAction,
   resumePendingEvidenceAutomation,
+  shouldAutoStartPendingEvidenceAutomation,
   startSingleKeywordEvidenceAutomation,
-} from './progress-modal-flow.js?v=20260812-3'
+} from './progress-modal-flow.js?v=20260815-1'
 import {
   acquireResearchTabLease,
   ownsResearchTabLease,
@@ -290,6 +292,7 @@ const RESEARCH_TAB_LEASE_TTL_MS = 15_000
 let researchTabLeaseOwned = false
 let researchTabLeaseHeartbeatId = 0
 let autoDeepDiveStartPromise = null
+let autoPendingEvidenceStartPromise = null
 
 function readResearchTabLease() {
   try {
@@ -6967,7 +6970,74 @@ function multiAngleFailureCode(value = '') {
   return 'unknown'
 }
 
+async function maybeAutoStartPendingEvidenceAutomation(source = '') {
+  if (autoPendingEvidenceStartPromise) return autoPendingEvidenceStartPromise
+
+  const evidenceRows = finalEvidenceRows()
+  const decision = deriveFinalKeywordDecision(evidenceRows)
+  const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
+  const actionableRows = pendingEvidenceRows(
+    evidenceRows,
+    evidenceRows
+      .filter((row) => row.evidenceState.status === 'pending')
+      .map((row) => row.keyword),
+  )
+  const activeWork = Boolean(state.extensionState?.active)
+    || state.marketplaceInsightAutoRunning
+    || state.marketplaceInsightBusy
+    || state.pendingEvidenceAutomation.active
+    || state.pendingEvidenceAutomation.scheduled
+  const failureCode = multiAngleFailureCode(state.progress.message)
+  const globallyBlocked = ['service-unavailable', 'login-required', 'rate-limited'].includes(failureCode)
+  const timing = classifyProductionWindow(activeResearchContext().event)
+  const timingBlocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
+  const shouldStart = shouldAutoStartPendingEvidenceAutomation({
+    flowMode: selectedFlowMode(),
+    actionablePendingCount: actionableRows.length,
+    winnerCount: decision.recommendedCount,
+    targetWinnerCount: target.targetWinnerCount,
+    activeWork,
+    restoredAwaiting: restoredResultsAwaitingConfirmation(),
+    crossNichePending: isCrossNicheWorkflowPending(state.crossNicheWorkflow),
+    blocked: Boolean(extensionBlockReason()) || globallyBlocked || timingBlocked,
+  })
+  if (!shouldStart) return false
+
+  autoPendingEvidenceStartPromise = (async () => {
+    if (!await confirmExtensionConnection()) return false
+    const currentRows = finalEvidenceRows()
+    const currentPendingRows = pendingEvidenceRows(
+      currentRows,
+      currentRows
+        .filter((row) => row.evidenceState.status === 'pending')
+        .map((row) => row.keyword),
+    )
+    if (currentPendingRows.length === 0) return false
+    state.pendingEvidenceAutomation = {
+      active: true,
+      scheduled: false,
+      initialCount: currentPendingRows.length,
+      completedBatches: 0,
+      currentStage: '',
+      targetKeywords: currentPendingRows.map((row) => row.keyword),
+    }
+    state.finalEvidenceFilter = 'pending'
+    setSimpleStatus(`${source || '前工程の完了'}から、未検証${currentPendingRows.length}件を自動確認します。A/B候補${target.targetWinnerCount}件まで探索を続けます。`)
+    renderPendingEvidenceAutomationButton(currentPendingRows.length)
+    renderResearchExperience()
+    persistMarketFinderState()
+    schedulePendingEvidenceAutomation(0)
+    return true
+  })().finally(() => { autoPendingEvidenceStartPromise = null })
+  return autoPendingEvidenceStartPromise
+}
+
 async function maybeAutoStartMultiAngleSearch(source = '') {
+  if (await maybeAutoStartPendingEvidenceAutomation(source)) return true
+  return maybeAutoStartMultiAngleDeepDive(source)
+}
+
+async function maybeAutoStartMultiAngleDeepDive(source = '') {
   if (autoDeepDiveStartPromise) return autoDeepDiveStartPromise
   const rows = finalEvidenceRows()
   const decision = deriveFinalKeywordDecision(rows)
@@ -7262,6 +7332,26 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
     }
     if (state.extensionState?.active || state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) {
       schedulePendingEvidenceAutomation(2000)
+      return
+    }
+
+    const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
+    const decision = deriveFinalKeywordDecision(finalEvidenceRows())
+    if (pendingEvidenceWinnerTargetReached({
+      winnerCount: decision.recommendedCount,
+      targetWinnerCount: target.targetWinnerCount,
+    })) {
+      state.multiAngleExploration = reconcileMultiAngleWinners(
+        state.multiAngleExploration,
+        finalEvidenceRows(),
+      )
+      state.pendingEvidenceAutomation.active = false
+      state.pendingEvidenceAutomation.scheduled = false
+      state.pendingEvidenceAutomation.currentStage = ''
+      state.pendingEvidenceAutomation.targetKeywords = []
+      setSimpleStatus(`A/B候補を${decision.recommendedCount}/${target.targetWinnerCount}件確保しました。今回の自動探索を停止します。`)
+      renderAll()
+      persistMarketFinderState()
       return
     }
 
