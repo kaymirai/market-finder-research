@@ -300,6 +300,7 @@ export function createMultiAngleExplorationState(saved = {}) {
     currentAngleId,
     angleIndex: Math.max(0, Number(saved?.angleIndex) || 0),
     evidenceKeys: uniqueStrings(saved?.evidenceKeys),
+    historicalEvidenceKeys: uniqueStrings(saved?.historicalEvidenceKeys),
     provenance: normalizedProvenance(saved?.provenance),
     queuedEvidenceKeys: uniqueStrings(saved?.queuedEvidenceKeys),
     currentBatchCandidates,
@@ -347,6 +348,7 @@ export function multiAngleAutomationControl(state = {}, workActive = false) {
 
 export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
   const pending = snapshot?.pendingEvidenceAutomation ?? {}
+  const previousExploration = createMultiAngleExplorationState(snapshot?.exploration)
   const exploration = createMultiAngleExplorationState({
     status: 'idle',
     activeEventId: String(context?.activeEventId ?? context?.eventId ?? '').trim(),
@@ -354,6 +356,13 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
     eventSnapshot: context?.eventSnapshot,
     categorySnapshot: context?.categorySnapshot,
     targetWinnerCount: positiveInteger(context?.targetWinnerCount, 1),
+    historicalEvidenceKeys: uniqueStrings([
+      ...previousExploration.historicalEvidenceKeys,
+      ...previousExploration.evidenceKeys,
+      ...previousExploration.failedEvidenceKeys,
+      ...previousExploration.queuedEvidenceKeys,
+      ...previousExploration.retryQueue.map((entry) => entry.evidenceKey),
+    ]),
   })
   return {
     ...snapshot,
@@ -1027,6 +1036,7 @@ export function nextMultiAngleBatch({
   }
 
   const used = new Set([
+    ...current.historicalEvidenceKeys,
     ...current.evidenceKeys,
     ...current.queuedEvidenceKeys,
     ...current.retryQueue.map((entry) => entry.evidenceKey),
@@ -1340,6 +1350,7 @@ export function reopenExhaustedMultiAngleExploration(state = {}, pools = {}, now
   const current = createMultiAngleExplorationState(state)
   if (current.status !== 'exhausted') return resumeMultiAngleExploration(current, now)
   const used = new Set([
+    ...current.historicalEvidenceKeys,
     ...current.evidenceKeys,
     ...current.queuedEvidenceKeys,
     ...current.failedEvidenceKeys,

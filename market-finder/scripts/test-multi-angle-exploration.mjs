@@ -798,6 +798,11 @@ test('prepares an exhausted cycle as fresh idle work while preserving saved refe
     assert.deepEqual(prepared.exploration[key], [])
   }
   assert.deepEqual(prepared.exploration.provenance, {})
+  assert.deepEqual(prepared.exploration.historicalEvidenceKeys, [
+    'old|shirt|halloween',
+    'failed|shirt|halloween',
+    'queued|shirt|halloween',
+  ])
   assert.deepEqual(prepared.exploration.resultLanes, {
     event: [],
     evergreen: [],
@@ -821,6 +826,46 @@ test('prepares an exhausted cycle as fresh idle work while preserving saved refe
   assert.deepEqual(prepared.candidates, [])
   assert.deepEqual(prepared.candidateCatalog, [])
   assert.equal(prepared.crossNicheProposal, null)
+})
+
+test('a fresh cycle skips keywords already checked by an earlier cycle', () => {
+  const repeated = {
+    keyword: 'appalled princess donut book lover shirt',
+    categoryId: 'shirt',
+    eventId: 'breast-cancer-awareness',
+    angleId: 'recent-sales',
+  }
+  const unseen = {
+    keyword: 'book shirt comfort colors',
+    categoryId: 'shirt',
+    eventId: 'breast-cancer-awareness',
+    angleId: 'recent-sales',
+  }
+  const prepared = multiAngleApi.prepareNewMultiAngleCycle({
+    exploration: createMultiAngleExplorationState({
+      status: 'exhausted',
+      activeEventId: 'breast-cancer-awareness',
+      categoryId: 'shirt',
+      evidenceKeys: [candidateEvidenceKey(repeated)],
+    }),
+  }, {
+    activeEventId: 'breast-cancer-awareness',
+    categoryId: 'shirt',
+    targetWinnerCount: 5,
+  })
+  const started = startMultiAngleExploration(prepared.exploration, {
+    activeEventId: 'breast-cancer-awareness',
+    categoryId: 'shirt',
+    targetWinnerCount: 5,
+  })
+  const next = nextMultiAngleBatch({
+    state: started,
+    pools: { 'recent-sales': [repeated, unseen] },
+  })
+
+  assert.deepEqual(next.candidates.map((candidate) => candidate.keyword), [
+    'book shirt comfort colors',
+  ])
 })
 
 test('starts a reused custom-event id with no live evidence from the archived cycle', () => {

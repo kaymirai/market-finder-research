@@ -232,7 +232,7 @@ import {
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260815-1'
+} from './multi-angle-exploration.js?v=20260815-2'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -296,6 +296,7 @@ let researchTabLeaseHeartbeatId = 0
 let autoDeepDiveStartPromise = null
 let autoPendingEvidenceStartPromise = null
 let autoFreshCycleTimerId = null
+let autoFreshCycleStarting = false
 
 function readResearchTabLease() {
   try {
@@ -6710,7 +6711,15 @@ function scheduleAutoFreshMultiAngleCycle(delayMs = 1500) {
   autoFreshCycleTimerId = window.setTimeout(async () => {
     autoFreshCycleTimerId = null
     if (state.multiAngleExploration.status !== 'exhausted') return
-    await startNewMultiAngleCycle()
+    autoFreshCycleStarting = true
+    try {
+      await startNewMultiAngleCycle()
+    } catch (error) {
+      setSimpleStatus(friendlyExtensionError(error))
+      renderAll()
+    } finally {
+      autoFreshCycleStarting = false
+    }
   }, Math.max(0, Number(delayMs) || 0))
   return true
 }
@@ -6737,7 +6746,7 @@ function queueNextMultiAngleBatch() {
       reason: result.reason,
       winnerCount: deriveFinalKeywordDecision(finalEvidenceRows()).recommendedCount,
       targetWinnerCount: calculateListingResearchTarget(state.listingResearchTargetSettings).targetWinnerCount,
-      blocked: Boolean(extensionBlockReason()),
+      blocked: Boolean(extensionBlockReason()) || autoFreshCycleStarting,
     })) {
       setSimpleStatus('現在の探索角度をすべて確認しました。A/B候補の目標まで、次の探索サイクルを自動で開始します。')
       scheduleAutoFreshMultiAngleCycle()
@@ -7079,7 +7088,7 @@ async function maybeAutoStartMultiAngleDeepDive(source = '') {
     reason: state.multiAngleExploration.status === 'exhausted' ? 'all-angles-exhausted' : '',
     winnerCount: decision.recommendedCount,
     targetWinnerCount: target.targetWinnerCount,
-    blocked: Boolean(blockedReason) || globallyBlocked || timingBlocked || activeWork,
+    blocked: Boolean(blockedReason) || globallyBlocked || timingBlocked || activeWork || autoFreshCycleStarting,
   })) {
     return scheduleAutoFreshMultiAngleCycle()
   }
