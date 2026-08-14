@@ -198,7 +198,7 @@ import {
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260812-17'
+} from './multi-angle-candidates.js?v=20260814-4'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
@@ -229,7 +229,7 @@ import {
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260812-5'
+} from './multi-angle-exploration.js?v=20260814-4'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'

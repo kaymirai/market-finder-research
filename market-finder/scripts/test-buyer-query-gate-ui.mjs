@@ -19,3 +19,8 @@ test('rechecks both candidate creation and Etsy handoff with the shared gate', (
   assert.match(functionBody('candidateFromKeyword'), /classifyMarketplaceBuyerQuery/)
   assert.match(functionBody('etsyValidationCandidates'), /classifyMarketplaceBuyerQuery/)
 })
+
+test('cache-busts both multi-angle module imports after the buyer-query gate update', () => {
+  assert.match(app, /from '\.\/multi-angle-candidates\.js\?v=20260814-4'/)
+  assert.match(app, /from '\.\/multi-angle-exploration\.js\?v=20260814-4'/)
+})

@@ -132,7 +132,7 @@ function normalizedRetryQueue(value) {
   if (!Array.isArray(value)) return []
   return value.flatMap((entry) => {
     const candidate = normalizeExplorationCandidate(entry?.candidate ?? entry)
-    if (!candidate) return []
+    if (!candidate || !isEfficientMarketplaceProbe(candidate)) return []
     const suppliedRetryAt = String(entry?.retryAt ?? '').trim()
     const retryAtMs = Date.parse(suppliedRetryAt)
     return [{

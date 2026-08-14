@@ -48,6 +48,48 @@ test('drops persisted measured recombinations that are too long for Marketplace 
   )
 })
 
+test('drops restored retry candidates that fail the Marketplace buyer-query gate', () => {
+  const restored = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    retryQueue: [
+      {
+        candidate: {
+          keyword: 'halloween nurse shirt',
+          eventId: 'halloween',
+          categoryId: 'shirt',
+        },
+        attempts: 1,
+        retryAt: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        candidate: {
+          keyword: 'halloween nurse mug',
+          eventId: 'halloween',
+          categoryId: 'shirt',
+        },
+        attempts: 1,
+        retryAt: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        candidate: {
+          keyword: 'halloween shirt',
+          eventId: 'halloween',
+          categoryId: 'shirt',
+        },
+        attempts: 1,
+        retryAt: '2026-08-01T00:00:00.000Z',
+      },
+    ],
+  })
+
+  assert.deepEqual(
+    restored.retryQueue.map((entry) => entry.candidate.keyword),
+    ['halloween nurse shirt'],
+  )
+})
+
 test('moves to the next angle without repeating the same evidence lookup and preserves provenance', () => {
   const started = startMultiAngleExploration({}, context, '2026-07-30T00:00:00Z')
   const pools = {
