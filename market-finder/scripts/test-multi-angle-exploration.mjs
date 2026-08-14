@@ -1859,7 +1859,7 @@ test('reload resume and external completion use the persisted current batch', ()
     }),
     pools: {
       'demand-neighborhood': [{
-        keyword: 'persisted winner',
+        keyword: 'persisted winner shirt',
         categoryId: 'shirt',
         eventId: 'halloween',
       }],
@@ -1871,7 +1871,7 @@ test('reload resume and external completion use the persisted current batch', ()
 
   assert.deepEqual(
     (restored.currentBatchCandidates ?? []).map((candidate) => candidate.keyword),
-    ['persisted winner'],
+    ['persisted winner shirt'],
   )
 
   const paused = pauseMultiAngleExploration(restored, 'input-context-changed')
@@ -1885,7 +1885,7 @@ test('reload resume and external completion use the persisted current batch', ()
   }])
 
   assert.equal(completed.status, 'winner-found')
-  assert.deepEqual(completed.winnerKeywords, ['persisted winner'])
+  assert.deepEqual(completed.winnerKeywords, ['persisted winner shirt'])
   assert.deepEqual(completed.currentBatchCandidates, [])
 })
 
@@ -1897,7 +1897,7 @@ test('selector changes pause the fixed research context and resume its batch', (
     state: startMultiAngleExploration({}, context),
     pools: {
       'demand-neighborhood': [{
-        keyword: 'fixed halloween niche',
+        keyword: 'fixed halloween niche shirt',
         categoryId: 'shirt',
         eventId: 'halloween',
       }],
@@ -1927,7 +1927,7 @@ test('selector changes pause the fixed research context and resume its batch', (
   assert.equal(paused.pauseReason, 'input-context-changed')
   assert.deepEqual(
     paused.currentBatchCandidates.map((candidate) => candidate.keyword),
-    ['fixed halloween niche'],
+    ['fixed halloween niche shirt'],
   )
 
   const resumed = resumeMultiAngleExploration(paused)
@@ -1938,7 +1938,7 @@ test('selector changes pause the fixed research context and resume its batch', (
   }])
 
   assert.equal(completed.status, 'running')
-  assert.deepEqual(completed.evidenceKeys, ['fixed halloween niche|shirt|halloween'])
+  assert.deepEqual(completed.evidenceKeys, ['fixed halloween niche shirt|shirt|halloween'])
 })
 
 test('custom event snapshot survives Alpha to Beta input changes and reload', () => {
@@ -2469,7 +2469,7 @@ test('marketplace extension and global stops preserve a resumable batch', () => 
       state: startMultiAngleExploration({}, context),
       pools: {
         'demand-neighborhood': [{
-          keyword: `${source} stop candidate`,
+          keyword: `${source} stop candidate shirt`,
           categoryId: 'shirt',
           eventId: 'halloween',
         }],
@@ -2482,7 +2482,7 @@ test('marketplace extension and global stops preserve a resumable batch', () => 
         scheduled: true,
         initialCount: 1,
         currentStage: 'pending-everbee',
-        targetKeywords: [`${source} stop candidate`],
+        targetKeywords: [`${source} stop candidate shirt`],
       },
     }, source, '2026-07-30T00:01:00Z')
 
@@ -2492,7 +2492,7 @@ test('marketplace extension and global stops preserve a resumable batch', () => 
     assert.equal(stopped.pendingEvidenceAutomation.scheduled, false)
     assert.deepEqual(
       stopped.pendingEvidenceAutomation.targetKeywords,
-      [`${source} stop candidate`],
+      [`${source} stop candidate shirt`],
     )
     assert.equal(stopped.exploration.currentBatchCandidates.length, 1)
 
@@ -2504,7 +2504,7 @@ test('marketplace extension and global stops preserve a resumable batch', () => 
     }])
     assert.deepEqual(
       completed.evidenceKeys,
-      [`${source} stop candidate|shirt|halloween`],
+      [`${source} stop candidate shirt|shirt|halloween`],
     )
   }
 })

@@ -1,7 +1,8 @@
 import {
   MARKET_EVENTS,
+  classifyMarketplaceBuyerQuery,
   normalizePhrase,
-} from '../../shared/market-keyword-engine/index.js?v=20260730-13'
+} from '../../shared/market-keyword-engine/index.js?v=20260814-3'
 import { eventSignalTerms } from './event-market-tracks.js?v=20260730-4'
 import { NICHE_AXIS_ORDER, taxonomyTerms } from './niche-taxonomy.js?v=20260726-1'
 
@@ -27,10 +28,10 @@ function normalizedSources(value) {
 }
 
 export function isEfficientMarketplaceProbe(candidate = {}) {
-  if (normalizePhrase(candidate.keyword).split(' ').filter(Boolean).length > 5) return false
-  const sources = normalizedSources([candidate.source, ...(candidate.sources ?? [])])
-  if (!sources.includes('measured-c-recombination')) return true
-  return true
+  return classifyMarketplaceBuyerQuery(candidate.keyword, {
+    eventId: candidate.eventId,
+    categoryId: candidate.categoryId,
+  }).eligible
 }
 
 function categoryMatchTerms(category = {}) {

@@ -30,6 +30,8 @@ import {
   classifyProductionWindow,
   detectRiskTerms,
   clusterKeywordCandidates,
+  classifyMarketplaceBuyerQuery,
+  deriveBuyerSearchQueriesFromTitle,
   getMarketTiming,
   getBroadEventDiscoveryProfile,
   getSourceFreshness,
@@ -38,7 +40,7 @@ import {
   learnedBuyerIntentSignals,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260814-2'
+} from '../../shared/market-keyword-engine/index.js?v=20260814-3'
 import {
   acceptRestoredCheckpoint,
   buildMarketplaceCaptureRows,
@@ -1517,11 +1519,6 @@ function combinedSeedKeywords() {
 }
 
 function trendCandidateEntries() {
-  const category = selectedCategory()
-  const product = normalizePhrase(category.searchTerm)
-  const eventTerm = normalizePhrase(selectedEvent().searchTerm)
-  const year = selectedYearOption()
-
   return parseTrendScoutEntries(elements.trendScoutInput?.value)
     .map((entry) => ({
       ...entry,
@@ -1529,21 +1526,15 @@ function trendCandidateEntries() {
     }))
     .filter((entry) => entry.trendQuality.usable)
     .sort((a, b) => b.trendQuality.score - a.trendQuality.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
-    .flatMap((entry) => {
-      const keyword = normalizePhrase(entry.keyword)
-      if (!keyword) return []
-      const hasProduct = keywordMatchesCategoryProduct(keyword, category.id)
-      const base = hasProduct ? keyword : `${keyword} ${product}`
-      return [
-        base,
-        eventTerm && !keyword.includes(eventTerm) ? `${eventTerm} ${base}` : '',
-        year ? `${base} ${year}` : '',
-      ].filter(Boolean).map((candidateKeyword) => ({
+    .flatMap((entry) => deriveBuyerSearchQueriesFromTitle(entry.keyword, {
+      ...keywordClassificationOptions(),
+      excludedRiskTerms: elements.riskInput.value,
+      limit: 8,
+    }).map((keyword) => ({
         ...entry,
-        keyword: normalizePhrase(candidateKeyword),
-        baseKeyword: keyword,
-      }))
-    })
+        keyword,
+        baseKeyword: normalizePhrase(entry.keyword),
+      })))
     .filter((entry) => entry.keyword.split(' ').filter(Boolean).length >= 2)
     .filter((entry) => keywordClass(entry.keyword).action === 'candidate')
     .slice(0, 50)
@@ -2454,7 +2445,15 @@ function erankRowsWithOpportunity() {
 
 function etsyValidationCandidates() {
   if (restoredResultsAwaitingConfirmation()) return []
+  const options = {
+    ...activeResearchOptions(),
+    excludedRiskTerms: elements.riskInput.value,
+  }
   return buildEtsyCandidatesFromPool(state.candidates)
+    .filter((candidate) => classifyMarketplaceBuyerQuery(
+      candidate.keyword ?? candidate.query,
+      options,
+    ).eligible)
 }
 
 function restoredResultsAwaitingConfirmation() {
@@ -8144,6 +8143,11 @@ function candidateSourceText(candidate, researched, resultScore) {
 
 function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Map()) {
   const normalized = normalizePhrase(keyword)
+  const queryEligibility = classifyMarketplaceBuyerQuery(normalized, {
+    ...keywordClassificationOptions(),
+    excludedRiskTerms: elements.riskInput.value,
+  })
+  if (!queryEligibility.eligible) return null
   const classification = keywordClass(normalized)
   if (classification.action !== 'candidate') return null
   const riskTerms = detectRiskTerms(normalized, elements.riskInput.value.split(/\r?\n|,/))

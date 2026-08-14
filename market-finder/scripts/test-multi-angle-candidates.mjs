@@ -7,6 +7,7 @@ import {
   candidateEvidenceKey,
   candidateProvenanceKey,
   deriveMeasuredSeedCandidates,
+  isEfficientMarketplaceProbe,
 } from '../src/multi-angle-candidates.js'
 import * as candidateApi from '../src/multi-angle-candidates.js'
 
@@ -15,6 +16,19 @@ const base = {
   category: { id: 'shirt', searchTerm: 'shirt', tags: ['tee'] },
   timingStatus: 'timely',
 }
+
+test('uses the shared two-to-six word Marketplace boundary', () => {
+  assert.equal(isEfficientMarketplaceProbe({
+    keyword: 'retro biology teacher halloween gift shirt',
+    eventId: 'halloween',
+    categoryId: 'shirt',
+  }), true)
+  assert.equal(isEfficientMarketplaceProbe({
+    keyword: 'retro biology teacher halloween gift for shirt',
+    eventId: 'halloween',
+    categoryId: 'shirt',
+  }), false)
+})
 
 test('prioritizes unmeasured same-event Etsy related terms from archived evidence', () => {
   const candidates = archivedDemandNeighborhoodCandidates([{
@@ -172,7 +186,7 @@ test('derives unseen style and recipient hypotheses from strong verified C seeds
 test('does not turn a long selling-title fragment into an even longer Marketplace probe', () => {
   const candidates = deriveMeasuredSeedCandidates({
     measuredRows: [{
-      keyword: 'logo corporate gifting shirt',
+      keyword: 'vintage logo corporate gifting employee shirt',
       opportunityLabel: 'C',
       evidenceState: { status: 'verified' },
       scoreState: { score: 82 },
@@ -336,16 +350,16 @@ test('keeps only current-category Marketplace terms in demand neighborhood', () 
     ...base,
     relatedTerms: [
       'halloween mug',
-      'halloween tee',
-      'halloween tshirt',
-      'halloween shirt',
+      'halloween nurse tee',
+      'halloween nurse tshirt',
+      'halloween nurse shirt',
       'halloween shirtless costume',
     ],
   })
 
   assert.deepEqual(
     pools['demand-neighborhood'].map((candidate) => candidate.keyword),
-    ['halloween tee', 'halloween tshirt', 'halloween shirt'],
+    ['halloween nurse tee', 'halloween nurse tshirt', 'halloween nurse shirt'],
   )
 })
 

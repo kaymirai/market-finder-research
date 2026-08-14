@@ -4,7 +4,7 @@ import {
   isEfficientMarketplaceProbe,
   marketplaceInsightPlanForContext,
   normalizeExplorationCandidate,
-} from './multi-angle-candidates.js?v=20260812-14'
+} from './multi-angle-candidates.js?v=20260814-3'
 import { mergeRowsByKey } from './research-performance.js?v=20260720-1'
 
 const VALID_STATUSES = new Set([
