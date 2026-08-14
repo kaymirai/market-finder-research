@@ -23,6 +23,8 @@ import {
   classifyBuyerIntentPhrase,
   classifyKeywordBucket,
   classifyCandidateKeyword,
+  classifyMarketplaceBuyerQuery,
+  deriveBuyerSearchQueriesFromTitle,
   explainEverbeeScore,
   generateBroadEventCandidates,
   generateBuyerIntentCandidates,
@@ -1255,6 +1257,62 @@ test('recognizes singular and plural ornament product aliases', () => {
   assert.equal(keywordMatchesCategoryProduct('family christmas ornament', 'ornament'), true)
   assert.equal(keywordMatchesCategoryProduct('memorial ornaments', 'ornament'), true)
   assert.equal(keywordMatchesCategoryProduct('family christmas ornament', 'shirt'), false)
+})
+
+test('accepts only buyer-like Marketplace queries with two to six words', () => {
+  const options = { eventId: 'halloween', categoryId: 'shirt' }
+  assert.equal(classifyMarketplaceBuyerQuery('teacher shirt', options).eligible, true)
+  assert.equal(
+    classifyMarketplaceBuyerQuery('retro biology teacher halloween gift shirt', options).eligible,
+    true,
+  )
+  assert.equal(classifyMarketplaceBuyerQuery('shirt', options).status, 'too-short')
+  assert.equal(
+    classifyMarketplaceBuyerQuery('retro biology teacher halloween gift for school shirt', options).status,
+    'title-like',
+  )
+  assert.equal(classifyMarketplaceBuyerQuery('halloween teacher mug', options).status, 'category-mismatch')
+})
+
+test('keeps ordinary risk terms visible but blocks explicit exclusion terms', () => {
+  const review = classifyMarketplaceBuyerQuery('disney halloween shirt', {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+  })
+  const blocked = classifyMarketplaceBuyerQuery('star wars shirt', {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    excludedRiskTerms: ['star wars'],
+  })
+
+  assert.equal(review.eligible, true)
+  assert.ok(review.riskTerms.length > 0)
+  assert.equal(blocked.eligible, false)
+  assert.equal(blocked.status, 'blocked-risk')
+})
+
+test('derives category-matched buyer queries from a long listing title', () => {
+  const queries = deriveBuyerSearchQueriesFromTitle(
+    'breast cancer awareness bat shirt retro science illustration goth nature lover biology halloween teacher gift',
+    { eventId: 'halloween', categoryId: 'shirt', limit: 8 },
+  )
+
+  assert.ok(queries.length > 0)
+  assert.ok(queries.every((query) => query.split(' ').length >= 2 && query.split(' ').length <= 6))
+  assert.ok(queries.every((query) => keywordMatchesCategoryProduct(query, 'shirt')))
+  assert.equal(queries.includes('breast cancer awareness bat shirt retro science illustration goth nature lover biology halloween teacher gift'), false)
+  assert.ok(queries.some((query) => /biology|teacher|science/.test(query)))
+})
+
+test('productizes a short Trend seed before applying the buyer-query gate', () => {
+  assert.deepEqual(
+    deriveBuyerSearchQueriesFromTitle('biology teacher', {
+      eventId: 'halloween',
+      categoryId: 'shirt',
+      limit: 8,
+    }),
+    ['biology teacher shirt', 'halloween biology teacher shirt'],
+  )
 })
 
 test('recommends personalization only with fresh Etsy and two selling EverBee proofs', () => {

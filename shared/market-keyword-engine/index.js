@@ -1445,6 +1445,39 @@ export function keywordMatchesCategoryProduct(keyword, categoryId) {
   return keywordProductFamilies(keyword).includes(CATEGORY_PRODUCT_FAMILY[category.id])
 }
 
+export function classifyMarketplaceBuyerQuery(keyword, options = {}) {
+  const normalized = normalizePhrase(keyword)
+  const words = phraseTokens(normalized)
+  const classification = classifyCandidateKeyword(normalized, options)
+  const riskTerms = detectRiskTerms(normalized, [])
+  const excludedRiskTerms = splitSeedText(options.excludedRiskTerms)
+  const blockedRiskTerms = excludedRiskTerms.filter((term) => phraseHasTerm(normalized, term))
+
+  const result = (eligible, status, reason) => ({
+    eligible,
+    status,
+    reason,
+    normalized,
+    wordCount: words.length,
+    riskTerms,
+    classification,
+  })
+
+  if (words.length < 2) return result(false, 'too-short', 'Buyer queries need at least two words')
+  if (words.length > 6) return result(false, 'title-like', 'Listing-title-like query is too long')
+  if (blockedRiskTerms.length > 0) return result(false, 'blocked-risk', `Excluded risk term: ${blockedRiskTerms.join(', ')}`)
+  if (!keywordMatchesCategoryProduct(normalized, options.categoryId)) {
+    return result(false, 'category-mismatch', 'Query does not match the selected category product')
+  }
+  if (classification.action !== 'candidate') {
+    return result(false, 'candidate-rejected', classification.reason)
+  }
+  if ((classification.specificTokens ?? []).length === 0) {
+    return result(false, 'too-broad', 'No buyer, recipient, occasion, or meaningful motif signal')
+  }
+  return result(true, 'eligible', 'Buyer-like query is eligible')
+}
+
 function isYearishToken(token) {
   return /^(?:20\d{2}|\d{2})$/.test(token)
 }
@@ -3670,6 +3703,50 @@ export function extractNicheHintsFromListings(listings = [], limit = 20, options
       || b.listingCount - a.listingCount
       || a.keyword.localeCompare(b.keyword, 'en'))
     .slice(0, limit)
+}
+
+export function deriveBuyerSearchQueriesFromTitle(title, options = {}) {
+  const normalized = normalizePhrase(title)
+  const direct = classifyMarketplaceBuyerQuery(normalized, options)
+  if (direct.eligible) return [direct.normalized]
+
+  const event = getEvent(options)
+  const category = getCategory(options.categoryId)
+  const eventTerm = normalizePhrase(event.searchTerm)
+  const productTerm = normalizePhrase(category.searchTerm)
+  const limit = Math.max(1, Math.min(12, Number(options.limit) || 8))
+  const seen = new Set()
+  const queries = []
+  const pushEligible = (rawQuery) => {
+    const eligibility = classifyMarketplaceBuyerQuery(rawQuery, options)
+    if (!eligibility.eligible || seen.has(eligibility.normalized)) return false
+    seen.add(eligibility.normalized)
+    queries.push(eligibility.normalized)
+    return queries.length >= limit
+  }
+
+  if (direct.wordCount <= 6) {
+    if (pushEligible(`${normalized} ${productTerm}`)) return queries
+    pushEligible(`${eventTerm} ${normalized} ${productTerm}`)
+    return queries
+  }
+  if (direct.status !== 'title-like') return []
+
+  const hints = extractNicheHintsFromListings([{ title: normalized }], 40, {
+    stopWords: [eventTerm, productTerm, ...(category.tags ?? [])],
+    blockedPhrases: splitSeedText(options.excludedRiskTerms),
+  })
+  for (const hint of hints) {
+    const hintWords = phraseTokens(hint.keyword)
+    if (hintWords.length < 1 || hintWords.length > 3) continue
+    for (const rawQuery of [
+      `${eventTerm} ${hint.keyword} ${productTerm}`,
+      `${hint.keyword} ${productTerm}`,
+    ]) {
+      if (pushEligible(rawQuery)) return queries
+    }
+  }
+  return queries
 }
 
 function roundedCrossNicheMetric(value) {
