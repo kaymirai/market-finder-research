@@ -24,3 +24,9 @@ test('cache-busts both multi-angle module imports after the buyer-query gate upd
   assert.match(app, /from '\.\/multi-angle-candidates\.js\?v=20260814-4'/)
   assert.match(app, /from '\.\/multi-angle-exploration\.js\?v=20260814-4'/)
 })
+
+test('checks automatic deep dive after idle EverBee completion', () => {
+  assert.match(app, /async function maybeAutoStartMultiAngleSearch/)
+  assert.match(app, /shouldAutoStartMultiAngleExploration/)
+  assert.match(app, /MARKET_STATE[\s\S]*maybeAutoStartMultiAngleSearch/)
+})

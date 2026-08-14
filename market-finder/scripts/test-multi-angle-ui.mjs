@@ -257,3 +257,11 @@ test('makes a blocked timing override the primary action even during a restored 
   const body = app.slice(start, end)
   assert.ok(body.indexOf("action: 'timing-override'") < body.indexOf("if (ui.phase === 'setup')"))
 })
+
+test('does not make CSV the primary action while the five-candidate target is unmet', () => {
+  const start = app.indexOf('function researchExperienceAction(')
+  const end = app.indexOf('\nfunction ', start + 1)
+  const body = app.slice(start, end)
+  assert.ok(body.indexOf('remainingWinnerCount > 0') < body.indexOf("action: 'export-design'"))
+  assert.match(body, /A\/Bをあと\$\{remainingWinnerCount\}件探す/)
+})

@@ -226,6 +226,7 @@ import {
   restoredMultiAngleTargetKeywords,
   resumeExhaustedMultiAngleExploration,
   resumeMultiAngleExploration,
+  shouldAutoStartMultiAngleExploration,
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
@@ -287,6 +288,7 @@ const RESEARCH_TAB_LEASE_KEY = 'etsy-mirai-market-finder-active-tab-v1'
 const RESEARCH_TAB_LEASE_TTL_MS = 15_000
 let researchTabLeaseOwned = false
 let researchTabLeaseHeartbeatId = 0
+let autoDeepDiveStartPromise = null
 
 function readResearchTabLease() {
   try {
@@ -4421,7 +4423,20 @@ function researchExperienceDescription(ui, decision, headerState) {
     if (decision.pendingCount > 0) return `未検証${decision.pendingCount}件を順番に確認します。`
     return '候補を作り、Etsy公式とEverBeeの根拠を順番に確認しています。'
   }
-  if (decision.status === 'ready') return `検証済みA/B候補${decision.recommendedCount}件が制作対象です。`
+  if (decision.status === 'ready') {
+    const targetWinnerCount = calculateListingResearchTarget(state.listingResearchTargetSettings).targetWinnerCount
+    const remainingWinnerCount = Math.max(0, targetWinnerCount - decision.recommendedCount)
+    if (remainingWinnerCount > 0) {
+      if (state.multiAngleExploration.status === 'exhausted') {
+        return `安全な未調査候補を使い切りました。A/B候補は${decision.recommendedCount}/${targetWinnerCount}件です。`
+      }
+      if (state.multiAngleExploration.pauseReason) {
+        return `A/B候補は${decision.recommendedCount}/${targetWinnerCount}件です。${state.multiAngleExploration.pauseReason}`
+      }
+      return `A/B候補は${decision.recommendedCount}/${targetWinnerCount}件です。残り${remainingWinnerCount}件を自動で探索します。`
+    }
+    return `検証済みA/B候補${decision.recommendedCount}件が制作対象です。`
+  }
   if (decision.status === 'retry') return `取得失敗${decision.failedCount}件を除外して判定しました。`
   return '今回の調査では制作に進むA/B候補はありません。'
 }
@@ -4501,8 +4516,7 @@ function researchExperienceAction(ui, decision, activeWork) {
       reason: blockedReason,
     }
   }
-  if (decision.status === 'ready' && remainingWinnerCount > 0
-    && ['running', 'paused', 'stopped', 'exhausted'].includes(state.multiAngleExploration.status)) {
+  if (decision.status === 'ready' && remainingWinnerCount > 0) {
     const blockedReason = extensionBlockReason()
     return {
       action: 'automation',
@@ -6366,6 +6380,18 @@ function nextResearchAction() {
   if (pending > 0) {
     return { text: `検証待ちが${pending}件あります。5「最終結果」の「選抜済みを自動検証」を押してください。`, blocking: false }
   }
+  const decision = deriveFinalKeywordDecision(finalEvidenceRows())
+  const targetWinnerCount = calculateListingResearchTarget(state.listingResearchTargetSettings).targetWinnerCount
+  const remainingWinnerCount = Math.max(0, targetWinnerCount - decision.recommendedCount)
+  if (decision.status === 'ready' && remainingWinnerCount > 0) {
+    if (state.multiAngleExploration.status === 'exhausted') {
+      return { text: `安全な未調査候補を使い切りました。A/B候補は${decision.recommendedCount}/${targetWinnerCount}件です。新しい探索サイクルを始めてください。`, blocking: false }
+    }
+    if (state.multiAngleExploration.pauseReason) {
+      return { text: `A/B候補は${decision.recommendedCount}/${targetWinnerCount}件です。${state.multiAngleExploration.pauseReason}`, blocking: false }
+    }
+    return { text: `A/B候補は${decision.recommendedCount}/${targetWinnerCount}件です。残り${remainingWinnerCount}件を自動で探索します。`, blocking: false }
+  }
   if (readyKeywords().length === 0) {
     return { text: '1「条件」で商品とイベントを選び、「候補を自動で探す」を押してください。', blocking: false }
   }
@@ -6923,6 +6949,48 @@ function multiAngleFailureCode(value = '') {
   return 'unknown'
 }
 
+async function maybeAutoStartMultiAngleSearch(source = '') {
+  if (autoDeepDiveStartPromise) return autoDeepDiveStartPromise
+  const rows = finalEvidenceRows()
+  const decision = deriveFinalKeywordDecision(rows)
+  const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
+  const activeWork = Boolean(state.extensionState?.active)
+    || state.marketplaceInsightAutoRunning
+    || state.marketplaceInsightBusy
+    || state.pendingEvidenceAutomation.active
+    || state.pendingEvidenceAutomation.scheduled
+  const blockedReason = extensionBlockReason()
+  const failureCode = multiAngleFailureCode(state.progress.message)
+  const globallyBlocked = ['service-unavailable', 'login-required', 'rate-limited'].includes(failureCode)
+  const timing = classifyProductionWindow(activeResearchContext().event)
+  const timingBlocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
+  const shouldStart = shouldAutoStartMultiAngleExploration({
+    hasResearchRows: rows.length > 0,
+    decisionStatus: decision.status,
+    winnerCount: decision.recommendedCount,
+    targetWinnerCount: target.targetWinnerCount,
+    explorationStatus: state.multiAngleExploration.status,
+    pendingCount: decision.pendingCount,
+    activeWork,
+    restoredAwaiting: restoredResultsAwaitingConfirmation(),
+    crossNichePending: isCrossNicheWorkflowPending(state.crossNicheWorkflow),
+    blocked: Boolean(blockedReason) || globallyBlocked || timingBlocked,
+  })
+  if (!shouldStart) return false
+
+  state.multiAngleExploration = reconcileMultiAngleWinners(
+    createMultiAngleExplorationState({
+      ...state.multiAngleExploration,
+      targetWinnerCount: target.targetWinnerCount,
+    }),
+    rows,
+  )
+  setSimpleStatus(`A/B候補 ${decision.recommendedCount}/${target.targetWinnerCount}件。${source || '初期確認完了'}から深掘りを開始します。`)
+  autoDeepDiveStartPromise = startMultiAngleSearch()
+    .finally(() => { autoDeepDiveStartPromise = null })
+  return autoDeepDiveStartPromise
+}
+
 function continueAfterMultiAnglePageTimeout(message = '') {
   const targetKeys = new Set(state.pendingEvidenceAutomation.targetKeywords.map(normalizePhrase))
   const activeKeyword = normalizePhrase(state.extensionState?.currentKeyword)
@@ -7208,6 +7276,7 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
         renderResearchStageTabs()
       }
       persistMarketFinderState()
+      if (await maybeAutoStartMultiAngleSearch('未検証候補の確認完了')) return
       return
     }
 
@@ -10003,6 +10072,9 @@ function handleExtensionMessage(event) {
     importExtensionResults(data.state)
     renderExtensionStateUpdate()
     resumePersistedEvidenceAutomationIfReady()
+    if (!data.state?.active && typeof maybeAutoStartMultiAngleSearch === 'function') {
+      void maybeAutoStartMultiAngleSearch('EverBee確認完了')
+    }
     // An activity-edge message can be missed when the extension finishes while this
     // tab is restoring or briefly busy. Any idle heartbeat must be able to resume the
     // persisted automation; the scheduler itself prevents duplicate timers.
