@@ -4,7 +4,7 @@ import {
   isEfficientMarketplaceProbe,
   marketplaceInsightPlanForContext,
   normalizeExplorationCandidate,
-} from './multi-angle-candidates.js?v=20260814-3'
+} from './multi-angle-candidates.js?v=20260814-5'
 import { mergeRowsByKey } from './research-performance.js?v=20260720-1'
 
 const VALID_STATUSES = new Set([
@@ -968,8 +968,17 @@ export function nextMultiAngleBatch({
   limit = 8,
   now = '',
   preferNormalCandidates = false,
+  excludedRiskTerms,
 } = {}) {
   let current = annotatePools(createMultiAngleExplorationState(state), pools)
+  const candidateIsEligible = excludedRiskTerms === undefined
+    ? () => true
+    : (candidate) => isEfficientMarketplaceProbe(candidate, { excludedRiskTerms })
+  current = {
+    ...current,
+    currentBatchCandidates: current.currentBatchCandidates.filter(candidateIsEligible),
+    retryQueue: current.retryQueue.filter((entry) => candidateIsEligible(entry.candidate)),
+  }
   if (TERMINAL_STATUSES.has(current.status)) {
     return { state: current, candidates: [], reason: `status-${current.status}` }
   }
@@ -982,6 +991,7 @@ export function nextMultiAngleBatch({
   const currentBatchCandidates = current.currentBatchCandidates
     .map((candidate) => hydrateCandidate(candidate, current, candidate?.angleId))
     .filter(Boolean)
+    .filter(candidateIsEligible)
     .filter((candidate) => !completedOrFailed.has(candidateEvidenceKey(candidate)))
     .slice(0, batchLimit)
   if (currentBatchCandidates.length > 0) {
@@ -1026,6 +1036,7 @@ export function nextMultiAngleBatch({
     && (pools[angleId] ?? []).some((rawCandidate) => {
       const candidate = hydrateCandidate(rawCandidate, current, angleId)
       return candidate
+        && candidateIsEligible(candidate)
         && candidate.resultLane !== 'seasonal-reference'
         && !used.has(candidateEvidenceKey(candidate))
     })
@@ -1050,7 +1061,7 @@ export function nextMultiAngleBatch({
     const unseen = []
     for (const rawCandidate of pools[angleId] ?? []) {
       const candidate = hydrateCandidate(rawCandidate, current, angleId)
-      if (!candidate || candidate.resultLane === 'seasonal-reference') continue
+      if (!candidate || !candidateIsEligible(candidate) || candidate.resultLane === 'seasonal-reference') continue
       const evidenceKey = candidateEvidenceKey(candidate)
       if (used.has(evidenceKey)) continue
       used.add(evidenceKey)

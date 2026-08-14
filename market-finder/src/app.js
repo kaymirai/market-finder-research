@@ -40,7 +40,7 @@ import {
   learnedBuyerIntentSignals,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260814-3'
+} from '../../shared/market-keyword-engine/index.js?v=20260814-4'
 import {
   acceptRestoredCheckpoint,
   buildMarketplaceCaptureRows,
@@ -198,7 +198,7 @@ import {
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260814-4'
+} from './multi-angle-candidates.js?v=20260814-5'
 import {
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
@@ -230,7 +230,7 @@ import {
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260814-4'
+} from './multi-angle-exploration.js?v=20260814-5'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -248,6 +248,7 @@ import {
 } from './marketplace-rate-limit-retry.js?v=20260730-2'
 import {
   createMarketplaceRetryState,
+  gateMarketplaceInsightPlanForDispatch,
   marketplaceRetryDelay,
   normalizeMarketplaceRetryState,
   normalizePendingEvidenceAutomation,
@@ -255,7 +256,7 @@ import {
   restorePendingEvidenceAutomation,
   shouldAutoResumeEvidenceAutomation,
   shouldAutoResumeReloadCheckpoint,
-} from './persistent-evidence-automation.js?v=20260812-3'
+} from './persistent-evidence-automation.js?v=20260814-4'
 import {
   completionModalBehavior,
   pendingAutomationToggleAction,
@@ -1058,7 +1059,10 @@ function restorePersistedState() {
         }),
       }
     : null
-  state.marketplaceInsightPlan = restoreInterruptedMarketplaceInsightPlan(state.marketplaceInsightPlan)
+  state.marketplaceInsightPlan = gateMarketplaceInsightPlanForDispatch(
+    restoreInterruptedMarketplaceInsightPlan(state.marketplaceInsightPlan),
+    { excludedRiskTerms: elements.riskInput.value },
+  )
   state.marketplaceInsightMessage = String(savedState.marketplaceInsightMessage ?? '')
   state.timingOverrideConfirmed = savedState.timingOverrideConfirmed === true
   state.crossNicheWorkflow = createCrossNicheWorkflowState(savedState.crossNicheWorkflow)
@@ -4115,17 +4119,22 @@ function renderOpportunityResultGroup({ title, description, items, emptyMessage,
 }
 
 function finalResultToolbarState() {
-  const finalRows = everbeeResultRows()
+  const finalRows = finalEvidenceRows()
+  const decision = deriveFinalKeywordDecision(finalRows)
+  const csvRows = finalRows
+    .filter((row) => row.queryEligibility?.eligible !== false)
+    .map((row) => row.everbeeRow)
+    .filter(Boolean)
   const erankRows = erankResultRows()
   const captureStates = erankCaptureStateRows()
-  const canCopyFinalKeywords = finalRows.some((row) => ['A', 'B'].includes(row.score.opportunityLabel))
-  const canDownloadStep4Csv = finalRows.length > 0
+  const canCopyFinalKeywords = decision.recommendedCount > 0
+  const canDownloadStep4Csv = csvRows.length > 0
   const canDownloadErankCsv = erankRows.length > 0 || captureStates.length > 0
   const unavailableReasons = []
   if (!canCopyFinalKeywords) unavailableReasons.push('A/B候補がないため、キーワードをコピーできません')
   if (!canDownloadStep4Csv) unavailableReasons.push('最終結果がないため、未来デザイナー用CSVを保存できません')
   if (!canDownloadErankCsv) unavailableReasons.push('eRankデータがないため、参考用eRank CSVを保存できません')
-  const freshness = formatDateTime(latestResearchCheckedAt(finalRows))
+  const freshness = formatDateTime(latestResearchCheckedAt(csvRows))
   return {
     canCopyFinalKeywords,
     canDownloadStep4Csv,
@@ -5405,6 +5414,7 @@ function finalEvidenceRows() {
       erankStatus: erankDemandUnknown ? 'unknown' : captureUi.status,
       hasEverbeeData,
       excluded,
+      queryEligible: queryEligibility.eligible,
       failed,
       failureStage,
     })
@@ -6562,6 +6572,7 @@ function currentMultiAnglePools() {
   return buildMultiAngleCandidatePools({
     event,
     category,
+    excludedRiskTerms: elements.riskInput.value,
     timingStatus: classifyProductionWindow(event).status,
     relatedTerms: marketplaceRelatedTerms(),
     archivedDemandCandidates: archivedDemandNeighborhoodCandidates(learningRecords, {
@@ -6659,6 +6670,7 @@ function nextAppMultiAngleBatch() {
   return nextMultiAngleBatch({
     state: state.multiAngleExploration,
     pools,
+    excludedRiskTerms: elements.riskInput.value,
     limit: 8,
     preferNormalCandidates: state.multiAngleExploration.retryQueue.length > 0,
   })
@@ -7434,7 +7446,8 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '',
     ? currentMultiAngleBatchCandidates()
     : []
   const rows = finalEvidenceRows().filter((row) => (
-    (allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword)))
+    row.queryEligibility?.eligible !== false
+    && (allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword)))
     && (
       batchCandidates.length === 0
       || batchCandidates.some(
@@ -10489,6 +10502,13 @@ async function runMarketplaceInsightAutomation() {
   let stoppedByError = false
   try {
     while (state.marketplaceInsightAutoRunning) {
+      state.marketplaceInsightPlan = gateMarketplaceInsightPlanForDispatch(
+        state.marketplaceInsightPlan,
+        {
+          ...activeResearchOptions(),
+          excludedRiskTerms: elements.riskInput.value,
+        },
+      )
       let item = state.marketplaceInsightPlan?.items?.find((candidate) => (
         candidate.status === 'planned'
         || (candidate.status === 'error' && !candidate.terminalError)

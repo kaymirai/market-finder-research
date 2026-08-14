@@ -1291,6 +1291,21 @@ test('keeps ordinary risk terms visible but blocks explicit exclusion terms', ()
   assert.equal(blocked.status, 'blocked-risk')
 })
 
+test('rejects repeated query phrases and duplicate garment product terms at the shared gate', () => {
+  const options = { eventId: 'halloween', categoryId: 'shirt' }
+  const repeatedWord = classifyMarketplaceBuyerQuery('teacher shirt shirt', options)
+  const repeatedPhrase = classifyMarketplaceBuyerQuery('teacher shirt teacher shirt', options)
+  const duplicateProduct = classifyMarketplaceBuyerQuery('teacher shirt tee', options)
+
+  assert.equal(repeatedWord.eligible, false)
+  assert.equal(repeatedWord.status, 'repeated-phrase')
+  assert.match(repeatedWord.reason, /repeat/i)
+  assert.equal(repeatedPhrase.status, 'repeated-phrase')
+  assert.equal(duplicateProduct.eligible, false)
+  assert.equal(duplicateProduct.status, 'duplicate-product')
+  assert.match(duplicateProduct.reason, /product/i)
+})
+
 test('derives category-matched buyer queries from a long listing title', () => {
   const queries = deriveBuyerSearchQueriesFromTitle(
     'breast cancer awareness bat shirt retro science illustration goth nature lover biology halloween teacher gift',

@@ -1446,6 +1446,8 @@ test('derives every final-result toolbar action from one state function', () => 
   assert.ok(body, 'finalResultToolbarState must be extractable')
   const createState = new Function(
     'everbeeResultRows',
+    'finalEvidenceRows',
+    'deriveFinalKeywordDecision',
     'erankResultRows',
     'erankCaptureStateRows',
     'latestResearchCheckedAt',
@@ -1453,12 +1455,21 @@ test('derives every final-result toolbar action from one state function', () => 
     `return function finalResultToolbarState() {${body}\n}`,
   )
   const rows = {
-    final: [],
+    everbee: [],
+    evidence: [],
     erank: [],
     captures: [],
   }
   const finalResultToolbarState = createState(
-    () => rows.final,
+    () => rows.everbee,
+    () => rows.evidence,
+    (evidenceRows) => ({
+      recommendedCount: evidenceRows.filter((row) => (
+        row.queryEligibility?.eligible !== false
+        && row.evidenceState?.status === 'verified'
+        && ['A', 'B'].includes(row.opportunityLabel)
+      )).length,
+    }),
     () => rows.erank,
     () => rows.captures,
     () => '2026-07-22T12:34:00.000Z',
@@ -1479,7 +1490,23 @@ test('derives every final-result toolbar action from one state function', () => 
   assert.equal(erankOnly.canDownloadStep4Csv, false)
   assert.equal(erankOnly.canDownloadErankCsv, true)
 
-  rows.final = [{ score: { opportunityLabel: 'A' } }]
+  rows.everbee = [{ score: { opportunityLabel: 'A' } }]
+  rows.evidence = [{
+    opportunityLabel: 'A',
+    evidenceState: { status: 'verified' },
+    queryEligibility: { eligible: false, status: 'title-like' },
+    everbeeRow: rows.everbee[0],
+  }]
+  const titleLikeOnly = finalResultToolbarState()
+  assert.equal(titleLikeOnly.canCopyFinalKeywords, false)
+  assert.equal(titleLikeOnly.canDownloadStep4Csv, false)
+
+  rows.evidence = [{
+    opportunityLabel: 'A',
+    evidenceState: { status: 'verified' },
+    queryEligibility: { eligible: true },
+    everbeeRow: rows.everbee[0],
+  }]
   const ready = finalResultToolbarState()
   assert.equal(ready.canCopyFinalKeywords, true)
   assert.equal(ready.canDownloadStep4Csv, true)

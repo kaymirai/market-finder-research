@@ -217,6 +217,37 @@ test('queues only the requested missing stage, without duplicates, up to fifty r
   assert.equal(batch.some((row) => row.keyword === 'teacher shirt'), false)
 })
 
+test('keeps query-ineligible audit rows out of pending dispatch and pending counts', () => {
+  const rows = [{
+    keyword: 'teacher halloween shirt',
+    queryEligibility: { eligible: true },
+    evidenceState: { status: 'pending', nextStage: 'pending-everbee' },
+  }, {
+    keyword: 'long listing title with many unrelated product words shirt',
+    queryEligibility: { eligible: false, status: 'title-like' },
+    evidenceState: { status: 'pending', nextStage: 'pending-everbee' },
+  }]
+
+  assert.deepEqual(
+    pendingEvidenceBatch(rows, 'pending-everbee').map((row) => row.keyword),
+    ['teacher halloween shirt'],
+  )
+  assert.equal(deriveFinalKeywordDecision(rows).pendingCount, 1)
+})
+
+test('turns a query-ineligible pending audit row into a terminal excluded state', () => {
+  assert.deepEqual(deriveFinalEvidenceState({
+    nextStage: 'pending-everbee',
+    queryEligible: false,
+  }), {
+    status: 'excluded',
+    label: '除外',
+    nextStage: '',
+    actionLabel: '',
+    terminal: true,
+  })
+})
+
 test('keeps graph dates and non-candidate phrases out of automatic evidence verification', () => {
   const rows = [
     {

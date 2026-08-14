@@ -1,3 +1,7 @@
+import {
+  classifyMarketplaceBuyerQuery,
+} from '../../shared/market-keyword-engine/index.js?v=20260814-4'
+
 const EVIDENCE_STAGES = new Set(['pending-etsy', 'pending-everbee', 'pending-erank'])
 const RETRYABLE_MARKETPLACE_STATUSES = new Set(['planned', 'opened', 'error'])
 
@@ -70,6 +74,37 @@ export function restoreInterruptedMarketplaceInsightPlan(plan) {
           error: 'ブラウザ終了により前回の取得が中断されました。自動再試行します。',
         }
       : item),
+  }
+}
+
+export function gateMarketplaceInsightPlanForDispatch(plan, options = {}) {
+  if (!plan || !Array.isArray(plan.items)) return plan ?? null
+  const eventId = String(plan.eventId ?? options.eventId ?? '').trim()
+  const categoryId = String(plan.categoryId ?? options.categoryId ?? '').trim()
+
+  return {
+    ...plan,
+    items: plan.items.map((item) => {
+      const queryEligibility = classifyMarketplaceBuyerQuery(item?.query, {
+        eventId: String(item?.eventId ?? eventId).trim(),
+        categoryId: String(item?.categoryId ?? categoryId).trim(),
+        excludedRiskTerms: options.excludedRiskTerms,
+      })
+      const dispatchable = item?.status === 'planned'
+        || item?.status === 'opened'
+        || (item?.status === 'error' && !item?.terminalError)
+      if (queryEligibility.eligible || !dispatchable) {
+        return { ...item, queryEligibility }
+      }
+      return {
+        ...item,
+        status: 'skipped',
+        terminalError: true,
+        error: '',
+        exclusionReason: queryEligibility.reason,
+        queryEligibility,
+      }
+    }),
   }
 }
 

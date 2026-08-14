@@ -30,6 +30,32 @@ test('uses the shared two-to-six word Marketplace boundary', () => {
   }), false)
 })
 
+test('applies current explicit exclusion terms to multi-angle candidate selection', () => {
+  assert.equal(isEfficientMarketplaceProbe({
+    keyword: 'disney teacher shirt',
+    eventId: 'halloween',
+    categoryId: 'shirt',
+  }, { excludedRiskTerms: ['disney'] }), false)
+
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    excludedRiskTerms: ['disney'],
+    relatedTerms: [{
+      keyword: 'disney teacher shirt',
+      eventId: 'halloween',
+      categoryId: 'shirt',
+    }, {
+      keyword: 'science teacher shirt',
+      eventId: 'halloween',
+      categoryId: 'shirt',
+    }],
+  })
+
+  assert.deepEqual(pools['demand-neighborhood'].map((candidate) => candidate.keyword), [
+    'science teacher shirt',
+  ])
+})
+
 test('prioritizes unmeasured same-event Etsy related terms from archived evidence', () => {
   const candidates = archivedDemandNeighborhoodCandidates([{
     eventId: 'halloween',

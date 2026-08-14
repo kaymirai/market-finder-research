@@ -2,7 +2,7 @@ import {
   MARKET_EVENTS,
   classifyMarketplaceBuyerQuery,
   normalizePhrase,
-} from '../../shared/market-keyword-engine/index.js?v=20260814-3'
+} from '../../shared/market-keyword-engine/index.js?v=20260814-4'
 import { eventSignalTerms } from './event-market-tracks.js?v=20260730-4'
 import { NICHE_AXIS_ORDER, taxonomyTerms } from './niche-taxonomy.js?v=20260726-1'
 
@@ -27,10 +27,11 @@ function normalizedSources(value) {
     .filter(Boolean))]
 }
 
-export function isEfficientMarketplaceProbe(candidate = {}) {
+export function isEfficientMarketplaceProbe(candidate = {}, options = {}) {
   return classifyMarketplaceBuyerQuery(candidate.keyword, {
     eventId: candidate.eventId,
     categoryId: candidate.categoryId,
+    excludedRiskTerms: options.excludedRiskTerms ?? candidate.excludedRiskTerms,
   }).eligible
 }
 
@@ -665,6 +666,9 @@ export function buildMultiAngleCandidatePools(input = {}) {
     eventId: activeEventId,
     timingStatus: String(input.timingStatus ?? '').trim(),
     activeEventId,
+    ...(input.excludedRiskTerms === undefined
+      ? {}
+      : { excludedRiskTerms: input.excludedRiskTerms }),
   }
   const byEvidence = new Map()
   const relatedCandidates = (Array.isArray(input.relatedTerms) ? input.relatedTerms : [input.relatedTerms])

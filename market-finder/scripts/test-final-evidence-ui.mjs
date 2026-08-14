@@ -216,10 +216,11 @@ test('prefers a later normal candidate without completing its retained retry ang
   }
   const nextAppMultiAngleBatch = new Function(
     'state',
+    'elements',
     'currentMultiAnglePools',
     'nextMultiAngleBatch',
     `${nextAppBody}; return nextAppMultiAngleBatch`,
-  )(appState, () => pools, nextMultiAngleBatch)
+  )(appState, { riskInput: { value: '' } }, () => pools, nextMultiAngleBatch)
 
   const normal = nextAppMultiAngleBatch()
   assert.deepEqual(normal.candidates.map((candidate) => candidate.keyword), [

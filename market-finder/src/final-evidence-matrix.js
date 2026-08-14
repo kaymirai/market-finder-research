@@ -166,7 +166,7 @@ export function buildFinalEvidenceKeywordPool({
 }
 
 export function deriveFinalEvidenceState(input = {}) {
-  if (input.excluded) {
+  if (input.excluded || input.queryEligible === false) {
     return {
       status: 'excluded',
       label: '除外',
@@ -285,6 +285,7 @@ export function formatEvidenceMetric(value, options = {}) {
 }
 
 export function isAutomatableEvidenceRow(row = {}) {
+  if (row?.queryEligibility?.eligible === false) return false
   const candidateAction = String(row.normalized?.candidateClass?.action ?? '').trim().toLowerCase()
   if (candidateAction && !['candidate', 'explore'].includes(candidateAction)) return false
   if (candidateAction === 'explore') {
@@ -396,6 +397,7 @@ export function deriveFinalKeywordDecision(rows = []) {
   }))
   const pendingRows = sourceRows.filter((row) => (
     String(row?.evidenceState?.status ?? '').trim() === 'pending'
+    && row?.queryEligibility?.eligible !== false
   ))
   const pendingCount = pendingRows.length
   const actionablePendingCount = pendingRows.filter((row) => isAutomatableEvidenceRow(row)).length

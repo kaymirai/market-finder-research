@@ -10,6 +10,7 @@ import {
   shouldAutoResumeEvidenceAutomation,
   shouldAutoResumeReloadCheckpoint,
 } from '../src/persistent-evidence-automation.js'
+import * as automationApi from '../src/persistent-evidence-automation.js'
 
 test('restores an active evidence batch but never restores a stale page timer', () => {
   const restored = normalizePendingEvidenceAutomation({
@@ -77,6 +78,48 @@ test('interrupted Marketplace Insights items become retryable after reload', () 
   assert.equal(restored.items[0].status, 'error')
   assert.match(restored.items[0].error, /中断/)
   assert.equal(restored.items[1].status, 'completed')
+})
+
+test('keeps restored Marketplace plans auditable while terminally skipping ineligible queries', () => {
+  assert.equal(typeof automationApi.gateMarketplaceInsightPlanForDispatch, 'function')
+  const gated = automationApi.gateMarketplaceInsightPlanForDispatch({
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    items: [{
+      query: 'teacher halloween shirt',
+      status: 'planned',
+    }, {
+      query: 'long listing title with many unrelated product words shirt',
+      status: 'planned',
+    }, {
+      query: 'disney teacher shirt',
+      status: 'error',
+      terminalError: false,
+    }],
+  }, {
+    excludedRiskTerms: ['disney'],
+  })
+
+  assert.equal(gated.items.length, 3)
+  assert.equal(gated.items[0].status, 'planned')
+  assert.equal(gated.items[1].status, 'skipped')
+  assert.equal(gated.items[1].terminalError, true)
+  assert.equal(gated.items[1].queryEligibility.status, 'title-like')
+  assert.equal(gated.items[2].status, 'skipped')
+  assert.equal(gated.items[2].queryEligibility.status, 'blocked-risk')
+})
+
+test('does not block ordinary IP review terms unless they are explicitly excluded', () => {
+  assert.equal(typeof automationApi.gateMarketplaceInsightPlanForDispatch, 'function')
+  const gated = automationApi.gateMarketplaceInsightPlanForDispatch({
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    items: [{ query: 'disney teacher shirt', status: 'planned' }],
+  })
+
+  assert.equal(gated.items[0].status, 'planned')
+  assert.equal(gated.items[0].queryEligibility.eligible, true)
+  assert.ok(gated.items[0].queryEligibility.riskTerms.length > 0)
 })
 
 test('persists the retry deadline and resumes with only the remaining wait', () => {

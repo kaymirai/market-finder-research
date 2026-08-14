@@ -21,12 +21,22 @@ test('rechecks both candidate creation and Etsy handoff with the shared gate', (
 })
 
 test('cache-busts both multi-angle module imports after the buyer-query gate update', () => {
-  assert.match(app, /from '\.\/multi-angle-candidates\.js\?v=20260814-4'/)
-  assert.match(app, /from '\.\/multi-angle-exploration\.js\?v=20260814-4'/)
+  assert.match(app, /from '\.\/multi-angle-candidates\.js\?v=20260814-5'/)
+  assert.match(app, /from '\.\/multi-angle-exploration\.js\?v=20260814-5'/)
 })
 
 test('checks automatic deep dive after idle EverBee completion', () => {
   assert.match(app, /async function maybeAutoStartMultiAngleSearch/)
   assert.match(app, /shouldAutoStartMultiAngleExploration/)
   assert.match(app, /MARKET_STATE[\s\S]*maybeAutoStartMultiAngleSearch/)
+})
+
+test('revalidates pending EverBee rows and restored Marketplace plans immediately before dispatch', () => {
+  assert.match(functionBody('verifyPendingEvidence'), /queryEligibility\?\.eligible !== false/)
+  assert.match(functionBody('runMarketplaceInsightAutomation'), /gateMarketplaceInsightPlanForDispatch/)
+})
+
+test('passes current explicit exclusion terms into multi-angle selection and queue recovery', () => {
+  assert.match(functionBody('currentMultiAnglePools'), /excludedRiskTerms:\s*elements\.riskInput\.value/)
+  assert.match(functionBody('nextAppMultiAngleBatch'), /excludedRiskTerms:\s*elements\.riskInput\.value/)
 })

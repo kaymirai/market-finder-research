@@ -1465,6 +1465,12 @@ export function classifyMarketplaceBuyerQuery(keyword, options = {}) {
 
   if (words.length < 2) return result(false, 'too-short', 'Buyer queries need at least two words')
   if (words.length > 6) return result(false, 'title-like', 'Listing-title-like query is too long')
+  if (hasRepeatedAdjacentPhrase(normalized)) {
+    return result(false, 'repeated-phrase', 'Query contains a repeated adjacent word or phrase')
+  }
+  if (hasDuplicateGarmentProductTerms(normalized)) {
+    return result(false, 'duplicate-product', 'Query contains duplicate garment product terms')
+  }
   if (blockedRiskTerms.length > 0) return result(false, 'blocked-risk', `Excluded risk term: ${blockedRiskTerms.join(', ')}`)
   if (!keywordMatchesCategoryProduct(normalized, options.categoryId)) {
     return result(false, 'category-mismatch', 'Query does not match the selected category product')

@@ -129,6 +129,49 @@ test('drops restored retry candidates that fail the Marketplace buyer-query gate
   )
 })
 
+test('skips newly excluded restored and retry candidates without pausing the exploration', () => {
+  const running = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    currentAngleId: 'demand-neighborhood',
+    currentBatchCandidates: [{
+      keyword: 'disney teacher shirt',
+      eventId: 'halloween',
+      categoryId: 'shirt',
+    }],
+    retryQueue: [{
+      candidate: {
+        keyword: 'disney nurse shirt',
+        eventId: 'halloween',
+        categoryId: 'shirt',
+        angleId: 'demand-neighborhood',
+      },
+      retryAt: '2026-08-01T00:00:00.000Z',
+    }],
+  })
+
+  const next = nextMultiAngleBatch({
+    state: running,
+    excludedRiskTerms: ['disney'],
+    pools: {
+      'demand-neighborhood': [{
+        keyword: 'science teacher shirt',
+        eventId: 'halloween',
+        categoryId: 'shirt',
+      }],
+    },
+    now: '2026-08-14T00:00:00.000Z',
+  })
+
+  assert.equal(next.state.status, 'running')
+  assert.equal(next.state.pauseReason, '')
+  assert.deepEqual(next.state.retryQueue, [])
+  assert.deepEqual(next.candidates.map((candidate) => candidate.keyword), [
+    'science teacher shirt',
+  ])
+})
+
 test('moves to the next angle without repeating the same evidence lookup and preserves provenance', () => {
   const started = startMultiAngleExploration({}, context, '2026-07-30T00:00:00Z')
   const pools = {
