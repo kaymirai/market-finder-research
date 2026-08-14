@@ -110,7 +110,10 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /function schedulePendingEvidenceAutomation\(/)
   assert.match(app, /function stopPendingEvidenceAutomation\(/)
   assert.match(app, /candidateLimit:\s*batchLimit/)
-  assert.match(app, /wasActive\s*&&\s*!data\.state\?\.active[\s\S]*schedulePendingEvidenceAutomation/)
+  assert.match(
+    app,
+    /state\.pendingEvidenceAutomation\?\.active && !data\.state\?\.active[\s\S]{0,1600}schedulePendingEvidenceAutomation\(\)/,
+  )
   assert.match(app, /選抜済みを自動検証/)
   assert.match(app, /自動検証を停止/)
 })
@@ -625,7 +628,11 @@ test('new-cycle button persists terminal evidence before resetting or starting w
       `new-cycle must install the prepared ${field} boundary`,
     )
   }
-  assert.match(clickBody, /await startNewMultiAngleCycle\(\)/)
+  assert.match(clickBody, /await handleWinningNicheAutomationAction\(action\)/)
+  assert.match(
+    app,
+    /async function handleWinningNicheAutomationAction\(action = ''\) \{[\s\S]*if \(action === 'new-cycle'\) return startNewMultiAngleCycle\(\)/,
+  )
 })
 
 test('completes a restored batch from persisted multi-angle candidates', () => {
@@ -1083,7 +1090,7 @@ test('the final evidence detail button toggles closed without silently selecting
   assert.doesNotMatch(renderBody, /state\.selectedResultKey = selection\.selectedKey/)
 })
 test('reconciles every restored winner state against the current final evidence', () => {
-  const start = app.indexOf('function acceptRestoredResearchResults()')
+  const start = app.indexOf('function acceptRestoredResearchResults(options = {})')
   const end = app.indexOf('\nfunction ', start + 1)
   const body = app.slice(start, end)
   assert.match(body, /state\.multiAngleExploration = reconcileMultiAngleWinners\(\s*state\.multiAngleExploration,\s*finalEvidenceRows\(\),\s*\)/)

@@ -243,7 +243,7 @@ test('feeds versioned contextual archives into the next candidate search', () =>
   assert.doesNotMatch(loadBody, /scheduleEvidenceAutoArchive\(\)/)
   assert.match(
     app,
-    /function scheduleEvidenceAutoArchive\(\)[\s\S]{0,700}const record = evidenceArchiveRecord\(\)[\s\S]{0,240}saveEvidenceArchive\(\{ automatic: true, record \}\)/,
+    /function scheduleEvidenceAutoArchive\(\)[\s\S]{0,900}deferLatestWork\(\{[\s\S]{0,500}work: \(\) => \{[\s\S]{0,240}const record = evidenceArchiveRecord\(\)[\s\S]{0,240}saveEvidenceArchive\(\{ automatic: true, record \}\)/,
   )
   assert.match(app, /自動保管/)
   assert.match(app, /function evidenceArchiveBlockReason\(options = \{\}\)/)
