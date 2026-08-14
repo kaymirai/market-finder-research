@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { deriveResearchExperienceUi } from '../src/research-experience-ui.js'
+import {
+  deriveResearchExperienceUi,
+  researchPauseRecovery,
+} from '../src/research-experience-ui.js'
 
 test('shows setup before research has produced rows', () => {
   const ui = deriveResearchExperienceUi({
@@ -70,4 +73,15 @@ test('normalizes unknown stages and invalid target counts', () => {
 
   assert.equal(ui.stage, 'conditions')
   assert.equal(ui.targetLabel, 'A/B候補 0 / 0件')
+})
+
+test('explains that an EverBee login is required before a paused search can resume', () => {
+  assert.deepEqual(researchPauseRecovery('login-required'), {
+    actionLabel: 'EverBeeにログイン後、探索を再開',
+    reason: 'EverBeeのログインが切れています。開いているEverBee SSOタブでログインしてから、このボタンを押してください。',
+  })
+  assert.deepEqual(researchPauseRecovery('page-timeout'), {
+    actionLabel: '',
+    reason: '',
+  })
 })

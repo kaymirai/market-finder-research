@@ -116,7 +116,8 @@ import {
 } from './research-console-ui.js?v=20260814-1'
 import {
   deriveResearchExperienceUi,
-} from './research-experience-ui.js?v=20260811-1'
+  researchPauseRecovery,
+} from './research-experience-ui.js?v=20260815-1'
 import {
   createResultSubviewUi,
   restoreResultSubviewUiFromPayload,
@@ -4462,6 +4463,7 @@ function researchExperienceDescription(ui, decision, headerState) {
 function researchExperienceAction(ui, decision, activeWork) {
   const targetWinnerCount = calculateListingResearchTarget(state.listingResearchTargetSettings).targetWinnerCount
   const remainingWinnerCount = Math.max(0, targetWinnerCount - decision.recommendedCount)
+  const pauseRecovery = researchPauseRecovery(state.multiAngleExploration.pauseReason)
   if (!elements.acceptRestoredResultsBtn?.hidden) {
     const restoredCount = state.finalEvidenceCount || state.researchRows.length
     return {
@@ -4515,9 +4517,9 @@ function researchExperienceAction(ui, decision, activeWork) {
       const blockedReason = extensionBlockReason()
       return {
         action: 'automation',
-        label: elements.winningNicheAutomationToggle?.textContent || '目標まで探索を再開',
+        label: pauseRecovery.actionLabel || elements.winningNicheAutomationToggle?.textContent || '目標まで探索を再開',
         disabled: Boolean(blockedReason),
-        reason: blockedReason,
+        reason: pauseRecovery.reason || blockedReason,
       }
     }
     return { action: '', label: '', disabled: true }
@@ -4529,9 +4531,9 @@ function researchExperienceAction(ui, decision, activeWork) {
     const blockedReason = extensionBlockReason()
     return {
       action: 'automation',
-      label: `目標まで探索を再開（A/B あと${remainingWinnerCount}件）`,
+      label: pauseRecovery.actionLabel || `目標まで探索を再開（A/B あと${remainingWinnerCount}件）`,
       disabled: Boolean(blockedReason),
-      reason: blockedReason,
+      reason: pauseRecovery.reason || blockedReason,
     }
   }
   if (decision.status === 'ready' && remainingWinnerCount > 0) {

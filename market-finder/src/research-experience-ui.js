@@ -13,6 +13,17 @@ function normalizedStage(value, fallback = 'conditions') {
   return RESEARCH_STAGE_IDS.has(stage) ? stage : fallback
 }
 
+export function researchPauseRecovery(value = '') {
+  const reason = String(value ?? '').trim().toLowerCase()
+  if (reason === 'login-required') {
+    return {
+      actionLabel: 'EverBeeにログイン後、探索を再開',
+      reason: 'EverBeeのログインが切れています。開いているEverBee SSOタブでログインしてから、このボタンを押してください。',
+    }
+  }
+  return { actionLabel: '', reason: '' }
+}
+
 export function deriveResearchExperienceUi(input = {}) {
   const decisionStatus = String(input.decisionStatus ?? 'empty')
   const isRunning = Boolean(input.isRunning) || decisionStatus === 'pending'
