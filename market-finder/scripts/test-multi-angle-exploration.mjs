@@ -10,6 +10,7 @@ import {
   recordMultiAngleFailure,
   resumeExhaustedMultiAngleExploration,
   resumeMultiAngleExploration,
+  shouldAutoStartMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleExploration,
 } from '../src/multi-angle-exploration.js'
@@ -22,6 +23,44 @@ const context = {
   categoryId: 'shirt',
   targetWinnerCount: 2,
 }
+
+test('auto-starts deep dive only after complete initial evidence is below target', () => {
+  const base = {
+    hasResearchRows: true,
+    decisionStatus: 'ready',
+    winnerCount: 1,
+    targetWinnerCount: 5,
+    explorationStatus: 'idle',
+    pendingCount: 0,
+    activeWork: false,
+    restoredAwaiting: false,
+    crossNichePending: false,
+    blocked: false,
+  }
+
+  assert.equal(shouldAutoStartMultiAngleExploration(base), true)
+  assert.equal(shouldAutoStartMultiAngleExploration({ ...base, winnerCount: 5 }), false)
+  assert.equal(shouldAutoStartMultiAngleExploration({ ...base, pendingCount: 1 }), false)
+  assert.equal(shouldAutoStartMultiAngleExploration({ ...base, explorationStatus: 'running' }), false)
+  assert.equal(shouldAutoStartMultiAngleExploration({ ...base, restoredAwaiting: true }), false)
+  assert.equal(shouldAutoStartMultiAngleExploration({ ...base, blocked: true }), false)
+})
+
+test('reconciliation ignores historical title-like A/B rows', () => {
+  const reconciled = reconcileMultiAngleWinners({ targetWinnerCount: 5 }, [{
+    keyword: 'halloween running shirt',
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'B',
+    queryEligibility: { eligible: true },
+  }, {
+    keyword: 'long listing title with many unrelated product words shirt',
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'A',
+    queryEligibility: { eligible: false },
+  }])
+
+  assert.deepEqual(reconciled.winnerKeywords, ['halloween running shirt'])
+})
 
 test('drops persisted measured recombinations that are too long for Marketplace validation', () => {
   const restored = createMultiAngleExplorationState({

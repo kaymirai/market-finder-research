@@ -881,6 +881,16 @@ export function pauseMultiAngleForContextChange(
   return changed ? pauseMultiAngleExploration(current, reason, now) : current
 }
 
+export function shouldAutoStartMultiAngleExploration(input = {}) {
+  const targetWinnerCount = Math.max(1, Number(input.targetWinnerCount) || 5)
+  const winnerCount = Math.max(0, Number(input.winnerCount) || 0)
+  if (!input.hasResearchRows || winnerCount >= targetWinnerCount) return false
+  if (input.decisionStatus === 'pending' || Number(input.pendingCount) > 0) return false
+  if (String(input.explorationStatus ?? 'idle') !== 'idle') return false
+  if (input.activeWork || input.restoredAwaiting || input.crossNichePending || input.blocked) return false
+  return ['ready', 'none', 'retry'].includes(String(input.decisionStatus ?? ''))
+}
+
 export function startMultiAngleExploration(state = {}, context = {}, now = '') {
   const restored = createMultiAngleExplorationState(state)
   const updatedAt = timestamp(now)
@@ -1197,6 +1207,7 @@ export function reconcileMultiAngleWinners(state = {}, rows = [], now = '') {
       ).trim()
       return row?.evidenceState?.status === 'verified'
         && resultLane !== 'seasonal-reference'
+        && row?.queryEligibility?.eligible !== false
         && ['A', 'B'].includes(grade)
     })
     .map((row) => row.keyword))
