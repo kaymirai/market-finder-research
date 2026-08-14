@@ -121,7 +121,10 @@ function checkedAtForRow(row) {
 
 export function selectVideoSlideCandidates(rows = [], context = {}) {
   const inContext = (Array.isArray(rows) ? rows : []).filter((row) => rowMatchesContext(row, context))
-  const verified = inContext.filter((row) => row?.evidenceState?.status === 'verified')
+  const verified = inContext.filter((row) => (
+    row?.evidenceState?.status === 'verified'
+    && row?.queryEligibility?.eligible !== false
+  ))
   const blockedCandidateCount = verified.filter(isExplicitlyBlocked).length
   const usable = verified.filter((row) => !isExplicitlyBlocked(row))
   const ab = usable.filter((row) => ['A', 'B'].includes(text(row.opportunityLabel).toUpperCase()))

@@ -448,6 +448,23 @@ test('names one verified A or B keyword as the primary keyword to use', () => {
   assert.deepEqual(decision.gradeCounts, { A: 2, B: 1, C: 0, D: 0 })
 })
 
+test('does not count a verified title-like row as an A/B production candidate', () => {
+  const decision = deriveFinalKeywordDecision([{
+    keyword: 'short buyer shirt',
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'B',
+    queryEligibility: { eligible: true },
+  }, {
+    keyword: 'long listing title with many unrelated product words shirt',
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'A',
+    queryEligibility: { eligible: false, status: 'title-like' },
+  }])
+
+  assert.equal(decision.recommendedCount, 1)
+  assert.deepEqual(decision.recommendedKeywords.map((row) => row.keyword), ['short buyer shirt'])
+})
+
 test('does not pretend to recommend a keyword while verification remains', () => {
   const decision = deriveFinalKeywordDecision([
     {

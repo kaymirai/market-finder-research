@@ -342,6 +342,7 @@ export function finalEvidenceFilterMatches(row = {}, filter = 'all') {
   if (selected === 'recommended') {
     return row.evidenceState?.status === 'verified'
       && ['A', 'B'].includes(String(row.opportunityLabel ?? '').trim())
+      && row?.queryEligibility?.eligible !== false
   }
   return row.evidenceState?.status === selected
 }
@@ -372,6 +373,7 @@ export function deriveFinalKeywordDecision(rows = []) {
     .filter((row) => (
       row?.evidenceState?.status === 'verified'
       && Object.hasOwn(rank, String(row.opportunityLabel ?? '').trim())
+      && row?.queryEligibility?.eligible !== false
       && String(row.keyword ?? '').trim()
     ))
     .sort((left, right) => (

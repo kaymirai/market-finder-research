@@ -325,8 +325,8 @@ test('keeps the primary design handoff label in sync with shortlist pagination',
 
 test('copies only A and B final keywords in their result order', () => {
   assert.match(app, /async function copyFinalKeywords\(\)/)
-  assert.match(app, /everbeeResultRows\(\)\s*\.filter\(\(row\) => \['A', 'B'\]\.includes\(row\.score\.opportunityLabel\)\)/)
-  assert.match(app, /\.map\(\(row\) => row\.score\.normalized\.keyword\)\s*\.join\('\\n'\)/)
+  assert.match(app, /deriveFinalKeywordDecision\(finalEvidenceRows\(\)\)\.recommendedKeywords/)
+  assert.match(app, /\.map\(\(row\) => row\.keyword\)\s*\.join\('\\n'\)/)
   assert.match(app, /elements\.copyFinalKeywordsBtn\.addEventListener\('click', copyFinalKeywords\)/)
 })
 

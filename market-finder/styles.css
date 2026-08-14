@@ -5011,6 +5011,11 @@ button.research-table-row {
   line-height: 1.4;
 }
 
+.final-evidence-query-exclusion {
+  color: #9a3412 !important;
+  font-weight: 800;
+}
+
 .final-evidence-detail-button {
   width: 100%;
   padding: 8px 10px;

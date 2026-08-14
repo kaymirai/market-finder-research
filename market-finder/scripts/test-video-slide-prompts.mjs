@@ -24,6 +24,7 @@ function makeRow(keyword, score, opportunityLabel, overrides = {}) {
     evidenceState: { status: overrides.status ?? 'verified' },
     scoreState: { score, type: 'overall' },
     opportunityLabel,
+    queryEligibility: overrides.queryEligibility ?? { eligible: true },
     confidenceLabel: overrides.confidenceLabel ?? 'High',
     decisionReasons: overrides.decisionReasons ?? ['需要と販売実績を確認'],
     raw: {
@@ -80,6 +81,17 @@ test('does not reject an A/B candidate because its design noun brief contains un
   assert.deepEqual(result.candidates.map((row) => row.keyword), ['halloween running shirt'])
   assert.equal(result.ipReviewCount, 0)
   assert.equal(result.blockedCandidateCount, 0)
+})
+
+test('excludes title-like historical evidence from slide candidates', () => {
+  const result = selectVideoSlideCandidates([
+    makeRow('halloween running shirt', 78, 'B'),
+    makeRow('seven word listing title that should not become shirt', 99, 'A', {
+      queryEligibility: { eligible: false, status: 'title-like' },
+    }),
+  ], CONTEXT)
+
+  assert.deepEqual(result.candidates.map((row) => row.keyword), ['halloween running shirt'])
 })
 
 test('keeps risk-term A/B candidates visible for IP review', () => {

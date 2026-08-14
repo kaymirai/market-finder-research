@@ -34,6 +34,12 @@ test('provides a single final evidence matrix with filters and bulk verification
   assert.match(app, /async function verifyPendingEvidence\(/)
 })
 
+test('labels title-like history without deleting it from the evidence table', () => {
+  assert.match(app, /商品タイトル相当・検索語対象外/)
+  assert.match(app, /titleLikeCount/)
+  assert.match(css, /final-evidence-query-exclusion/)
+})
+
 test('bounds the rendered exploration history so restored research stays responsive', () => {
   assert.match(app, /limitFinalEvidenceRows\(nodes,\s*40\)/)
   assert.match(app, /historyLimit\.rows\.map/)
@@ -1068,7 +1074,7 @@ test('hands the design step every A/B theme as grouped series, not a flat keywor
   // One listing serves one buyer intent, so the handoff must not flatten the clusters away.
   assert.doesNotMatch(app, /selectDesignShortlist/)
   // Only verified rows may reach the design handoff.
-  assert.match(app, /row\.evidenceState\.status === 'verified'\)\s*\n\s*\.map\(\(row\) => row\.everbeeRow\)/)
+  assert.match(app, /row\.evidenceState\.status === 'verified'\)\s*\n\s*\.filter\(\(row\) => row\.queryEligibility\?\.eligible !== false\)\s*\n\s*\.map\(\(row\) => row\.everbeeRow\)/)
   // The full export must stay available so the shortlist is a view, not a filter on the data.
   assert.match(app, /function exportStep4Csv\(\)\s*\{\s*exportResultRowsCsv\(everbeeResultRows\(\)/)
 })

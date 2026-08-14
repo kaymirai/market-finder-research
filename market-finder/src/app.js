@@ -5162,6 +5162,7 @@ function evidenceConversionLabel(row = {}) {
 function currentDesignClusterPlan() {
   const verifiedRows = finalEvidenceRows()
     .filter((row) => row.evidenceState.status === 'verified')
+    .filter((row) => row.queryEligibility?.eligible !== false)
     .map((row) => row.everbeeRow)
     .filter(Boolean)
   return selectDesignClusters(verifiedRows)
@@ -5333,6 +5334,11 @@ function finalEvidenceRows() {
     )
     const capture = currentContextCompatible ? captureByKeyword.get(keyword) ?? {} : {}
     const normalized = scoredRow?.score?.normalized ?? raw
+    const queryEligibility = classifyMarketplaceBuyerQuery(keyword, {
+      eventId: raw.researchEventId ?? candidate.eventId ?? activeContext.eventId,
+      categoryId: raw.researchCategoryId ?? candidate.categoryId ?? activeContext.categoryId,
+      excludedRiskTerms: elements.riskInput.value,
+    })
     const captureUi = deriveErankCaptureUiState(raw, {
       active: Boolean(
         currentContextCompatible
@@ -5403,6 +5409,7 @@ function finalEvidenceRows() {
       raw,
       normalized,
       everbeeRow,
+      queryEligibility,
       evidenceState,
       scoreState,
       opportunityLabel: scoreState.type === 'overall' ? scoredRow?.score?.opportunityLabel ?? '' : '',
@@ -5525,12 +5532,15 @@ function renderFinalEvidenceMatrixRow(row, index) {
   const verificationAction = row.evidenceState.actionLabel
     ? `<button type="button" class="text-btn final-evidence-action" data-final-verify-stage="${escapeHtml(row.evidenceState.nextStage)}" data-final-verify-keyword="${escapeHtml(row.keyword)}" data-final-verify-key="${escapeHtml(row.key)}">${escapeHtml(row.evidenceState.actionLabel)}</button>`
     : ''
+  const queryExclusion = row.queryEligibility?.eligible === false
+    ? '<small class="final-evidence-query-exclusion">商品タイトル相当・検索語対象外</small>'
+    : ''
   const selected = row.key === state.selectedResultKey
   const score = Number.isFinite(Number(row.scoreState.score)) ? `${Math.round(Number(row.scoreState.score))}点` : '採点前'
   return `
     <tr class="final-evidence-row is-${escapeHtml(row.evidenceState.status)}${selected ? ' is-selected' : ''}">
       <td class="final-evidence-rank">${index + 1}</td>
-      <td><button type="button" class="final-evidence-keyword" data-result-key="${escapeHtml(row.key)}">${escapeHtml(row.keyword)}</button></td>
+      <td><button type="button" class="final-evidence-keyword" data-result-key="${escapeHtml(row.key)}">${escapeHtml(row.keyword)}</button>${queryExclusion}</td>
       <td><strong>${escapeHtml(score)}</strong><small>${escapeHtml(row.opportunityLabel || row.candidateStage || '-')}</small></td>
       <td><span class="final-evidence-status is-${escapeHtml(row.evidenceState.status)}">${escapeHtml(row.evidenceState.label)}</span></td>
       <td><strong>${escapeHtml(etsySearches)}</strong><small>検索 / 競合 ${escapeHtml(etsyListings)}</small></td>
@@ -5578,6 +5588,10 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
     button.setAttribute('aria-pressed', String(button.dataset.finalEvidenceFilter === state.finalEvidenceFilter))
   })
   const pendingRows = rows.filter((row) => row.evidenceState.status === 'pending')
+  const titleLikeCount = rows.filter((row) => (
+    row.queryEligibility?.eligible === false
+    && row.queryEligibility?.status === 'title-like'
+  )).length
   const buttonPendingRows = pendingEvidenceRows(rows, pendingRows.map((row) => row.keyword))
   const includedKeywords = new Set(rows.map((row) => normalizePhrase(row.keyword)))
   const deferredIdeaCount = new Set(
@@ -5588,6 +5602,9 @@ function renderFinalEvidenceMatrix(rows = finalEvidenceRows()) {
   elements.finalEvidenceScopeStatus.textContent = deferredIdeaCount > 0
     ? `検証対象 ${rows.length}件。候補アイデア ${deferredIdeaCount}件は選抜外のため、eRank枠を使わず保留しています。`
     : `検証対象 ${rows.length}件。選抜した候補と取得済みデータだけを表示しています。`
+  if (titleLikeCount > 0) {
+    elements.finalEvidenceScopeStatus.textContent += ` 商品タイトル相当・検索語対象外 ${titleLikeCount}件は監査用に表示し、A/B制作候補・デザイン候補・CSV・動画スライド候補から除外しています。`
+  }
   const buttonPendingCount = state.pendingEvidenceAutomation?.active
     ? pendingEvidenceRows(rows, state.pendingEvidenceAutomation.targetKeywords).length
     : buttonPendingRows.length
@@ -8698,9 +8715,8 @@ async function copyKeywords() {
 }
 
 async function copyFinalKeywords() {
-  const text = everbeeResultRows()
-    .filter((row) => ['A', 'B'].includes(row.score.opportunityLabel))
-    .map((row) => row.score.normalized.keyword)
+  const text = deriveFinalKeywordDecision(finalEvidenceRows()).recommendedKeywords
+    .map((row) => row.keyword)
     .join('\n')
   await copyText(text, elements.copyFinalKeywordsBtn, 'コピー済み', 'キーワードをコピー')
 }
@@ -8999,10 +9015,13 @@ function exportDesignShortlistCsv() {
 }
 
 function exportResultRowsCsv(rows, fileBaseName) {
-  if (rows.length === 0) return
   const evidenceByContext = new Map(
     finalEvidenceRows().map((row) => [researchRowContextKey(row), row]),
   )
+  const eligibleRows = rows.filter((row) => (
+    evidenceByContext.get(researchRowContextKey(row))?.queryEligibility?.eligible !== false
+  ))
+  if (eligibleRows.length === 0) return
 
   const header = [
     'Rank',
@@ -9078,7 +9097,7 @@ function exportResultRowsCsv(rows, fileBaseName) {
     ...RESEARCH_METADATA_CSV_HEADERS,
   ]
 
-  const lines = rows.map((row, index) => {
+  const lines = eligibleRows.map((row, index) => {
     const normalized = row.score.normalized
     const brief = row.idea.nounBrief ?? {}
     const route = row.productRoute ?? {}
