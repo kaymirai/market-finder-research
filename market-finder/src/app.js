@@ -3053,7 +3053,13 @@ function releaseMarketplaceInsightBatch() {
     ...summary,
     [stage]: items.filter((item) => item.stage === stage).length,
   }), {})
-  state.marketplaceInsightPlan = { ...result.plan, items, counts }
+  state.marketplaceInsightPlan = gateMarketplaceInsightPlanForDispatch(
+    { ...result.plan, items, counts },
+    {
+      ...activeResearchOptions(),
+      excludedRiskTerms: elements.riskInput.value,
+    },
+  )
   const messages = {
     'batch-added': `関連深掘りラウンド${result.plan.researchRound}として上位${result.addedCount}語を追加しました。`,
     'need-more-seeds': '入口結果を10語以上取得すると、最初の関連深掘りを追加できます。',
@@ -10515,10 +10521,7 @@ async function runMarketplaceInsightAutomation() {
       ))
       if (!item && marketplaceNextBatchState().ready) {
         releaseMarketplaceInsightBatch()
-        item = state.marketplaceInsightPlan?.items?.find((candidate) => (
-          candidate.status === 'planned'
-          || (candidate.status === 'error' && !candidate.terminalError)
-        ))
+        continue
       }
       if (!item) break
 

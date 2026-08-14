@@ -147,3 +147,56 @@ One all-files-concurrent diagnostic run caused only `test-local-launcher.mjs` to
 
 - Live Etsy/EverBee behavior was intentionally not exercised to avoid consuming search/rate limits. Final live confirmation will occur during the user's next normal research run.
 - The full suite must remain sequential because the local-launcher tests own fixed local ports and can collide when all files are forced to run concurrently.
+
+## Review fix round 2
+
+Commit: `fix: recheck released Marketplace plans`（本追記を含むコミット。最終SHAは完了ハンドオフに記載）
+
+### Change
+
+- `releaseMarketplaceInsightBatch()` が追加したfollow-up planを、現在のevent/categoryと`excludedRiskTerms`を使う共通buyer-query gateへ直ちに通すようにした。
+- title-like、重複商品語、category mismatch、明示的除外語の候補は削除せず、`status: skipped`、`terminalError: true`、`queryEligibility`、`exclusionReason`を保持する監査可能なterminal non-dispatch行にした。
+- release直後は同じ反復でitemを選び直さず`continue`し、次の反復のdispatch gateから再開するようにした。eligibleなfollow-upは`planned`のまま次反復で通常dispatchされる。
+- skipped follow-upは既存queryとしてcandidate poolから除外され、5件単位で有限に消費される。40件上限またはcandidate pool枯渇で既存stop条件に到達するため、empty-plan busy loopは作らない。
+
+### TDD record
+
+RED command:
+
+```powershell
+node --test --test-name-pattern "rechecks newly released" market-finder/scripts/test-buyer-query-gate-ui.mjs
+```
+
+Observed RED: `advanceMarketplaceInsightResearch()` fixtureが追加した5件すべての`queryEligibility`が`undefined`で、7語title-like候補も`planned`のまま残った（`0 passed / 1 failed`）。
+
+GREEN command:
+
+```powershell
+node --test --test-name-pattern "rechecks newly released" market-finder/scripts/test-buyer-query-gate-ui.mjs
+```
+
+Result: `1 passed / 0 failed`。
+
+Fixture coverage:
+
+- 7語title-like: `retro biology teacher halloween gift school shirt`
+- duplicate garment product: `teacher shirt tee`
+- category mismatch: `teacher halloween mug`
+- explicit excluded risk: `disney teacher shirt`
+- eligible next-iteration follow-up: `biology teacher halloween shirt`
+
+### Verification
+
+- Focused: `test-buyer-query-gate-ui.mjs`、`test-persistent-evidence-automation.mjs`、`test-opportunity-model.mjs` — `130 passed / 0 failed`
+- Full Market Finder sequential suite: `39 files / 708 passed / 0 failed`
+- `node --check market-finder/src/app.js`: PASS
+- `git diff --check`: PASS
+- 外部Etsy/EverBee通信: なし（ローカルunit/source testsのみ）
+
+### Self-review
+
+- 変更は未対応findingのrelease/dispatch境界とその回帰テストだけに限定した。
+- release直後と次反復先頭の二重境界で共通gateを適用し、将来のrelease経路変更でもdispatch前条件が崩れにくい。
+- 不適格行は履歴から削除せず、判定status/reasonを保持する。
+- eligible行はgateで変質させず、次反復の既存dispatch処理へ渡る。
+- live通信とレート枠は消費していない。
