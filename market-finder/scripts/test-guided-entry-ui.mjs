@@ -30,6 +30,32 @@ function panelOpeningTag(stage) {
   return match[0]
 }
 
+test('provides one mission bar for setup running and result phases', () => {
+  assert.match(html, /id="researchMissionBar"/)
+  assert.match(html, /id="researchMissionTarget"/)
+  assert.match(html, /id="researchMissionState"/)
+  assert.match(html, /id="researchExperiencePrimaryAction"/)
+  assert.match(html, /id="researchProgressView"/)
+  assert.match(html, /id="researchProgressSteps"/)
+  assert.match(app, /function renderResearchExperience\(/)
+  assert.match(app, /document\.body\.dataset\.researchPhase/)
+  assert.match(app, /deriveResearchExperienceUi/)
+  assert.match(app, /bindResearchStageTabs\(elements\.researchStageTabs/)
+})
+
+test('explains beside the main action why it cannot run', () => {
+  assert.match(html, /id="researchMissionActionReason"/)
+  assert.match(app, /researchMissionActionReason: document\.querySelector\('#researchMissionActionReason'\)/)
+  assert.match(app, /reason: blockedReason/)
+  assert.match(app, /elements\.researchMissionActionReason\.textContent = action\.reason \|\| ''/)
+  assert.match(app, /elements\.researchMissionActionReason\.hidden = !action\.reason/)
+})
+test('shows the pending provider instead of the final screen while research is incomplete', () => {
+  assert.match(html, /class="research-progress-copy">\s*<small>現在の工程<\/small>/)
+  const stageBody = app.match(/function researchExperienceActiveStage\(rows = \[\]\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(stageBody, /if \(\['running', 'paused'\]\.includes\(state\.multiAngleExploration\.status\)\) return 'candidates'[\s\S]*const pendingRow = rows\.find\(\(row\) => row\.evidenceState\.status === 'pending'\)/)
+assert.match(stageBody, /String\(pendingRow\?\.evidenceState\.nextStage \?\? ''\)\.includes\('etsy'\) \? 'etsy' : 'everbee'/)
+})
 test('uses one set of five numbered workflow steps', () => {
   assert.doesNotMatch(html, /class="workflow-strip"/)
   for (let step = 1; step <= 5; step += 1) {
@@ -91,7 +117,7 @@ test('renders the five-stage research console', () => {
   }
   assert.match(
     html,
-    /data-research-panel="results"[\s\S]*?<details[^>]*class="[^"]*erank-advanced-panel[^"]*"[^>]*>[\s\S]*?<summary>eRankで追加確認<\/summary>/,
+    /data-research-panel="results"[\s\S]*?data-result-view="erank"[\s\S]*?id="candidateErankBtn"/,
   )
 })
 
@@ -284,6 +310,19 @@ test('gives final results a dedicated export toolbar', () => {
   assert.equal(html.match(/id="downloadErankCsvBtn"/g)?.length, 1)
 })
 
+test('uses one primary design handoff and keeps full exports secondary', () => {
+  assert.match(app, /action: 'export-design',[\s\S]{0,220}A\/B全\$\{designPlan\.totalClusters\}テーマを未来デザイナー用CSV保存/)
+  assert.match(app, /if \(action === 'export-design'\) \{\s*exportDesignShortlistCsv\(\)/)
+  assert.match(html, /id="downloadStep4CsvBtn"[^>]*class="ghost-btn advanced-only"/)
+  assert.match(html, /id="downloadErankCsvBtn"[^>]*class="ghost-btn advanced-only"/)
+  assert.match(html, /id="downloadDesignShortlistBtn"[^>]*class="ghost-btn"/)
+})
+
+test('keeps the primary design handoff label in sync with shortlist pagination', () => {
+  assert.match(app, /designShortlistMoreBtn\.addEventListener\('click',[\s\S]{0,220}renderDesignShortlist\(\)\s*renderResearchExperience\(\)/)
+  assert.match(app, /designShortlistResetBtn\.addEventListener\('click',[\s\S]{0,220}renderDesignShortlist\(\)\s*renderResearchExperience\(\)/)
+})
+
 test('copies only A and B final keywords in their result order', () => {
   assert.match(app, /async function copyFinalKeywords\(\)/)
   assert.match(app, /everbeeResultRows\(\)\s*\.filter\(\(row\) => \['A', 'B'\]\.includes\(row\.score\.opportunityLabel\)\)/)
@@ -308,7 +347,7 @@ test('renders only the active research stage details', () => {
   assert.match(app, /case 'etsy':[\s\S]{0,160}renderMarketplaceInsightPlan\(\)/)
   assert.match(app, /case 'results':[\s\S]{0,360}renderResultsTable\(\)[\s\S]{0,360}renderErankResults\(\)[\s\S]{0,360}renderCrossNicheDrilldown\(\)[\s\S]{0,360}renderSeoPlan\(\)/)
   assert.match(app, /function renderActiveResearchStage\(options = \{\}\)[\s\S]{0,2200}renderResearchQueue\(\)[\s\S]{0,300}renderResearchInspector\(\)/)
-  assert.match(app, /function renderAll\(\) \{\s*renderGlobalResearchStatus\(\)\s*renderWinningNicheAutomation\(\)\s*renderNextResearchAction\(\)\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*persistMarketFinderState\(\)\s*\}/)
+  assert.match(app, /function renderAll\(\) \{\s*renderGlobalResearchStatus\(\)\s*renderWinningNicheAutomation\(\)\s*renderNextResearchAction\(\)\s*renderResearchExperience\(\)\s*renderResearchStageTabs\(\)\s*renderActiveResearchStage\(\)\s*if \(shouldPersistWorkspaceRender\(/)
 })
 
 test('always states the next action and why a control cannot be pressed', () => {
@@ -328,10 +367,10 @@ test('always states the next action and why a control cannot be pressed', () => 
 test('requires and documents the exact installed extension manifest version', () => {
   const requiredVersion = app.match(/const REQUIRED_EXTENSION_VERSION = '([^']+)'/)?.[1]
 
-  assert.equal(extensionManifest.version, '1.39')
+  assert.equal(extensionManifest.version, '1.44')
   assert.equal(requiredVersion, extensionManifest.version)
-  assert.match(readme, /バージョンが `1\.39`/)
-  assert.match(html, /拡張バージョン 1\.39/)
+  assert.match(readme, /バージョンが `1\.44`/)
+  assert.match(html, /拡張バージョン 1\.44/)
 })
 
 test('dispatches only the selected stage detail renderers', () => {
@@ -399,7 +438,7 @@ test('BRIDGE_READY refresh cannot reveal Etsy while another stage is active', ()
     'REQUIRED_EXTENSION_VERSION',
     'updateExtensionBadge',
     'renderMarketplaceInsightPlan',
-    'pollExtensionState',
+    'scheduleExtensionStatePoll',
     'pendingExtensionRequests',
     'importExtensionResults',
     'renderExtensionStateUpdate',
@@ -462,7 +501,7 @@ test('routes extension state notifications through the active stage renderer', (
   assert.notEqual(importEnd, -1, 'extension import handler must end before copy helpers')
   assert.match(marketStateHandler, /importExtensionResults\(data\.state\)[\s\S]{0,200}renderExtensionStateUpdate\(\)/)
   assert.doesNotMatch(pollSuccessHandler, /importExtensionResults\(response\.state\)|renderExtensionStateUpdate\(\)/)
-  assert.match(pollSuccessHandler, /response\.state\?\.active[\s\S]{0,120}setTimeout\(pollExtensionState, 2000\)/)
+  assert.match(pollSuccessHandler, /shouldContinueExtensionPolling\([\s\S]{0,300}scheduleExtensionStatePoll\(response\.state\?\.active \? 2000 : 3000\)/)
   assert.doesNotMatch(importHandler, /renderAll\(\)/)
   assert.doesNotMatch(marketStateHandler, /renderMarketplaceInsightPlan\(\)/)
   assert.doesNotMatch(pollSuccessHandler, /renderMarketplaceInsightPlan\(\)/)
@@ -483,6 +522,9 @@ test('keeps active research running through a transient extension poll timeout',
     'elements',
     'failProgress',
     'isExtensionResponseTimeout',
+    'shouldContinueExtensionPolling',
+    'scheduleExtensionStatePoll',
+    'extensionPollInFlight',
     `return async function pollExtensionState() {${pollBody}\n}`,
   )
   const state = {
@@ -495,6 +537,7 @@ test('keeps active research running through a transient extension poll timeout',
       results: [],
     },
     extensionPollFailureCount: 0,
+    extensionWorkspaceActive: false,
     progress: { visible: true },
   }
   const scheduled = []
@@ -515,6 +558,9 @@ test('keeps active research running through a transient extension poll timeout',
     { extensionStatus: { textContent: '' } },
     () => { failed += 1 },
     (error) => /Chrome拡張から応答がありません/.test(String(error?.message ?? error)),
+    () => true,
+    (delay) => scheduled.push({ delay }),
+    false,
   )
 
   await pollExtensionState()
@@ -526,7 +572,7 @@ test('keeps active research running through a transient extension poll timeout',
   assert.equal(scheduled[0].delay, 3000)
 })
 
-test('pending MARKET_STATE polls write a changed Workspace once and an unchanged Workspace zero times', async () => {
+test('active MARKET_STATE polls defer Workspace writes until the research batch finishes', async () => {
   const activeBody = app.match(/function renderActiveResearchStage\([^)]*\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction renderAll\(\)/)?.[1]
   const refreshBody = app.match(/function renderExtensionStateUpdate\(\) \{([\s\S]*?)\n\}/)?.[1]
   const handlerBody = app.match(/function handleExtensionMessage\(event\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction updateExtensionBadge/)?.[1]
@@ -553,6 +599,8 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     `return function renderActiveResearchStage(options) {${activeBody}\n}`,
   )
   const createRefresh = new Function(
+    'state',
+    'multiAngleSearchIsRunning',
     'renderExtensionState',
     'renderGlobalResearchStatus',
     'renderNextResearchAction',
@@ -573,6 +621,10 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     'friendlyExtensionError',
     'isErankDailyLimitError',
     'resumePersistedEvidenceAutomationIfReady',
+    'shouldRecoverMultiAngleQueue',
+    'pauseMultiAngleSearch',
+    'queueNextMultiAngleBatch',
+    'scheduleExtensionStatePoll',
     `return function handleExtensionMessage(event) {${handlerBody}\n}`,
   )
   const createPoll = new Function(
@@ -586,12 +638,17 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     'elements',
     'failProgress',
     'isExtensionResponseTimeout',
+    'shouldContinueExtensionPolling',
+    'scheduleExtensionStatePoll',
+    'extensionPollInFlight',
     `return async function pollExtensionState() {${pollBody}\n}`,
   )
 
   const appState = {
     extensionConnected: true,
     extensionState: null,
+    extensionWorkspaceActive: false,
+    multiAngleRunning: true,
     extensionPollFailureCount: 0,
     progress: { failed: false, message: '' },
     consoleUi: { activeStage: 'results' },
@@ -634,6 +691,8 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     noRender,
   )
   const renderExtensionStateUpdate = createRefresh(
+    appState,
+    () => appState.multiAngleRunning,
     () => chromeRenders.push('extension'),
     () => chromeRenders.push('header'),
     () => chromeRenders.push('next'),
@@ -664,6 +723,15 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     (error) => String(error),
     (error) => /ERANK_DAILY_LOOKUP_LIMIT_REACHED/.test(String(error ?? '')),
     noRender,
+    ({ extensionState, explorationStatus, pendingActive, marketplaceActive }) => (
+      !extensionState?.active
+      && explorationStatus === 'running'
+      && !pendingActive
+      && !marketplaceActive
+    ),
+    noRender,
+    noRender,
+    noRender,
   )
   pollExtensionState = createPoll(
     appState,
@@ -676,6 +744,9 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     { extensionStatus: { textContent: '' } },
     noRender,
     (error) => /Chrome拡張から応答がありません/.test(String(error?.message ?? error)),
+    ({ extensionState }) => Boolean(extensionState?.active || appState.multiAngleRunning),
+    noRender,
+    false,
   )
 
   const deliverPoll = async (extensionState) => {
@@ -703,16 +774,40 @@ test('pending MARKET_STATE polls write a changed Workspace once and an unchanged
     remaining: 1,
     results: [{ keyword: 'ghost shirt', erankSearchVolume: 120 }],
   }
-  assert.equal(await deliverPoll(changedState), 1, 'one changed pending response may write the Workspace once')
+  assert.equal(await deliverPoll(changedState), 0, 'active progress must not rebuild the large Workspace')
   assert.equal(
     await deliverPoll(JSON.parse(JSON.stringify(changedState))),
     0,
-    'the next semantically identical pending response must not write the Workspace',
+    'an unchanged active response must not rebuild the Workspace',
   )
-  assert.deepEqual(chromeRenders, ['extension', 'header', 'next', 'tabs', 'extension', 'header', 'next', 'tabs'])
+  assert.equal(
+    await deliverPoll({ ...changedState, active: false, remaining: 0 }),
+    0,
+    'a completed automation batch must defer the heavy Workspace while the next batch is prepared',
+  )
+  assert.equal(
+    await deliverPoll({ ...changedState, active: false, remaining: 0 }),
+    0,
+    'later idle heartbeats must not rebuild the completed Workspace again',
+  )
+  assert.equal(await deliverPoll(changedState), 0)
+  appState.multiAngleRunning = false
+  assert.equal(
+    await deliverPoll({ ...changedState, active: false, remaining: 0 }),
+    0,
+    'a standalone completed batch must keep the heavy Workspace deferred until the user opens it',
+  )
+  assert.deepEqual(chromeRenders, [
+    'extension', 'header', 'next', 'tabs',
+    'extension', 'header',
+    'extension', 'header', 'next', 'tabs',
+    'extension', 'header', 'next', 'tabs',
+    'extension', 'header', 'next', 'tabs',
+    'extension', 'header', 'next', 'tabs',
+  ])
 })
 
-test('refreshes the active stage once for every extension import outcome', () => {
+test('keeps extension import notifications lightweight while a batch is active', () => {
   const importStart = app.indexOf('function importExtensionResults(extensionState)')
   const refreshStart = app.indexOf('function renderExtensionStateUpdate()')
   const copyStart = app.indexOf('async function copyText')
@@ -744,58 +839,89 @@ test('refreshes the active stage once for every extension import outcome', () =>
     `return function importExtensionResults(extensionState) {${importBody}\n}`,
   )
   const createRefresh = new Function(
+    'state',
     'renderExtensionState',
     'renderGlobalResearchStatus',
     'renderNextResearchAction',
     'renderResearchStageTabs',
     'renderActiveResearchStage',
+    'multiAngleSearchIsRunning',
     `return function renderExtensionStateUpdate() {${refreshBody}\n}`,
   )
-  const scenarios = [
-    { label: 'active empty', state: { active: true, results: [] }, expectedImport: false, expectedPersists: 0 },
-    { label: 'imported result', state: { active: true, results: [{ keyword: 'ghost shirt' }] }, expectedImport: true, expectedPersists: 1 },
-    { label: 'inactive ignore', state: { active: false, results: [] }, expectedImport: false, expectedPersists: 0 },
-  ]
-
-  for (const scenario of scenarios) {
-    const appState = {
-      researchRows: [],
-      acceptExtensionResults: false,
-      restoredResearchSavedAt: '',
-      restoredResultsAccepted: false,
-      progress: { mode: 'idle' },
-    }
-    let persistCount = 0
-    const importResults = createImport(
-      extensionResultsImportMode,
-      appState,
-      (extensionState) => extensionState.results,
-      (row) => row,
-      () => '',
-      (rows) => appState.researchRows.push(...rows),
-      () => {},
-      () => [],
-      { researchJobInput: { value: '' } },
-      () => [],
-      () => [],
-      () => {},
-      () => {},
-      () => { persistCount += 1 },
-    )
-    const rendered = []
-    const refresh = createRefresh(
-      () => rendered.push('extension'),
-      () => rendered.push('header'),
-      () => rendered.push('next'),
-      () => rendered.push('tabs'),
-      () => rendered.push('active'),
-    )
-
-    assert.equal(importResults(scenario.state), scenario.expectedImport, scenario.label)
-    refresh()
-    assert.equal(persistCount, scenario.expectedPersists, scenario.label)
-    assert.deepEqual(rendered, ['extension', 'header', 'next', 'tabs', 'active'], scenario.label)
+  const appState = {
+    researchRows: [],
+    acceptExtensionResults: false,
+    restoredResearchSavedAt: '',
+    restoredResultsAccepted: false,
+    progress: { mode: 'idle' },
+    extensionState: { active: true, results: [] },
+    extensionWorkspaceActive: false,
   }
+  let persistCount = 0
+  const importResults = createImport(
+    extensionResultsImportMode,
+    appState,
+    (extensionState) => extensionState.results,
+    (row) => row,
+    () => '',
+    (rows) => appState.researchRows.push(...rows),
+    () => {},
+    () => [],
+    { researchJobInput: { value: '' } },
+    () => [],
+    () => [],
+    () => {},
+    () => {},
+    () => { persistCount += 1 },
+  )
+  const rendered = []
+  const refresh = createRefresh(
+    appState,
+    () => rendered.push('extension'),
+    () => rendered.push('header'),
+    () => rendered.push('next'),
+    () => rendered.push('tabs'),
+    () => rendered.push('active'),
+    () => false,
+  )
+
+  assert.equal(importResults(appState.extensionState), false)
+  refresh()
+  assert.deepEqual(rendered, ['extension', 'header', 'next', 'tabs'])
+
+  rendered.length = 0
+  appState.extensionState = {
+    active: true,
+    currentKeyword: 'ghost shirt',
+    results: [{ keyword: 'ghost shirt' }],
+  }
+  assert.equal(importResults(appState.extensionState), false)
+  refresh()
+  assert.deepEqual(
+    rendered,
+    ['extension', 'header'],
+    'subsequent active progress events must not rescore all results or rebuild stage tabs',
+  )
+  assert.equal(persistCount, 0)
+})
+
+test('closes a stale provider result modal before the next Etsy batch starts', () => {
+  const runStart = app.indexOf('async function runMarketplaceInsightAutomation()')
+  const runEnd = app.indexOf('\nfunction stopMarketplaceInsightAutomation', runStart)
+  const runBody = app.slice(runStart, runEnd)
+
+  assert.notEqual(runStart, -1)
+  assert.notEqual(runEnd, -1)
+  assert.match(runBody, /state\.progress\.visible[\s\S]{0,180}state\.progress\.(?:failed|stopped|completed)[\s\S]{0,180}closeProgressModal\(\)/)
+})
+
+test('an idle extension restarts unfinished evidence automation even when the active edge was missed', () => {
+  const handlerBody = app.match(/function handleExtensionMessage\(event\) \{([\s\S]*?)\r?\n\}\r?\n\r?\nfunction updateExtensionBadge/)?.[1] ?? ''
+  assert.match(
+    handlerBody,
+    /state\.pendingEvidenceAutomation\?\.active\s*&&\s*!data\.state\?\.active[\s\S]{0,420}schedulePendingEvidenceAutomation\(\)/,
+  )
+  assert.doesNotMatch(handlerBody, /state\.pendingEvidenceAutomation\?\.active\s*&&\s*wasActive/)
 })
 
 test('renders the two entry routes as one radio group', () => {
@@ -861,7 +987,7 @@ test('offers the identity vocabulary as chips so the field is never blank', () =
   assert.ok(position('buyerIdentitySuggestions') < position('buyerIdentityInput'))
   assert.ok(position('buyerIdentityShuffleBtn') < position('buyerIdentityInput'))
   assert.match(html, /id="buyerContextSuggestions"/)
-  assert.match(app, /learnedBuyerIdentitySuggestions\(chosen\)/)
+  assert.match(app, /learnedBuyerIdentitySuggestions\(chosen, options\.analysis\)/)
   assert.match(app, /suggestBuyerIdentities\(\{[\s\S]{0,240}exclude: \[\.\.\.chosen, \.\.\.learned/)
   assert.match(app, /data-buyer-identity=/)
   assert.match(app, /data-buyer-context=/)
@@ -960,6 +1086,18 @@ test('shows EverBee competition in the final comparison and detail views', () =>
   assert.match(app, /normalized\.everbeeCompetitionBand/)
 })
 
+test('shows evidence-backed personalization guidance in final results and CSV', () => {
+  assert.match(app, /recommendPersonalization,/)
+  assert.match(app, /personalizationRecommendation: recommendPersonalization\(row, row\.score, options\)/)
+  assert.match(app, /function renderPersonalizationRecommendation\(recommendation\)/)
+  assert.match(app, /パーソナライズ（カスタム）/)
+  assert.match(app, /'Personalization Decision'/)
+  assert.match(app, /'Personalization Etsy Evidence Count'/)
+  assert.match(app, /'Personalization EverBee Evidence Count'/)
+  assert.match(app, /personalization\.etsyEvidenceCount/)
+  assert.match(app, /personalization\.everbeeEvidenceCount/)
+})
+
 test('shows product-level EverBee sales in monthly-sales order with recent winners marked', () => {
   assert.match(app, /function renderEverbeeProductRows\(row\)/)
   assert.match(app, /EverBee売れ筋商品/)
@@ -992,14 +1130,15 @@ test('confirms the cross-niche round before swapping the candidate list', () => 
   assert.match(app, /advanceCrossNicheWorkflow/)
   assert.match(app, /isCrossNicheWorkflowPending/)
   assert.match(app, /state\.crossNicheWorkflow/)
-  assert.match(app, /const needsAdaptiveMigration = !isCrossNicheWorkflowPending\(state\.crossNicheWorkflow\)/)
+  assert.match(app, /const needsAdaptiveMigration = !restoredPreview\s*&&\s*!isCrossNicheWorkflowPending\(state\.crossNicheWorkflow\)/)
   assert.doesNotMatch(app, /再調査が終わるまで最終おすすめを確定しません/)
   assert.match(app, /初回結果は下に残しています/)
   assert.match(html, /id="researchRoundTabs"/)
   assert.match(html, /id="researchRoundSummary"/)
   assert.match(app, /state\.researchRounds\.selectedRoundId = 'all'/)
   assert.match(app, /preserveCrossNicheResearch/)
-  assert.match(app, /if \(!isCrossNicheWorkflowPending\(state\.crossNicheWorkflow\)\) \{\s*if \(added > 0\) generateCandidates/)
+  assert.match(app, /if \(!isCrossNicheWorkflowPending\(state\.crossNicheWorkflow\)\) \{\s*if \(shouldRegenerateMarketplaceCandidates\(\{/)
+  assert.match(app, /autoRunning: state\.marketplaceInsightAutoRunning/)
   assert.match(app, /buildErankQueryPlan/)
   assert.match(app, /setFlowMode\('auto'\)/)
   assert.match(app, /crossNicheParent/)
@@ -1082,9 +1221,13 @@ test('persists and restores research console UI state', () => {
   assert.match(app, /state\.consoleUi = restoreResearchConsoleUiFromPayload\(savedState\)/)
 })
 
-test('switches stages without clearing research data', () => {
+test('lets the user open completed workflow stages and the final result', () => {
   assert.match(app, /function setActiveResearchStage\(/)
-  assert.match(app, /bindResearchStageTabs\(elements\.researchStageTabs, setActiveResearchStage\)/)
+  assert.match(app, /bindResearchStageTabs\(elements\.researchStageTabs/)
+  assert.match(app, /const isLocked = button\.dataset\.status === 'locked'/)
+  assert.match(app, /button\.tabIndex = isLocked \? -1 : 0/)
+  assert.match(app, /button\.removeAttribute\('aria-disabled'\)/)
+  assert.match(app, /elements\.finalKeywordDecision\?\.scrollIntoView/)
   assert.doesNotMatch(app, /function setActiveResearchStage[\s\S]{0,500}state\.researchRows = \[\]/)
 })
 
@@ -1092,13 +1235,13 @@ test('separates restored results from the current research run', () => {
   assert.match(app, /restoredResearchSavedAt: ''/)
   assert.match(app, /acceptExtensionResults: false/)
   assert.match(app, /latestResearchCheckedAt\(state\.researchRows\)/)
-  assert.match(app, /前回の保存結果を表示中です。Chrome拡張のReloadで再調査した結果ではありません/)
+  assert.match(app, /保存済み結果を表示中です。Chrome拡張のReloadで再調査した結果ではありません/)
   assert.match(app, /if \(importMode === 'restore'\)/)
   assert.match(app, /label: '前回のeRank・Etsy・EverBee結果'/)
   assert.match(app, /state\.acceptExtensionResults = true/)
   assert.match(app, /restoredResultsAccepted: false/)
   assert.match(app, /data-use-restored-results/)
-  assert.match(app, /この前回結果から続ける/)
+  assert.match(app, /保存した結果で調査を再開/)
   assert.match(app, /if \(restoredResultsAwaitingConfirmation\(\)\) return \[\]/)
   assert.match(app, /const canUsePlan = hasPlan && !restoredAwaiting/)
 })
@@ -1109,7 +1252,7 @@ test('puts the restored-result continuation button beside the persistent next ac
   const nextActionMarkup = html.slice(nextActionStart, nextActionEnd)
 
   assert.match(nextActionMarkup, /id="acceptRestoredResultsBtn"/)
-  assert.match(nextActionMarkup, />この前回結果から続ける<\/button>/)
+  assert.match(nextActionMarkup, />保存した結果で調査を再開<\/button>/)
   assert.match(app, /acceptRestoredResultsBtn:\s*document\.querySelector\('#acceptRestoredResultsBtn'\)/)
   assert.match(app, /acceptRestoredResultsBtn\.hidden\s*=\s*next\.action\s*!==\s*'restored-results'/)
   assert.match(app, /acceptRestoredResultsBtn\.addEventListener\('click',\s*acceptRestoredResearchResults\)/)
@@ -1220,7 +1363,8 @@ test('persists and restores every selected flow mode', () => {
 })
 
 test('keeps research stage tabs auto-route-only and ignores CSV stage selection', () => {
-  assert.match(html, /<nav id="researchStageTabs" class="research-stage-tabs flow-auto-only"/)
+  assert.match(html, /<div id="researchAppLayout" class="research-app-layout flow-auto-only"/)
+  assert.match(html, /<nav id="researchStageTabs" class="research-stage-tabs"/)
 
   const body = app.match(/function setActiveResearchStage\(stageId, \{ persist = true \} = \{\}\) \{([\s\S]*?)\n\}/)?.[1]
   assert.ok(body, 'setActiveResearchStage must be extractable')
@@ -1362,39 +1506,102 @@ test('uses action names instead of legacy Step labels in user-facing copy', () =
 test('keeps accepted results when the guided flow sends Etsy-confirmed words to EverBee', () => {
   assert.match(
     app,
-    /async function simpleStartResearch\(\)[\s\S]{0,900}await startExtensionResearch\(\{\s*preserveExisting:\s*true\s*\}\)/,
+    /async function simpleStartResearch\(\)[\s\S]{0,1600}await startExtensionResearch\(\{\s*preserveExisting:\s*true\s*\}\)/,
   )
 })
 
-test('styles a desktop research console without mobile stacking', () => {
-  assert.match(styles, /body\s*\{[^}]*min-width:\s*1280px/)
-  assert.match(styles, /\.app-shell\s*\{[^}]*width:\s*min\(1760px,\s*calc\(100% - 20px\)\)[^}]*min-width:\s*1260px/)
-  assert.match(styles, /\.research-console\s*\{[^}]*grid-template-columns:\s*220px\s+minmax\(720px,\s*1fr\)\s+320px/)
-  const consoleHeightMatch = styles.match(/\.research-console\s*\{[^}]*min-width:\s*1260px[^}]*height:\s*calc\(100vh - (\d+)px\)[^}]*min-height:\s*480px/)
-  assert.ok(consoleHeightMatch, 'desktop console keeps its fixed three-column width and viewport height budget')
-  const consoleViewportOffset = Number(consoleHeightMatch[1])
-  for (const viewportHeight of [900, 1080]) {
-    const consoleTop = 334
-    const shellBottomPadding = 24
-    assert.ok(
-      consoleTop + (viewportHeight - consoleViewportOffset) + shellBottomPadding <= viewportHeight,
-      `console and shell padding must fit a ${viewportHeight}px desktop viewport`,
-    )
-  }
-  assert.match(styles, /\.research-stage-tabs/)
-  assert.match(styles, /\.final-result-toolbar/)
-  assert.match(styles, /\.research-console-queue,\s*\.research-console-inspector\s*\{[^}]*overflow:\s*auto/)
-  assert.match(styles, /\.research-console-workspace\s*\{[^}]*overflow:\s*auto/)
-  assert.match(styles, /\.research-console\[data-active-stage="results"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
-  assert.match(styles, /\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-queue,[\s\S]{0,300}\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-inspector\s*\{[^}]*display:\s*none/)
-  assert.match(styles, /\.research-console\[data-active-stage="everbee"\][\s\S]{0,300}\.research-console\[data-active-stage="etsy"\][\s\S]{0,300}\.research-console\[data-active-stage="results"\][\s\S]{0,300}\.research-console-workspace > \.workspace-grid\s*\{[^}]*display:\s*none/)
-  assert.match(styles, /\.final-result-toolbar\s*\{[^}]*position:\s*sticky/)
-  assert.match(styles, /\.final-result-actions \.primary-btn\s*\{[^}]*width:\s*auto/)
-  assert.doesNotMatch(styles, /font-size:\s*[^;]*(?:vw|vh|vmin|vmax)/)
-  assert.doesNotMatch(styles, /border-radius:\s*(?:9|[1-9]\d+)px/)
-  assert.doesNotMatch(styles, /@media[^{}]*max-width[^{}]*\{[\s\S]{0,800}\.research-console[^}]*grid-template-columns:\s*1fr/)
+test('does not show a hard-coded EverBee handoff count', () => {
+  assert.match(html, /Etsy公式確認済みの候補をEverBeeへ送ります/)
+  assert.doesNotMatch(html, /Etsy公式確認済みの20件をEverBeeへ送ります/)
 })
 
+test('does not call saved data previous results while the same research is already running', () => {
+  const restoredBody = app.match(/function restoredResultsAwaitingConfirmation\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(restoredBody, /state\.multiAngleExploration\?\.status !== 'running'/)
+  assert.doesNotMatch(html, /この前回結果から続ける/)
+  assert.match(app, /保存した\$\{restoredCount\}件で調査を再開/)
+})
+
+test('keeps Etsy queue guidance and EverBee availability in sync', () => {
+  assert.match(html, /id="marketplaceHandoffNote"/)
+  assert.match(html, /id="marketplaceHandoffTitle"/)
+  assert.match(html, /id="marketplaceHandoffText"/)
+  assert.match(app, /function marketplaceQueueRemainingCount\(/)
+  assert.match(app, /const hasRemainingEtsyQueue = remaining > 0/)
+  assert.match(app, /const everbeeHandoff = everbeeHandoffState\([\s\S]{0,260}remainingEtsyCount: remaining/)
+  assert.match(app, /elements\.erankToEverbeeBtn\.disabled = everbeeHandoff\.disabled/)
+  assert.match(app, /Etsy公式があと\$\{remaining\}件残っています/)
+  assert.match(app, /Etsy公式確認を自動再開/)
+  assert.match(app, /elements\.marketplaceHandoffTitle\.textContent/)
+})
+
+test('uses a fixed desktop sidebar for stages and result destinations', () => {
+  assert.match(html, /id="researchAppLayout"/)
+  assert.match(html, /id="researchSidebar"/)
+  assert.match(html, /id="researchMainColumn"/)
+  assert.match(html, /id="resultSubviewNav"/)
+  assert.equal((html.match(/data-research-stage=/g) ?? []).length, 5)
+  assert.equal((html.match(/data-result-subview=/g) ?? []).length, 7)
+  assert.match(styles, /\.research-app-layout\s*\{[^}]*grid-template-columns:\s*240px minmax\(0,\s*1fr\)/s)
+  assert.match(styles, /\.research-sidebar\s*\{[^}]*position:\s*sticky/s)
+})
+
+test('refreshes extension activity before restarting saved evidence validation', () => {
+  const start = app.indexOf('async function confirmExtensionConnection()')
+  const end = app.indexOf('\nfunction handleExtensionMessage', start)
+  const connectionCheck = app.slice(start, end)
+
+  assert.ok(start >= 0 && end > start, 'connection check function must exist')
+  assert.doesNotMatch(
+    connectionCheck,
+    /if \(state\.extensionConnected && state\.extensionVersion === REQUIRED_EXTENSION_VERSION\) return true/,
+  )
+  assert.match(connectionCheck, /requestExtension\('GET_MARKET_STATE'/)
+  assert.match(connectionCheck, /const extensionState = response\.state/)
+  assert.match(connectionCheck, /state\.extensionState = extensionState/)
+})
+
+test('hands an idle extension to the current tab without stealing an active run', () => {
+  assert.match(app, /from '\.\/research-tab-lease\.js\?v=/)
+  assert.match(app, /function initResearchTabLease\(\)/)
+  const start = app.indexOf('async function confirmExtensionConnection()')
+  const end = app.indexOf('\nfunction handleExtensionMessage', start)
+  const connectionCheck = app.slice(start, end)
+
+  assert.ok(start >= 0 && end > start, 'connection check function must exist')
+  assert.ok(
+    connectionCheck.indexOf("requestExtension('GET_MARKET_STATE'")
+      < connectionCheck.indexOf('claimResearchTabLease({ force:'),
+    'extension activity must be checked before the current tab takes ownership',
+  )
+  assert.match(connectionCheck, /if \(extensionState\.active && !ownsCurrentLease\)/)
+  assert.match(connectionCheck, /claimResearchTabLease\(\{ force: !extensionState\.active \}\)/)
+  assert.match(app, /function schedulePendingEvidenceAutomation\([^)]*\) \{\s*if \(!researchTabLeaseOwned\)/)
+  assert.match(app, /window\.addEventListener\('pagehide', releaseCurrentResearchTabLease\)/)
+})
+
+test('uses the same automatable pending rows for the button and the manual run', () => {
+  assert.match(
+    app,
+    /const buttonPendingRows = pendingEvidenceRows\(rows, pendingRows\.map\(\(row\) => row\.keyword\)\)/,
+  )
+  assert.match(app, /const initialPendingRows = pendingEvidenceRows\(\s*finalEvidenceRows\(\),\s*allPendingKeywords/)
+  assert.match(app, /allowedKeywordSet\.size > 0\s*\|\| batchCandidates\.length === 0/)
+})
+
+test('uses one desktop page scrollbar for the active research workspace', () => {
+  assert.match(styles, /body\s*\{[^}]*min-width:\s*1280px/)
+  assert.match(styles, /\.research-console\s*\{[^}]*display:\s*block[^}]*min-width:\s*0[^}]*height:\s*auto[^}]*min-height:\s*0[^}]*overflow:\s*visible/s)
+  assert.match(styles, /\.research-console-queue,\s*\.research-console-inspector\s*\{[^}]*display:\s*none/s)
+  assert.match(styles, /\.research-console-workspace\s*\{[^}]*overflow:\s*visible/s)
+  assert.doesNotMatch(styles, /\.research-console\s*\{[^}]*height:\s*calc\(/s)
+  assert.match(styles, /\.final-evidence-table-shell\s*\{[^}]*overflow:\s*visible/s)
+  assert.match(styles, /\.research-stage-tabs/)
+  assert.match(styles, /\.research-mission-bar\s*\{/)
+  assert.match(styles, /body\[data-research-phase="running"\]/)
+  assert.match(styles, /body\[data-research-phase="result"\]/)
+  assert.doesNotMatch(styles, /font-size:\s*[^;]*(?:vw|vh|vmin|vmax)/)
+})
 test('preserves desktop console layouts after the 780px mobile cascade', () => {
   const mobileCascade = styles.slice(styles.indexOf('@media (max-width: 780px)'))
   assert.notEqual(mobileCascade, styles, 'the 780px media query must exist')
@@ -1418,4 +1625,33 @@ test('uses one current cache version for the console stylesheet and module', () 
 
   assert.ok(stylesheetVersion, 'stylesheet cache version must exist')
   assert.equal(moduleVersion, stylesheetVersion, 'stylesheet and module cache versions must match')
+})
+
+test('allows an idle extension to replace a stale tab lease from the primary action', () => {
+  const start = app.indexOf('function extensionBlockReason()')
+  const end = app.indexOf('\nfunction ', start + 1)
+  const body = app.slice(start, end)
+  assert.match(body, /!researchTabLeaseOwned\s*&&\s*state\.extensionState\?\.active/)
+})
+test('offers the main resume action when exploration is unfinished but no provider is active', () => {
+  const start = app.indexOf('function researchExperienceAction(')
+  const end = app.indexOf('\nfunction ', start + 1)
+  const body = app.slice(start, end)
+  assert.match(body, /\['running',\s*'paused',\s*'stopped',\s*'exhausted'\]\.includes\(state\.multiAngleExploration\.status\)[\s\S]*action:\s*'automation'/)
+  const resumeIndex = body.indexOf("['paused', 'stopped', 'exhausted'].includes(state.multiAngleExploration.status)")
+  const readyIndex = body.indexOf("if (decision.status === 'ready'")
+  assert.ok(resumeIndex >= 0 && resumeIndex < readyIndex, 'paused work must expose Resume before the final-result branches')
+})
+test('keeps searching from a ready result until the configured winner target is reached', () => {
+  const start = app.indexOf('function researchExperienceAction(')
+  const end = app.indexOf('\nfunction ', start + 1)
+  const body = app.slice(start, end)
+  assert.match(body, /remainingWinnerCount\s*=\s*Math\.max\(0,\s*targetWinnerCount\s*-\s*decision\.recommendedCount\)/)
+  assert.match(body, /decision\.status === 'ready'\s*&&\s*remainingWinnerCount > 0[\s\S]*action:\s*'automation'[\s\S]*A\/Bをあと\$\{remainingWinnerCount\}件探す/)
+})
+
+test('the visible primary action invokes automation directly instead of clicking a hidden control', () => {
+  const primaryHandler = app.match(/elements\.researchExperiencePrimaryAction\?\.addEventListener\('click', async \(event\) => \{([\s\S]*?)\n  \}\)/)?.[1] ?? ''
+  assert.match(primaryHandler, /await handleWinningNicheAutomationAction\(/)
+  assert.doesNotMatch(primaryHandler, /winningNicheAutomationToggle\?\.click\(\)/)
 })

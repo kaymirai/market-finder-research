@@ -121,3 +121,14 @@ export function shouldAutoResumeEvidenceAutomation({
     && Array.isArray(pendingEvidenceAutomation.targetKeywords)
     && pendingEvidenceAutomation.targetKeywords.length > 0
 }
+
+export function shouldAutoResumeReloadCheckpoint({
+  exploration,
+  pendingEvidenceAutomation,
+} = {}) {
+  return exploration?.status === 'paused'
+    && exploration?.pauseReason === 'reload-required'
+    && pendingEvidenceAutomation?.active === true
+    && Array.isArray(pendingEvidenceAutomation.targetKeywords)
+    && pendingEvidenceAutomation.targetKeywords.length > 0
+}

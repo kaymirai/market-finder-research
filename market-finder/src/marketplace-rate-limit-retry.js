@@ -1,5 +1,12 @@
 const ETSY_TRANSIENT_BLOCK_PATTERN = /ETSY_MARKETPLACE_RATE_LIMITED|Marketplace Insightsの検索欄が見つかりません/i
 
+const MARKETPLACE_GLOBAL_FAILURE_PATTERN = /ETSY_MARKETPLACE_RATE_LIMITED|rate.?limit|429|Chrome.*(?:接続|応答)|拡張.*(?:接続|応答)|extension.*(?:connection|response|unavailable)|login|required|sign.?in|service.?unavailable|connection.*(?:lost|closed)|timeout|time out/i
+
+export function classifyMarketplaceAutomationError(error) {
+  const message = error?.message || String(error ?? '')
+  return MARKETPLACE_GLOBAL_FAILURE_PATTERN.test(message) ? 'global' : 'query'
+}
+
 function retryDelay(attempt, baseDelayMs, maxDelayMs) {
   const exponent = Math.max(0, attempt - 1)
   return Math.min(maxDelayMs, baseDelayMs * (2 ** exponent))

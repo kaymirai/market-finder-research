@@ -286,10 +286,37 @@ export function formatEvidenceMetric(value, options = {}) {
 
 export function isAutomatableEvidenceRow(row = {}) {
   const candidateAction = String(row.normalized?.candidateClass?.action ?? '').trim().toLowerCase()
-  if (candidateAction && candidateAction !== 'candidate') return false
+  if (candidateAction && !['candidate', 'explore'].includes(candidateAction)) return false
+  if (candidateAction === 'explore') {
+    const normalized = row.normalized ?? {}
+    const hasMeasuredDemand = [
+      normalized.erankSearchVolume,
+      normalized.erankClicks,
+      normalized.erankCtr,
+      normalized.etsySearches30d,
+      normalized.etsyListings,
+    ].some((value) => finiteNumber(value) !== null)
+    if (!hasMeasuredDemand) return false
+  }
   if (String(row.candidateStage ?? '').trim().toLowerCase() === 'reject') return false
   if (String(row.opportunityLabel ?? '').trim().toUpperCase() === 'D') return false
   return true
+}
+
+export function shouldExcludeFinalEvidenceRow(input = {}) {
+  if (String(input.candidateStage ?? '').trim().toLowerCase() === 'reject') return true
+  if (
+    input.hasEverbeeData
+    && String(input.opportunityLabel ?? '').trim().toUpperCase() === 'D'
+  ) return true
+  return Boolean(
+    input.erankAttempted
+    && !input.erankDemandUnknown
+    && !input.failed
+    && !input.hasEverbeeData
+    && !input.hasEtsyData
+    && !input.eligibleForEtsy
+  )
 }
 
 export function pendingEvidenceBatch(rows = [], stage, limit = 50) {
@@ -319,9 +346,29 @@ export function finalEvidenceFilterMatches(row = {}, filter = 'all') {
   return row.evidenceState?.status === selected
 }
 
+export function limitFinalEvidenceRows(rows = [], limit = 40) {
+  const source = Array.isArray(rows) ? rows : []
+  const resolvedLimit = Math.max(1, Math.floor(Number(limit) || 40))
+  const visibleRows = source.slice(0, resolvedLimit)
+  return {
+    rows: visibleRows,
+    total: source.length,
+    shown: visibleRows.length,
+    hasMore: visibleRows.length < source.length,
+  }
+}
+
+export function toggleFinalEvidenceSelection(selectedKey = '', clickedKey = '') {
+  const current = String(selectedKey ?? '').trim()
+  const clicked = String(clickedKey ?? '').trim()
+  if (!clicked) return current
+  return current === clicked ? '' : clicked
+}
+
 export function deriveFinalKeywordDecision(rows = []) {
+  const sourceRows = Array.isArray(rows) ? rows : []
   const rank = { A: 0, B: 1 }
-  const recommended = rows
+  const recommended = sourceRows
     .filter((row) => (
       row?.evidenceState?.status === 'verified'
       && Object.hasOwn(rank, String(row.opportunityLabel ?? '').trim())
@@ -333,8 +380,25 @@ export function deriveFinalKeywordDecision(rows = []) {
       || String(left.keyword).localeCompare(String(right.keyword), 'en')
     ))
 
-  const pendingCount = rows.filter((row) => (
-    ['pending', 'failed'].includes(String(row?.evidenceState?.status ?? '').trim())
+  const gradeCounts = sourceRows.reduce((counts, row) => {
+    const label = String(row?.opportunityLabel ?? '').trim()
+    if (Object.hasOwn(counts, label)) counts[label] += 1
+    return counts
+  }, { A: 0, B: 0, C: 0, D: 0 })
+
+  const recommendedKeywords = recommended.map((row) => ({
+    key: String(row.key ?? '').trim(),
+    keyword: String(row.keyword).trim(),
+    label: String(row.opportunityLabel).trim(),
+    score: finiteNumber(row.scoreState?.score),
+  }))
+  const pendingRows = sourceRows.filter((row) => (
+    String(row?.evidenceState?.status ?? '').trim() === 'pending'
+  ))
+  const pendingCount = pendingRows.length
+  const actionablePendingCount = pendingRows.filter((row) => isAutomatableEvidenceRow(row)).length
+  const failedCount = sourceRows.filter((row) => (
+    String(row?.evidenceState?.status ?? '').trim() === 'failed'
   )).length
 
   if (recommended.length > 0) {
@@ -345,16 +409,26 @@ export function deriveFinalKeywordDecision(rows = []) {
       primaryLabel: String(primary.opportunityLabel).trim(),
       primaryScore: finiteNumber(primary.scoreState?.score),
       alternatives: recommended.slice(1, 3).map((row) => String(row.keyword).trim()),
+      recommendedCount: recommendedKeywords.length,
+      recommendedKeywords,
+      gradeCounts,
       pendingCount,
+      actionablePendingCount,
+      failedCount,
     }
   }
 
   return {
-    status: pendingCount > 0 ? 'pending' : 'none',
+    status: pendingCount > 0 ? 'pending' : failedCount > 0 ? 'retry' : 'none',
     primaryKeyword: '',
     primaryLabel: '',
     primaryScore: null,
     alternatives: [],
+    recommendedCount: 0,
+    recommendedKeywords: [],
+    gradeCounts,
     pendingCount,
+    actionablePendingCount,
+    failedCount,
   }
 }

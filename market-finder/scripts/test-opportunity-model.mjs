@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import * as marketKeywordEngine from '../../shared/market-keyword-engine/index.js'
 import {
   aggregateEverbeeListings,
   buildCrossNicheDrilldown,
@@ -21,6 +22,7 @@ import {
   suggestBuyerIdentities,
   classifyBuyerIntentPhrase,
   classifyKeywordBucket,
+  classifyCandidateKeyword,
   explainEverbeeScore,
   generateBroadEventCandidates,
   generateBuyerIntentCandidates,
@@ -36,6 +38,7 @@ import {
   rankMarketplaceInsightRelatedCandidates,
   newcomerAccess,
   scoreEverbeeResult,
+  recommendProductRoute,
   selectAutomaticBuyerIdentities,
   selectMarketplaceInsightFollowUpBatch,
   evaluateMarketplaceInsightResearchStop,
@@ -541,6 +544,15 @@ test('builds a balanced Christmas shortlist with seasonal signals and evergreen 
   assert.ok(adjacent.length / rows.length >= 0.4)
 })
 
+test('keeps ornament available as a Christmas motif for shirt research', () => {
+  const classification = classifyCandidateKeyword('ornament shirt', {
+    eventId: 'christmas',
+    categoryId: 'shirt',
+  })
+
+  assert.equal(classification.action, 'candidate')
+})
+
 test('creates a unique 15-query Etsy plan split 5 discovery, 7 validation, 3 reserve', () => {
   const candidates = generateBroadEventCandidates({
     eventId: 'halloween',
@@ -561,12 +573,14 @@ test('creates a unique 15-query Etsy plan split 5 discovery, 7 validation, 3 res
   assert.ok(plan.items.every((item) => item.status === 'planned'))
 })
 
-test('creates 20 Etsy Plus seeds and reserves 40 adaptive follow-up slots', () => {
-  const candidates = generateBroadEventCandidates({
-    eventId: 'halloween',
-    categoryId: 'shirt',
-    limit: 80,
-  })
+test('queues every generated candidate in Etsy Plus before reserving adaptive follow-up slots', () => {
+  const candidates = Array.from({ length: 80 }, (_, index) => ({
+    keyword: `halloween candidate ${index + 1} shirt`,
+    query: `halloween candidate ${index + 1} shirt`,
+    discoveryLane: ['motif', 'moment', 'audience', 'aesthetic', 'adjacent'][index % 5],
+    queryStrategy: 'direct',
+    opportunityIndex: 100 - index,
+  }))
   const plan = buildMarketplaceInsightPlan(candidates, {
     eventId: 'halloween',
     categoryId: 'shirt',
@@ -574,14 +588,15 @@ test('creates 20 Etsy Plus seeds and reserves 40 adaptive follow-up slots', () =
   })
 
   assert.equal(plan.mode, 'plus')
-  assert.equal(plan.quota, 60)
-  assert.equal(plan.seedQuota, 20)
+  assert.equal(plan.quota, 120)
+  assert.equal(plan.seedQuota, 80)
   assert.equal(plan.followUpCapacity, 40)
-  assert.equal(plan.items.length, 20)
-  assert.equal(new Set(plan.items.map((item) => item.query)).size, 20)
-  assert.equal(plan.counts.discovery, 6)
-  assert.equal(plan.counts.validation, 11)
-  assert.equal(plan.counts.reserve, 3)
+  assert.equal(plan.items.length, 80)
+  assert.equal(new Set(plan.items.map((item) => item.query)).size, 80)
+  assert.deepEqual(
+    new Set(plan.items.map((item) => item.query)),
+    new Set(candidates.map((candidate) => candidate.keyword)),
+  )
   assert.equal(plan.counts.followup, 0)
   assert.deepEqual(plan.candidatePool, [])
   assert.equal(plan.followUpBatchSize, 5)
@@ -755,7 +770,7 @@ test('stops adaptive research only after its minimum depth or a depleted pool', 
   }).reason, 'candidate-pool-depleted')
 })
 
-test('releases one five-query follow-up batch after ten completed seeds', () => {
+test('releases one five-query follow-up batch after every direct candidate is completed', () => {
   const candidates = generateBroadEventCandidates({
     eventId: 'halloween',
     categoryId: 'shirt',
@@ -776,7 +791,7 @@ test('releases one five-query follow-up batch after ten completed seeds', () => 
   })
   plan.items = plan.items.map((item, index) => ({
     ...item,
-    status: index < 10 ? 'completed' : 'planned',
+    status: 'completed',
   }))
 
   const advanced = advanceMarketplaceInsightResearch(plan, {
@@ -788,10 +803,10 @@ test('releases one five-query follow-up batch after ten completed seeds', () => 
   assert.equal(advanced.plan.researchRound, 1)
   assert.equal(advanced.plan.releasedFollowUpCount, 5)
   assert.equal(advanced.plan.items.filter((item) => item.stage === 'followup').length, 5)
-  assert.equal(advanced.plan.items[10].stage, 'followup')
+  assert.equal(advanced.plan.items[plan.seedQuota].stage, 'followup')
 })
 
-test('does not release follow-ups before ten seeds or while a batch is unfinished', () => {
+test('does not release follow-ups before every direct candidate or while a batch is unfinished', () => {
   const candidates = generateBroadEventCandidates({ eventId: 'halloween', categoryId: 'shirt', limit: 40 })
   const metrics = Array.from({ length: 10 }, (_, index) => ({
     keyword: `halloween gated niche ${index + 1} shirt`,
@@ -803,13 +818,16 @@ test('does not release follow-ups before ten seeds or while a batch is unfinishe
   const plan = buildMarketplaceInsightPlan(candidates, {
     eventId: 'halloween', categoryId: 'shirt', marketplaceInsightMode: 'plus', relatedKeywordMetrics: metrics,
   })
-  plan.items = plan.items.map((item, index) => ({ ...item, status: index < 9 ? 'completed' : 'planned' }))
+  plan.items = plan.items.map((item, index) => ({
+    ...item,
+    status: index < plan.seedQuota - 1 ? 'completed' : 'planned',
+  }))
 
   const tooEarly = advanceMarketplaceInsightResearch(plan, { eventId: 'halloween', categoryId: 'shirt' })
   assert.equal(tooEarly.addedCount, 0)
-  assert.equal(tooEarly.reason, 'need-more-seeds')
+  assert.equal(tooEarly.reason, 'continue-seeds')
 
-  plan.items = plan.items.map((item, index) => ({ ...item, status: index < 10 ? 'completed' : 'planned' }))
+  plan.items = plan.items.map((item) => ({ ...item, status: 'completed' }))
   const firstBatch = advanceMarketplaceInsightResearch(plan, { eventId: 'halloween', categoryId: 'shirt' })
   const blocked = advanceMarketplaceInsightResearch(firstBatch.plan, { eventId: 'halloween', categoryId: 'shirt' })
   assert.equal(blocked.addedCount, 0)
@@ -865,15 +883,15 @@ test('does not award A to a single hit', () => {
   assert.ok(result.gateReasons.includes('sales-concentration'))
 })
 
-test('awards A only to fresh broad sales evidence', () => {
+test('keeps fresh eRank and broad sales evidence at B until Etsy official evidence is added', () => {
   const result = scoreEverbeeResult(freshRow(), SCORE_OPTIONS)
 
-  assert.equal(result.opportunityLabel, 'A')
+  assert.equal(result.opportunityLabel, 'B')
   assert.equal(result.confidenceLabel, 'High')
   assert.equal(result.candidateStage, 'opportunity')
 })
 
-test('allows fresh official Etsy demand and supply to replace eRank for A', () => {
+test('keeps fresh Etsy official and EverBee evidence at B when eRank demand is unavailable', () => {
   const result = scoreEverbeeResult(freshRow({
     erankSearchVolume: '',
     erankClicks: '',
@@ -885,9 +903,77 @@ test('allows fresh official Etsy demand and supply to replace eRank for A', () =
     etsyCheckedAt: '2026-07-15T00:00:00Z',
   }), SCORE_OPTIONS)
 
-  assert.equal(result.opportunityLabel, 'A')
+  assert.equal(result.opportunityLabel, 'B')
   assert.equal(result.confidenceLabel, 'High')
   assert.equal(result.validation.hasEtsyMarketplaceData, true)
+})
+
+test('scores an exact Etsy zero together with EverBee median sales and eRank demand', () => {
+  const moderate = scoreEverbeeResult(freshRow({
+    keyword: 'halloween nurse shirt',
+    etsySearches30d: 0,
+    etsyListings: 0,
+    etsyCheckedAt: '2026-07-15T00:00:00Z',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+  const strong = scoreEverbeeResult(freshRow({
+    keyword: 'halloween nurse shirt',
+    listingsAnalyzed: 500,
+    erankSearchVolume: 1500,
+    erankClicks: 500,
+    medianMonthlySales: 12,
+    etsySearches30d: 0,
+    etsyListings: 0,
+    etsyCheckedAt: '2026-07-15T00:00:00Z',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+
+  assert.equal(moderate.opportunityLabel, 'B')
+  assert.equal(strong.opportunityLabel, 'A')
+  assert.ok(strong.score > moderate.score)
+  assert.equal(moderate.parts.etsyOfficialDemandScore, 0)
+  assert.equal(moderate.parts.everbeeMedianSalesScore, 6)
+  assert.equal(moderate.parts.erankDemandScore, 8)
+  assert.equal(moderate.parts.coreDemandSalesScore, 14)
+  assert.equal(strong.parts.coreDemandSalesScore, 20)
+  assert.equal(moderate.gateReasons.includes('etsy-zero-demand'), false)
+  assert.equal(moderate.validation.etsyZeroDemandSignal, true)
+  assert.match(moderate.exclusionReasons.join(' '), /Etsy公式需要 0点/)
+})
+
+test('explains the three-part score used for the A and B decision', () => {
+  const score = scoreEverbeeResult(freshRow({
+    keyword: 'halloween nurse shirt',
+    etsySearches30d: 0,
+    etsyListings: 0,
+    etsyCheckedAt: '2026-07-15T00:00:00Z',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+  const evidence = explainEverbeeScore(score)
+  const formula = evidence.rows.find((row) => row.key === 'coreDemandSalesScore')
+
+  assert.equal(formula?.metric, 'A/B判定ポイント')
+  assert.equal(formula?.value, 'Etsy公式 0点 + EverBee中央値 6点 + eRank需要 8点 = 14/30点')
+  assert.match(formula?.detail ?? '', /A 18点以上 \/ B 8点以上/)
+})
+
+test('excludes an unrecognized one-word modifier from A and B until its meaning is verified', () => {
+  const result = scoreEverbeeResult(freshRow({
+    keyword: 'halloween tail shirt',
+    etsySearches30d: '',
+    etsyListings: '',
+    etsyCheckedAt: '',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+
+  assert.equal(result.opportunityLabel, 'C')
+  assert.ok(result.gateReasons.includes('ambiguous-intent'))
+  assert.equal(result.validation.ambiguousIntent, true)
+})
+
+test('keeps a recognized one-word occupation eligible for A or B', () => {
+  const result = scoreEverbeeResult(freshRow({
+    keyword: 'halloween nurse shirt',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+
+  assert.ok(['A', 'B'].includes(result.opportunityLabel))
+  assert.equal(result.validation.ambiguousIntent, false)
 })
 
 test('does not combine demand and supply passes from different sources', () => {
@@ -905,7 +991,7 @@ test('does not combine demand and supply passes from different sources', () => {
   assert.notEqual(result.validation.demandSupplySource, 'mixed')
 })
 
-test('explains fresh eRank evidence when Etsy official data is stale', () => {
+test('keeps fresh eRank and EverBee evidence at B when Etsy official data is stale', () => {
   const result = scoreEverbeeResult(freshRow({
     etsySearches30d: 500,
     etsyListings: 3000,
@@ -913,9 +999,9 @@ test('explains fresh eRank evidence when Etsy official data is stale', () => {
   }), SCORE_OPTIONS)
   const evidence = explainEverbeeScore(result)
 
-  assert.equal(result.opportunityLabel, 'A')
+  assert.equal(result.opportunityLabel, 'B')
   assert.equal(result.validation.demandSupplySource, 'erank')
-  assert.equal(evidence.rows[0].metric, 'eRank需要')
+  assert.equal(evidence.rows.find((row) => row.key === 'demand')?.metric, 'eRank需要')
 })
 
 test('awards B to a fresh moderate Etsy niche with two selling listings', () => {
@@ -981,7 +1067,10 @@ test('penalizes conflicting Etsy and eRank demand bands without hiding a B test'
   assert.equal(conflicting.opportunityLabel, 'B')
   assert.equal(conflicting.validation.demandSourceConflict, true)
   assert.equal(conflicting.parts.sourceConsistencyScore, -5)
-  assert.equal(conflicting.score, etsyOnly.score - 5)
+  assert.equal(
+    conflicting.score,
+    etsyOnly.score + conflicting.parts.erankDemandScore + conflicting.parts.sourceConsistencyScore,
+  )
   assert.match(conflicting.exclusionReasons.join(' '), /需要の強さが不一致/)
 })
 
@@ -1160,6 +1249,96 @@ test('recognizes category product aliases before productizing trend seeds', () =
   assert.equal(keywordMatchesCategoryProduct('retro tshirt', 'shirt'), true)
   assert.equal(keywordMatchesCategoryProduct('cozy crewneck', 'sweatshirt'), true)
   assert.equal(keywordMatchesCategoryProduct('cozy crewneck', 'shirt'), false)
+})
+
+test('recognizes singular and plural ornament product aliases', () => {
+  assert.equal(keywordMatchesCategoryProduct('family christmas ornament', 'ornament'), true)
+  assert.equal(keywordMatchesCategoryProduct('memorial ornaments', 'ornament'), true)
+  assert.equal(keywordMatchesCategoryProduct('family christmas ornament', 'shirt'), false)
+})
+
+test('recommends personalization only with fresh Etsy and two selling EverBee proofs', () => {
+  const row = freshRow({
+    keyword: 'family christmas ornament',
+    etsyRelatedTerms: ['personalized family christmas ornament'],
+    etsyCheckedAt: '2026-07-17T00:00:00Z',
+    productRows: [
+      { title: 'Custom Name Family Ornament', monthlySales: 8 },
+      { title: 'Personalized Family Christmas Ornament', monthlySales: 3 },
+    ],
+  })
+  const options = { categoryId: 'ornament', now: '2026-07-19T00:00:00Z' }
+  const score = scoreEverbeeResult(row, options)
+  const recommendation = marketKeywordEngine.recommendPersonalization?.(row, score, options)
+
+  assert.deepEqual(recommendation, {
+    decision: 'recommend',
+    label: '名入れ方針: 推奨',
+    summary: 'Etsy関連語 1件 / EverBee販売商品 2件。通常版より名入れ版を優先してテスト。',
+    etsyEvidenceCount: 1,
+    everbeeEvidenceCount: 2,
+  })
+})
+
+test('keeps incomplete, stale, or inferred-only personalization evidence out of recommend', () => {
+  const options = { categoryId: 'ornament', now: '2026-07-19T00:00:00Z' }
+  const rows = [
+    {
+      expected: 'verify',
+      row: freshRow({
+        keyword: 'family christmas ornament',
+        etsyRelatedTerms: ['custom family ornament'],
+        etsyCheckedAt: '2026-07-17T00:00:00Z',
+      }),
+    },
+    {
+      expected: 'verify',
+      row: freshRow({
+        keyword: 'family christmas ornament',
+        productRows: [{ title: 'Custom Name Family Ornament', monthlySales: 5 }],
+      }),
+    },
+    {
+      expected: 'not-recommended',
+      row: freshRow({ keyword: 'personalized family ornament' }),
+    },
+    {
+      expected: 'not-recommended',
+      row: freshRow({
+        keyword: 'family christmas ornament',
+        etsyRelatedTerms: ['personalized family ornament'],
+        etsyCheckedAt: '2026-04-01T00:00:00Z',
+        everbeeCheckedAt: '2026-04-01T00:00:00Z',
+        productRows: [
+          { title: 'Custom Name Family Ornament', monthlySales: 8 },
+          { title: 'Personalized Family Christmas Ornament', monthlySales: 3 },
+        ],
+      }),
+    },
+  ]
+
+  for (const { row, expected } of rows) {
+    const score = scoreEverbeeResult(row, options)
+    const recommendation = marketKeywordEngine.recommendPersonalization?.(row, score, options)
+    assert.equal(recommendation?.decision, expected)
+  }
+})
+
+test('marks a risk-blocked ornament as outside personalization evaluation', () => {
+  const row = freshRow({ keyword: 'disney family ornament' })
+  const options = { categoryId: 'ornament', customRiskTerms: 'disney', now: '2026-07-19T00:00:00Z' }
+  const score = scoreEverbeeResult(row, options)
+  const recommendation = marketKeywordEngine.recommendPersonalization?.(row, score, options)
+
+  assert.equal(recommendation?.decision, 'blocked')
+})
+
+test('routes an ornament result to Ornament', () => {
+  const row = freshRow({ keyword: 'family christmas ornament' })
+  const options = { categoryId: 'ornament', now: '2026-07-19T00:00:00Z' }
+  const score = scoreEverbeeResult(row, options)
+
+  assert.equal(recommendProductRoute(row, score, options).primary.id, 'ornament')
 })
 
 test('does not combine conflicting recipient roles without a matching intent', () => {

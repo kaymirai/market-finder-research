@@ -20,6 +20,29 @@ function uniqueKeywords(values) {
   })
 }
 
+export function initialResearchRoundKeywords(candidates = []) {
+  return uniqueKeywords(
+    (Array.isArray(candidates) ? candidates : [])
+      .map((candidate) => normalizeKeyword(candidate?.keyword ?? candidate?.query))
+      .filter(Boolean),
+  )
+}
+
+export function everbeeHandoffState({
+  busy = false,
+  restoredAwaiting = false,
+  remainingEtsyCount = 0,
+  officialKeywordCount = 0,
+  erankResultCount = 0,
+} = {}) {
+  const hasSourceResults = Number(officialKeywordCount) > 0 || Number(erankResultCount) > 0
+  const etsyComplete = Number(remainingEtsyCount) <= 0
+  return {
+    disabled: Boolean(busy || !etsyComplete || !hasSourceResults),
+    acceptRestoredOnStart: Boolean(restoredAwaiting && etsyComplete && hasSourceResults),
+  }
+}
+
 function hasRankNumberPrefix(value) {
   const [firstToken = ''] = normalizeKeyword(value).split(' ')
   return /^\d{1,3}$/.test(firstToken)
@@ -58,7 +81,8 @@ function cohortMetrics(row = {}) {
 
 export function extensionResultsImportMode(extensionState, localRows = [], acceptInactiveResults = false) {
   if (!Array.isArray(extensionState?.results) || extensionState.results.length === 0) return 'ignore'
-  if (extensionState.active || acceptInactiveResults) return 'current'
+  if (extensionState.active) return 'ignore'
+  if (acceptInactiveResults) return 'current'
   return Array.isArray(localRows) && localRows.length === 0 ? 'restore' : 'ignore'
 }
 

@@ -246,3 +246,14 @@ test('has no hidden all-seasonal save control or dead all-handler branch', () =>
   assert.doesNotMatch(html, /data-save-seasonal-reference="all"/)
   assert.doesNotMatch(app, /saveSeasonalReference === 'all'/)
 })
+
+test('persists an explicit timing override across reloads for the same saved research', () => {
+  assert.match(app, /timingOverrideConfirmed:\s*state\.timingOverrideConfirmed/)
+  assert.match(app, /state\.timingOverrideConfirmed\s*=\s*savedState\.timingOverrideConfirmed\s*===\s*true/)
+})
+test('makes a blocked timing override the primary action even during a restored running phase', () => {
+  const start = app.indexOf('function researchExperienceAction(')
+  const end = app.indexOf('\nfunction ', start + 1)
+  const body = app.slice(start, end)
+  assert.ok(body.indexOf("action: 'timing-override'") < body.indexOf("if (ui.phase === 'setup')"))
+})

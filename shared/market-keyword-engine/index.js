@@ -792,6 +792,7 @@ export const PRODUCT_CATEGORIES = [
   { id: 'shirt', label: 'Shirt', searchTerm: 'shirt', tags: ['shirt', 'graphic tee', 'gift shirt'] },
   { id: 'sweatshirt', label: 'Sweatshirt', searchTerm: 'sweatshirt', tags: ['sweatshirt', 'cozy gift', 'crewneck'] },
   { id: 'mug', label: 'Mug', searchTerm: 'mug', tags: ['mug', 'coffee gift', 'cup'] },
+  { id: 'ornament', label: 'Ornament', searchTerm: 'ornament', tags: ['ornament', 'christmas ornament', 'holiday decor'] },
   { id: 'wall-art', label: 'Wall Art', searchTerm: 'wall art', tags: ['wall art', 'art print', 'poster'] },
   { id: 'tote', label: 'Tote Bag', searchTerm: 'tote bag', tags: ['tote bag', 'canvas tote', 'gift tote'] },
   { id: 'sticker', label: 'Sticker', searchTerm: 'sticker', tags: ['sticker', 'laptop sticker', 'planner sticker'] },
@@ -836,6 +837,7 @@ export const DEFAULT_RISK_TERMS = [
   'minecraft',
   'roblox',
   'fortnite',
+  'resident evil',
   'barbie',
   'bluey',
   'snoopy',
@@ -972,6 +974,7 @@ const PRODUCT_FAMILY_TERMS = {
   shirt: ['shirt', 'shirts', 'tshirt', 'tshirts', 'tee', 'tees', 'graphic tee'],
   sweatshirt: ['sweatshirt', 'sweatshirts', 'hoodie', 'hoodies', 'crewneck', 'crewnecks'],
   mug: ['mug', 'mugs', 'cup', 'cups', 'coffee mug'],
+  ornament: ['ornament', 'ornaments', 'christmas ornament', 'christmas ornaments'],
   tote: ['tote bag', 'tote', 'canvas tote', 'bag'],
   sticker: ['sticker', 'stickers', 'planner sticker', 'laptop sticker'],
   'wall-art': ['wall art', 'poster', 'posters', 'art print', 'prints', 'printable', 'nursery art'],
@@ -986,10 +989,13 @@ const CATEGORY_PRODUCT_FAMILY = {
   shirt: 'shirt',
   sweatshirt: 'sweatshirt',
   mug: 'mug',
+  ornament: 'ornament',
   'wall-art': 'wall-art',
   tote: 'tote',
   sticker: 'sticker',
 }
+
+const PRODUCT_FAMILIES_WITH_MOTIF_USAGE = new Set(['ornament'])
 
 const BROAD_OCCASION_WORDS = new Set([
   'wedding',
@@ -1589,7 +1595,9 @@ export function classifyCandidateKeyword(keyword, options = {}) {
   const expectedFamily = CATEGORY_PRODUCT_FAMILY[category.id]
   const families = keywordProductFamilies(normalized)
   const mismatchedFamilies = expectedFamily
-    ? families.filter((family) => family !== expectedFamily)
+    ? families.filter((family) => (
+      family !== expectedFamily && !PRODUCT_FAMILIES_WITH_MOTIF_USAGE.has(family)
+    ))
     : []
   if (mismatchedFamilies.length > 0) {
     return {
@@ -3216,8 +3224,8 @@ export function advanceMarketplaceInsightResearch(plan = {}, options = {}) {
   }
 
   if (activeFollowUps.length > 0) return { plan: nextPlan, addedCount: 0, reason: 'batch-in-progress' }
-  if (completedSeedCount < 10) return { plan: nextPlan, addedCount: 0, reason: 'need-more-seeds' }
-  if (followUpItems.length > 0 && completedSeedCount < (Number(plan.seedQuota) || 20)) {
+  const requiredSeedCount = Math.max(1, Number(plan.seedQuota) || 20)
+  if (completedSeedCount < requiredSeedCount) {
     return { plan: nextPlan, addedCount: 0, reason: 'continue-seeds' }
   }
 
@@ -3294,16 +3302,17 @@ export function buildMarketplaceInsightPlan(candidates = [], options = {}) {
   const event = getEvent(options)
   const category = getCategory(options.categoryId)
   const mode = options.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
-  const config = mode === 'plus'
-    ? { quota: 60, seedQuota: 20, discovery: 6, validation: 11, reserve: 3 }
-    : { quota: 15, seedQuota: 15, discovery: 5, validation: 7, reserve: 3 }
   const baselineQuery = normalizePhrase(`${event.searchTerm} ${category.searchTerm}`)
-  const pool = candidates
+  const normalizedPool = candidates
     .map((candidate) => ({
       ...candidate,
       query: normalizePhrase(candidate.query ?? candidate.keyword),
     }))
     .filter((candidate) => candidate.query)
+  const pool = [...new Map(normalizedPool.map((candidate) => [candidate.query, candidate])).values()]
+  const config = mode === 'plus'
+    ? { quota: pool.length + 40, seedQuota: pool.length, discovery: 5, validation: pool.length, reserve: 0 }
+    : { quota: 15, seedQuota: 15, discovery: 5, validation: 7, reserve: 3 }
   const selected = []
   const used = new Set()
 
@@ -3333,7 +3342,9 @@ export function buildMarketplaceInsightPlan(candidates = [], options = {}) {
     return true
   }
 
-  addItem({ query: baselineQuery }, 'discovery', 'イベント全体の需要と供給を基準値として確認')
+  if (mode === 'free') {
+    addItem({ query: baselineQuery }, 'discovery', 'イベント全体の需要と供給を基準値として確認')
+  }
   const discoveryLanes = mode === 'plus'
     ? ['motif', 'moment', 'audience', 'aesthetic', 'adjacent']
     : ['motif', 'moment', 'audience', 'adjacent']
@@ -3360,7 +3371,7 @@ export function buildMarketplaceInsightPlan(candidates = [], options = {}) {
   if (mode === 'plus') {
     for (const candidate of pool) {
       if (selected.length >= config.seedQuota) break
-      addItem(candidate, 'reserve', 'Plus初期調査を各レーンへ広げる追加候補')
+      addItem(candidate, 'validation', '生成候補をEtsy公式で全件確認')
     }
 
   }
@@ -4313,6 +4324,33 @@ function demandSignalBand(searches, clicks = null) {
   return 0
 }
 
+function etsyOfficialDemandPoints(searches) {
+  if (searches === null || searches <= 0) return 0
+  if (searches >= 1000) return 10
+  if (searches >= 300) return 8
+  if (searches >= 100) return 6
+  if (searches >= 50) return 4
+  return 2
+}
+
+function everbeeMedianSalesPoints(medianMonthlySales) {
+  if (medianMonthlySales === null || medianMonthlySales <= 0) return 0
+  if (medianMonthlySales >= 10) return 10
+  if (medianMonthlySales >= 5) return 8
+  if (medianMonthlySales >= 3) return 6
+  if (medianMonthlySales >= 1) return 4
+  return 2
+}
+
+function erankDemandPoints(searches, clicks) {
+  if ((searches ?? 0) >= 1000 || (clicks ?? 0) >= 300) return 10
+  if ((searches ?? 0) >= 300 || (clicks ?? 0) >= 100) return 8
+  if ((searches ?? 0) >= 100 || (clicks ?? 0) >= 30) return 6
+  if ((searches ?? 0) >= 50 || (clicks ?? 0) >= 15) return 4
+  if ((searches ?? 0) > 0 || (clicks ?? 0) > 0) return 2
+  return 0
+}
+
 function partialSupplyScore(sourceId, values = {}) {
   if (sourceId === 'etsy') {
     const listings = values.etsyListings
@@ -4465,6 +4503,13 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   const everbeePositive = (sellingListingCount ?? 0) > 0 || (topMonthlySales ?? 0) > 0 || (topRevenue ?? 0) > 0
   const erankPositive = (erankSearchVolume ?? 0) > 0 || (erankClicks ?? 0) > 0 || (erankCtr ?? 0) > 0
   const etsyMarketplacePositive = (etsySearches30d ?? 0) > 0
+  const etsyZeroDemandSignal = etsySearches30d === 0
+  const buyerIntent = classifyBuyerIntentPhrase(keyword)
+  const hasNamedBuyerIntent = buyerIntent.buyerIntentAxes
+    .some((axis) => axis !== 'Style/product')
+  const ambiguousIntent = candidateClass.specificTokens.length === 1
+    && !hasNamedBuyerIntent
+    && !etsyMarketplacePositive
   const erankDemandPass = (erankSearchVolume !== null && erankSearchVolume >= 100)
     || (erankClicks !== null && erankClicks >= 30)
   const etsyDemandPass = etsySearches30d !== null && etsySearches30d >= 100
@@ -4545,6 +4590,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   if (confidenceLabel !== 'High') gateReasons.push('confidence')
   if (['empty', 'saturated'].includes(everbeeCompetition.band)) gateReasons.push('everbee-competition')
   if (competitionUnverified) gateReasons.push('competition-unverified')
+  if (ambiguousIntent) gateReasons.push('ambiguous-intent')
   if (!safetyPass) gateReasons.push('safety')
 
   const demandScore = demandPass
@@ -4570,11 +4616,23 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       : 0
   const confidenceScore = confidenceLabel === 'High' ? 5 : confidenceLabel === 'Medium' ? 3 : 0
   const sourceConsistencyScore = demandSourceConflict ? -5 : 0
-  const rawScore = demandScore + supplyScore + everbeeCompetitionScore + salesBreadthScore + medianSalesScore + concentrationScore + freshnessScore + confidenceScore + sourceConsistencyScore
+  const etsyOfficialDemandScore = etsyMarketplaceFreshness.eligibleForRanking
+    ? etsyOfficialDemandPoints(etsySearches30d)
+    : 0
+  const everbeeMedianSalesScore = everbeeFreshness.eligibleForRanking
+    ? everbeeMedianSalesPoints(medianMonthlySales)
+    : 0
+  const erankDemandScore = erankFreshness.eligibleForRanking
+    ? erankDemandPoints(erankSearchVolume, erankClicks)
+    : 0
+  const coreDemandSalesScore = etsyOfficialDemandScore + everbeeMedianSalesScore + erankDemandScore
+  const rawScore = coreDemandSalesScore + supplyScore + everbeeCompetitionScore + salesBreadthScore + concentrationScore + freshnessScore + confidenceScore + sourceConsistencyScore
   const scoreCap = competitionUnverified ? Math.min(39, everbeeCompetition.scoreCap) : everbeeCompetition.scoreCap
   const score = safetyPass ? Math.max(0, Math.min(scoreCap, rawScore)) : 0
 
-  const passesAGates = gateReasons.length === 0 && everbeeCompetition.supportsA
+  const passesAGates = gateReasons.length === 0
+    && everbeeCompetition.supportsA
+    && coreDemandSalesScore >= 18
   const passesErankBGates = hasErankCore
     && erankFreshness.eligibleForRanking
     && erankSupplyPass
@@ -4589,9 +4647,11 @@ export function scoreEverbeeResult(row = {}, options = {}) {
     && (sellingListingCount ?? 0) >= 2
     && (topSalesShare ?? 1) < 0.8
   const passesBGates = safetyPass
+    && !ambiguousIntent
     && freshnessPass
     && hasEverbeeAggregate
     && everbeeCompetition.supportsB
+    && coreDemandSalesScore >= 8
     && (passesErankBGates || passesEtsyMarketplaceBGates)
 
   let opportunityLabel = 'C'
@@ -4614,6 +4674,8 @@ export function scoreEverbeeResult(row = {}, options = {}) {
         : 'D: 除外候補'
 
   const exclusionReasons = []
+  if (etsyZeroDemandSignal) exclusionReasons.push('Etsy公式需要 0点（EverBee月間販売中央値とeRank需要を加えた総合判定）')
+  if (ambiguousIntent) exclusionReasons.push('単語の意味・買い手・用途を特定できない')
   if (candidateClass.action === 'reject') exclusionReasons.push(candidateClass.reason)
   if (riskTerms.length > 0) exclusionReasons.push(`要確認語句: ${riskTerms.join(', ')}`)
   if (!freshnessPass && (hasErankData || hasEtsyMarketplaceData || hasEverbeeData)) exclusionReasons.push('需要・供給データまたはEverBeeの取得日が期限超過または不明')
@@ -4652,14 +4714,14 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       revenueScore: 0,
       trendScore: 0,
       priceScore: 0,
-      erankDemandScore: demandScore,
+      erankDemandScore,
       erankCompetitionScore: supplyScore,
       erankCtrScore: 0,
       erankKeywordDifficultyScore: supplyScore,
       erankTrendScore: 0,
       erankSearchScore: demandScore,
       erankClickScore: demandScore,
-      etsyMarketplaceDemandScore: demandScore,
+      etsyMarketplaceDemandScore: etsyOfficialDemandScore,
       etsyMarketplaceSupplyScore: supplyScore,
       salesDensityScore: 0,
       revenueDensityScore: 0,
@@ -4672,6 +4734,9 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       riskPenalty: safetyPass ? 0 : 100,
       salesBreadthScore,
       medianSalesScore,
+      etsyOfficialDemandScore,
+      everbeeMedianSalesScore,
+      coreDemandSalesScore,
       concentrationScore,
       freshnessScore,
       confidenceScore,
@@ -4688,6 +4753,8 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       demandSupplySource,
       demandSourceConflict,
       demandSignalGap,
+      etsyZeroDemandSignal,
+      ambiguousIntent,
     },
     normalized: {
       keyword,
@@ -4751,6 +4818,7 @@ function evidenceStatus(status, label, detail) {
 
 export function explainEverbeeScore(score) {
   const normalized = score.normalized ?? {}
+  const parts = score.parts ?? {}
   const usesEtsyMarketplace = score.validation?.demandSupplySource === 'etsy'
   const demandSourceLabel = usesEtsyMarketplace ? 'Etsy公式' : 'eRank'
   const demandPass = !score.gateReasons?.includes('demand')
@@ -4797,6 +4865,14 @@ export function explainEverbeeScore(score) {
   return {
     summary,
     rows: [
+      {
+        status: score.opportunityLabel === 'A' ? 'strong' : score.opportunityLabel === 'B' ? 'warn' : 'weak',
+        label: score.opportunityLabel === 'A' ? 'A基準' : score.opportunityLabel === 'B' ? 'B基準' : '基準未満',
+        detail: 'Etsy公式検索・EverBee月間販売中央値・eRank需要を各10点で採点します。A 18点以上 / B 8点以上です。',
+        key: 'coreDemandSalesScore',
+        metric: 'A/B判定ポイント',
+        value: `Etsy公式 ${parts.etsyOfficialDemandScore ?? 0}点 + EverBee中央値 ${parts.everbeeMedianSalesScore ?? 0}点 + eRank需要 ${parts.erankDemandScore ?? 0}点 = ${parts.coreDemandSalesScore ?? 0}/30点`,
+      },
       {
         ...demand,
         key: 'demand',
@@ -5128,6 +5204,7 @@ const CATEGORY_ROUTE_SIGNALS = {
   shirt: ['shirt', 'tee', 'tshirt', 'funny', 'dad', 'mom', 'teacher', 'nurse', 'pickleball', 'dog mom', 'dog dad', 'retro', 'vintage'],
   sweatshirt: ['sweatshirt', 'crewneck', 'hoodie', 'cozy', 'fall', 'autumn', 'winter', 'christmas', 'halloween', 'teacher', 'nurse', 'embroidered', 'book lover'],
   mug: ['mug', 'coffee', 'cup', 'caffeine', 'teacher', 'nurse', 'coworker', 'boss', 'dad', 'mom', 'grandma', 'quote'],
+  ornament: ['ornament', 'christmas', 'holiday', 'family', 'memorial', 'pet', 'gift'],
   'wall-art': ['wall art', 'poster', 'print', 'art print', 'nursery', 'decor', 'room', 'aesthetic', 'quote', 'boho', 'minimalist', 'gallery'],
   tote: ['tote', 'bag', 'book lover', 'library', 'teacher', 'market', 'bridesmaid', 'bridal', 'eco', 'grocery'],
   sticker: ['sticker', 'planner', 'laptop', 'water bottle', 'cute', 'kawaii', 'book lover', 'teacher', 'vinyl'],
@@ -5149,6 +5226,7 @@ function routeReason(categoryId, keyword, score) {
   if (categoryId === 'sweatshirt') return 'shirtが重い時の逃がし先。cozy/seasonal/apparel intent がある場合だけ再確認。'
   if (categoryId === 'wall-art') return 'decor/quote/aesthetic intent がある時の逃がし先。アパレル競合を避けやすい。'
   if (categoryId === 'mug') return 'gift/quote/workplace intent と相性がよく、制作コストを抑えやすい。'
+  if (categoryId === 'ornament') return 'christmas/holiday/family/memorial intent と相性がよい。名入れは実測がある場合だけ優先。'
   if (categoryId === 'sticker') return '低単価の趣味・planner・laptop intent向け。IP安全性が必須。'
   if (categoryId === 'tote') return 'book/teacher/market/bridal intent向け。縦長デザインと相性がよい。'
   if (keywordText.includes('shirt') || keywordText.includes('tee')) return 'shirt intent はあるため、eRankの供給と複数商品の販売を確認して判断。'
@@ -5220,6 +5298,52 @@ export function recommendProductRoute(row = {}, scoreInput = null, options = {})
     shirtSaturated,
     hasSalesProof,
   }
+}
+
+function matchesPersonalizationTerm(value) {
+  return PERSONALIZATION_PATTERN.test(normalizePhrase(value))
+}
+
+function personalizationResult(decision, label, summary, etsyEvidenceCount, everbeeEvidenceCount) {
+  return { decision, label, summary, etsyEvidenceCount, everbeeEvidenceCount }
+}
+
+export function recommendPersonalization(row = {}, scoreInput = null, options = {}) {
+  const score = scoreInput?.normalized ? scoreInput : scoreEverbeeResult(row, options)
+  const normalized = score.normalized ?? {}
+  const blocked = score.riskTerms.length > 0 || normalized.candidateClass?.action === 'reject'
+  const etsyEvidenceCount = normalized.etsyMarketplaceFreshness?.eligibleForRanking
+    ? (normalized.etsyRelatedTerms ?? []).filter(matchesPersonalizationTerm).length
+    : 0
+  const everbeeEvidenceCount = normalized.everbeeFreshness?.eligibleForRanking
+    ? (Array.isArray(row.productRows) ? row.productRows : []).filter((product) => (
+      matchesPersonalizationTerm(product?.title ?? product?.keyword)
+      && (parseNumber(product?.monthlySales ?? product?.sales) ?? 0) > 0
+    )).length
+    : 0
+
+  if (blocked) {
+    return personalizationResult('blocked', '名入れ方針: 判定対象外', '商品化不可のため、名入れ方針は判定しません。', 0, 0)
+  }
+  if (etsyEvidenceCount >= 1 && everbeeEvidenceCount >= 2) {
+    return personalizationResult(
+      'recommend',
+      '名入れ方針: 推奨',
+      `Etsy関連語 ${etsyEvidenceCount}件 / EverBee販売商品 ${everbeeEvidenceCount}件。通常版より名入れ版を優先してテスト。`,
+      etsyEvidenceCount,
+      everbeeEvidenceCount,
+    )
+  }
+  if (etsyEvidenceCount > 0 || everbeeEvidenceCount > 0) {
+    return personalizationResult(
+      'verify',
+      '名入れ方針: 要確認',
+      `Etsy関連語 ${etsyEvidenceCount}件 / EverBee販売商品 ${everbeeEvidenceCount}件。名入れ語で追加確認後にテスト。`,
+      etsyEvidenceCount,
+      everbeeEvidenceCount,
+    )
+  }
+  return personalizationResult('not-recommended', '名入れ方針: 根拠なし', 'Etsy関連語 0件 / EverBee販売商品 0件。通常版を先にテスト。', 0, 0)
 }
 
 function phraseTokens(value) {
@@ -5757,7 +5881,8 @@ export function rankResearchRows(rows = [], options = {}) {
       const score = scoreEverbeeResult(row, options)
       const idea = buildProductIdea(row.keyword, options)
       const productRoute = recommendProductRoute(row, score, options)
-      return { ...row, score, idea, productRoute }
+      const personalizationRecommendation = recommendPersonalization(row, score, options)
+      return { ...row, score, idea, productRoute, personalizationRecommendation }
     })
     .sort((a, b) => b.score.score - a.score.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
 }

@@ -126,6 +126,8 @@
     let marketRunId = 0
     const MARKET_KEYWORD_TIMEOUT_MS = 90000
     const ERANK_KEYWORD_TIMEOUT_MS = 330000
+    const ETSY_CAPTURE_RESPONSE_TIMEOUT_MS = 5000
+    const ETSY_MARKETPLACE_NAVIGATION_TIMEOUT_MS = 5000
     const ERANK_DAILY_LOOKUP_LIMIT_ERROR = 'ERANK_DAILY_LOOKUP_LIMIT_REACHED: eRankの1日あたりの検索上限に達しました。翌日のリセット後に再開してください（Basic 100件/日、Pro 200件/日）。'
 
     const trendSourceConfigs: Record<TrendSourceId, TrendSourceConfig> = {
@@ -160,7 +162,7 @@
     ]
 
     chrome.runtime.onInstalled.addListener((details) => {
-        if (details.reason !== 'install' && details.reason !== 'update') return
+        if (details.reason !== 'install') return
         reloadOpenExtensionWorkflowTabs()
     })
 
@@ -450,6 +452,25 @@
         }
     }
 
+    function etsyMarketplaceInsightSearchUrl(rawQuery: string) {
+        const query = rawQuery.trim().replace(/\s+/g, ' ')
+        return `https://www.etsy.com/your/shops/me/marketplace-insights/search?query=${encodeURIComponent(query)}&search_trigger=results_search_bar&search_term_type=any_phrase`
+    }
+
+    function navigateEtsyMarketplaceInsightTab(tabId: number, query: string) {
+        const url = etsyMarketplaceInsightSearchUrl(query)
+        return new Promise<void>((resolve, reject) => {
+            chrome.tabs.update(tabId, { url }, (tab) => {
+                const updateError = chrome.runtime.lastError?.message
+                if (updateError || !tab?.id) {
+                    reject(new Error(updateError || 'Etsy Marketplace Insightsの検索ページを更新できませんでした。'))
+                    return
+                }
+                resolve()
+            })
+        })
+    }
+
     async function openEtsyMarketplaceInsightTab(activate = true) {
         const existingTabId = await findEtsyMarketplaceTab()
         if (existingTabId !== null) {
@@ -480,20 +501,32 @@
         const query = rawQuery.trim().replace(/\s+/g, ' ')
         if (!query) return { started: false, ok: false, error: 'Marketplace Insightsで調べる語句がありません。' }
 
-        const tabId = await openEtsyMarketplaceInsightTab(activate)
-        const injection = await chrome.scripting.executeScript({
-            target: { tabId },
-            func: submitEtsyMarketplaceInsightQueryInPage,
-            args: [query],
-        })
-        const result = injection[0]?.result as { submitted?: boolean; error?: string } | undefined
-        if (!result?.submitted) {
-            return {
-                started: false,
-                ok: false,
-                error: result?.error || '検索欄が見つかりません。Etsyへログインし、Shop Manager > Stats > Marketplace Insightsを表示してください。',
-            }
+        let tabId = await openEtsyMarketplaceInsightTab(activate)
+        try {
+            await withTimeout(
+                navigateEtsyMarketplaceInsightTab(tabId, query),
+                ETSY_MARKETPLACE_NAVIGATION_TIMEOUT_MS,
+                'ETSY_MARKETPLACE_NAVIGATION_TIMEOUT: 既存のEtsyタブが応答しません。',
+            )
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            if (!message.includes('ETSY_MARKETPLACE_NAVIGATION_TIMEOUT')) throw error
+
+            const url = etsyMarketplaceInsightSearchUrl(query)
+            tabId = await withTimeout(new Promise<number>((resolve, reject) => {
+                chrome.tabs.create({ url, active: activate }, (tab) => {
+                    const createError = chrome.runtime.lastError?.message
+                    if (createError || !tab?.id) {
+                        reject(new Error(createError || 'Etsy Marketplace Insightsの代替タブを開けませんでした。'))
+                        return
+                    }
+                    resolve(tab.id)
+                })
+            }), ETSY_MARKETPLACE_NAVIGATION_TIMEOUT_MS, 'Etsy Marketplace Insightsの代替タブ作成がタイムアウトしました。')
+            etsyMarketplaceTabId = tabId
         }
+        await waitForTabComplete(tabId)
+        await delay(1200)
         return { started: true, ok: true, query, tabId }
     }
 
@@ -517,7 +550,7 @@
             } catch (error) {
                 latestError = error instanceof Error ? error.message : String(error)
             }
-            if (/ETSY_MARKETPLACE_RATE_LIMITED/i.test(latestError)) {
+            if (/ETSY_MARKETPLACE_RATE_LIMITED|ETSY_CAPTURE_RESPONSE_TIMEOUT/i.test(latestError)) {
                 throw new Error(latestError)
             }
             if (attempt < attempts - 1 && retryDelayMs > 0) await wait(retryDelayMs)
@@ -555,62 +588,67 @@
             }
         }
 
-        const captures: Array<{ mode: string, result: EtsyMarketplaceInsightResult }> = []
-        let initialMode = 'unknown'
+        let response: EtsyMarketplaceTabResponse
         try {
-            const currentModeInjection = await chrome.scripting.executeScript({
-                target: { tabId },
-                func: switchEtsyMarketplaceRelatedModeInPage,
-                args: ['current'],
-            })
-            initialMode = String(currentModeInjection[0]?.result?.mode ?? 'unknown')
-
-            for (const mode of ['similar', 'explore'] as const) {
-                try {
-                    const switchInjection = await chrome.scripting.executeScript({
-                        target: { tabId },
-                        func: switchEtsyMarketplaceRelatedModeInPage,
-                        args: [mode],
-                    })
-                    if (!switchInjection[0]?.result?.found) continue
-                    const extraction = await chrome.scripting.executeScript({
-                        target: { tabId },
-                        func: extractEtsyMarketplaceInsightInPage,
-                        args: [query],
-                    })
-                    const result = extraction[0]?.result as EtsyMarketplaceInsightResult | undefined
-                    if (result) captures.push({ mode, result })
-                } catch {
-                    // A single related view should not block capture of the other view.
-                }
-            }
-
-            if (captures.length === 0) {
-                const extraction = await chrome.scripting.executeScript({
-                    target: { tabId },
-                    func: extractEtsyMarketplaceInsightInPage,
-                    args: [query],
-                })
-                const result = extraction[0]?.result as EtsyMarketplaceInsightResult | undefined
-                if (result) captures.push({ mode: 'visible', result })
-            }
-        } finally {
-            if (initialMode === 'similar' || initialMode === 'explore') {
-                try {
-                    await chrome.scripting.executeScript({
-                        target: { tabId },
-                        func: switchEtsyMarketplaceRelatedModeInPage,
-                        args: [initialMode],
-                    })
-                } catch {
-                    // Restoring the selected view is best-effort only.
-                }
-            }
+            response = await requestEtsyMarketplaceCapture(tabId, query)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            throw new Error(`ETSY_CAPTURE_MESSAGE: ${message}`)
         }
-
         if (restoreMarketFinderFocus) focusMarketFinderTab()
-        if (captures.length === 0) throw new Error('Marketplace Insightsの画面から結果を取得できませんでした。')
-        return mergeEtsyMarketplaceInsightResults(captures)
+        if (!response.ok || !response.result) {
+            throw new Error(`ETSY_CAPTURE_MESSAGE: ${response.error || 'Marketplace Insightsの画面から結果を取得できませんでした。'}`)
+        }
+        try {
+            return mergeEtsyMarketplaceInsightResults([{ mode: 'visible', result: response.result }])
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            throw new Error(`ETSY_CAPTURE_MERGE: ${message}`)
+        }
+    }
+
+    type EtsyMarketplaceTabResponse = {
+        ok: boolean
+        result?: EtsyMarketplaceInsightResult
+        error?: string
+    }
+
+    async function requestEtsyMarketplaceCapture(tabId: number, query: string): Promise<EtsyMarketplaceTabResponse> {
+        const firstTry = await sendEtsyMarketplaceCaptureMessage(tabId, query)
+        const shouldReinject = firstTry.error?.includes('Receiving end does not exist')
+            || firstTry.error?.includes('ETSY_CAPTURE_RESPONSE_TIMEOUT')
+        if (firstTry.ok || !shouldReinject) return firstTry
+
+        await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['dist/etsyMarketplaceContent.js'],
+        })
+        return sendEtsyMarketplaceCaptureMessage(tabId, query)
+    }
+
+    function sendEtsyMarketplaceCaptureMessage(tabId: number, query: string): Promise<EtsyMarketplaceTabResponse> {
+        return new Promise((resolve) => {
+            let settled = false
+            const finish = (response: EtsyMarketplaceTabResponse) => {
+                if (settled) return
+                settled = true
+                clearTimeout(timeoutId)
+                resolve(response)
+            }
+            const timeoutId = setTimeout(() => {
+                finish({
+                    ok: false,
+                    error: 'ETSY_CAPTURE_RESPONSE_TIMEOUT: Etsyの取得スクリプトから応答がありません。',
+                })
+            }, ETSY_CAPTURE_RESPONSE_TIMEOUT_MS)
+            chrome.tabs.sendMessage(tabId, { action: 'ETSY_MARKETPLACE_CAPTURE', query }, (response) => {
+                if (chrome.runtime.lastError) {
+                    finish({ ok: false, error: chrome.runtime.lastError.message })
+                    return
+                }
+                finish(response as EtsyMarketplaceTabResponse)
+            })
+        })
     }
 
     function mergeEtsyMarketplaceInsightResults(captures: Array<{ mode: string, result: EtsyMarketplaceInsightResult }>) {
@@ -755,6 +793,126 @@
             input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }))
         }
         return { submitted: true }
+    }
+
+    function extractVisibleEtsyMarketplaceInsightInPage(expectedQuery: string): EtsyMarketplaceInsightResult {
+        function normalize(value: string) {
+            return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+        }
+
+        function isDateAxisLabel(value: string) {
+            const label = String(value ?? '').replace(/\s+/g, ' ').trim()
+            return /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?$/i.test(label)
+                || /^\d{1,2}月\d{1,2}日$/.test(label)
+        }
+
+        function parseCompactNumber(value: string): number | null {
+            const match = String(value ?? '')
+                .replace(/\u00a0/g, ' ')
+                .match(/(\d[\d,]*(?:\.\d+)?)\s*(千|万|百万|億|[kmb])?/i)
+            if (!match) return null
+            const suffix = String(match[2] ?? '').toLowerCase()
+            let multiplier = 1
+            if (suffix === 'k' || suffix === '千') multiplier = 1_000
+            else if (suffix === '万') multiplier = 10_000
+            else if (suffix === 'm' || suffix === '百万') multiplier = 1_000_000
+            else if (suffix === '億') multiplier = 100_000_000
+            else if (suffix === 'b') multiplier = 1_000_000_000
+            const numeric = Number(match[1].replace(/,/g, ''))
+            return Number.isFinite(numeric) ? Math.round(numeric * multiplier) : null
+        }
+
+        const root = document.querySelector('main, [role="main"]') ?? document.body
+        const pageText = (root as HTMLElement)?.innerText ?? ''
+        if (/slow down,\s*buddy|uh oh!|あらら|まあまあ、そう焦らずに/i.test(pageText)) {
+            return {
+                ok: false,
+                keyword: expectedQuery,
+                etsySearches30d: null,
+                etsyListings: null,
+                etsyRelatedTerms: [],
+                etsyRelatedKeywordMetrics: [],
+                etsyCheckedAt: null,
+                remainingSearches: null,
+                error: 'ETSY_MARKETPLACE_RATE_LIMITED: Etsy側の連続検索制限に達しました。',
+            }
+        }
+
+        const inputs = root?.querySelectorAll<HTMLInputElement>([
+            'input[type="search"]',
+            'input[name*="keyword" i]',
+            'input[placeholder*="keyword" i]',
+            'input[aria-label*="keyword" i]',
+        ].join(',')) ?? []
+        const input = Array.from(inputs)[0]
+        const actualQuery = String(input?.value ?? expectedQuery).trim()
+        const expectedKey = normalize(expectedQuery)
+        const actualKey = normalize(actualQuery)
+        if (expectedKey && actualKey && expectedKey !== actualKey) {
+            return {
+                ok: false,
+                keyword: actualQuery,
+                etsySearches30d: null,
+                etsyListings: null,
+                etsyRelatedTerms: [],
+                etsyRelatedKeywordMetrics: [],
+                etsyCheckedAt: null,
+                remainingSearches: null,
+                error: `表示中の語句は「${actualQuery}」です。「${expectedQuery}」の結果を待っています。`,
+            }
+        }
+
+        let etsySearches30d: number | null = null
+        let etsyListings: number | null = null
+        const etsyRelatedTerms: string[] = []
+        const etsyRelatedKeywordMetrics: EtsyMarketplaceRelatedKeywordMetric[] = []
+        const seenRelatedKeys: string[] = []
+        const rows = root?.querySelectorAll<HTMLElement>('tr, [role="row"]') ?? []
+
+        for (const row of Array.from(rows)) {
+            const cells = Array.from(row.querySelectorAll<HTMLElement>('th, td, [role="cell"], [role="rowheader"]'))
+                .map((cell) => String(cell.innerText ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())
+                .filter(Boolean)
+            if (cells.length < 3) continue
+            const keyword = cells[0]
+            const keywordKey = normalize(keyword)
+            if (!keywordKey) continue
+            const searches = parseCompactNumber(cells[1])
+            const listings = parseCompactNumber(cells[2])
+
+            if (keywordKey === (actualKey || expectedKey)) {
+                etsySearches30d = searches
+                etsyListings = listings
+                continue
+            }
+            if (!/[a-z]/i.test(keyword) || isDateAxisLabel(keyword) || searches === null || listings === null) continue
+            if (seenRelatedKeys.includes(keywordKey) || etsyRelatedTerms.length >= 100) continue
+            seenRelatedKeys.push(keywordKey)
+            etsyRelatedTerms.push(keyword)
+            etsyRelatedKeywordMetrics.push({
+                keyword,
+                etsySearches30d: searches,
+                etsyListings: listings,
+                conversionLabel: String(cells[3] ?? '').trim(),
+            })
+        }
+
+        const remainingMatch = pageText.match(/(\d+)\s+(?:free\s+)?search(?:es)?\s+(?:remaining|left)/i)
+            ?? pageText.match(/(?:残り|あと)\s*(\d+)\s*(?:回|件)?/)
+        const remainingSearches = remainingMatch ? Number(remainingMatch[1]) : null
+        const ok = etsySearches30d !== null || etsyListings !== null
+        return {
+            ok,
+            keyword: actualQuery || expectedQuery,
+            etsySearches30d,
+            etsyListings,
+            etsySearchTrendPercent: null,
+            etsyRelatedTerms,
+            etsyRelatedKeywordMetrics,
+            etsyCheckedAt: ok ? new Date().toISOString() : null,
+            remainingSearches: Number.isFinite(remainingSearches) ? remainingSearches : null,
+            error: ok ? '' : 'Etsyの表示中の結果行から検索数と検索結果を読み取れませんでした。',
+        }
     }
 
     function extractEtsyMarketplaceInsightInPage(expectedQuery: string): EtsyMarketplaceInsightResult {
@@ -986,9 +1144,11 @@
         __ETSY_MIRAI_TEST_HOOKS__?: Record<string, unknown>
     }).__ETSY_MIRAI_TEST_HOOKS__
     if (testHooks) testHooks.extractEtsyMarketplaceInsightInPage = extractEtsyMarketplaceInsightInPage
+    if (testHooks) testHooks.extractVisibleEtsyMarketplaceInsightInPage = extractVisibleEtsyMarketplaceInsightInPage
     if (testHooks) testHooks.mergeEtsyMarketplaceInsightResults = mergeEtsyMarketplaceInsightResults
     if (testHooks) testHooks.switchEtsyMarketplaceRelatedModeInPage = switchEtsyMarketplaceRelatedModeInPage
     if (testHooks) testHooks.waitForEtsyMarketplaceInsightResult = waitForEtsyMarketplaceInsightResult
+    if (testHooks) testHooks.etsyMarketplaceInsightSearchUrl = etsyMarketplaceInsightSearchUrl
 
     function normalizeTrendSources(value: unknown): TrendSourceConfig[] {
         const requested = Array.isArray(value) && value.length > 0
@@ -1872,7 +2032,7 @@
 
         await chrome.scripting.executeScript({
             target: { tabId },
-            files: ['dist/erankContent.js'],
+            files: ['dist/erankMetricPolicy.js', 'dist/erankContent.js'],
         })
 
         await activateTab(tabId)

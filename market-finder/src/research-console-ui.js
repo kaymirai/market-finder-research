@@ -95,9 +95,9 @@ export function deriveResearchHeaderState(input = {}) {
   const marketplaceActive = Boolean(input.marketplaceActive)
   const extensionMode = String(input.extensionState?.mode ?? '').toLowerCase()
   const extensionService = extensionMode.includes('erank') ? 'eRank' : 'EverBee'
-  const multiAngleActive = ['running', 'paused'].includes(
-    String(input.multiAngleStatus ?? '').trim(),
-  )
+  const multiAngleStatus = String(input.multiAngleStatus ?? '').trim()
+  const multiAngleActive = multiAngleStatus === 'running'
+  const multiAnglePaused = multiAngleStatus === 'paused'
   const service = marketplaceActive ? 'Etsy公式' : extensionActive ? extensionService : ''
   const keyword = marketplaceActive
     ? String(input.marketplaceKeyword ?? '').trim()
@@ -109,7 +109,7 @@ export function deriveResearchHeaderState(input = {}) {
       ? 'extension'
       : multiAngleActive ? 'multi-angle' : ''
 
-  return {
+  const state = {
     condition: String(input.condition ?? '').trim() || '条件未設定',
     connection: connected ? '接続済み' : '未接続',
     activity: service ? `${service} / ${keyword || '次のキーワードを準備中'}` : '待機中',
@@ -123,6 +123,8 @@ export function deriveResearchHeaderState(input = {}) {
           ? '複数角度の探索を停止します'
           : '停止できる調査はありません',
   }
+  if (multiAnglePaused && !service) state.activity = '一時停止中'
+  return state
 }
 
 export function createResearchConsoleUi(saved = {}) {
@@ -175,6 +177,7 @@ export function bindResearchStageTabs(tabContainer, onStageSelect) {
   if (!tabContainer?.addEventListener) return
   tabContainer.addEventListener('click', (event) => {
     const button = event.target?.closest?.('[data-research-stage]')
+    if (button?.getAttribute?.('aria-disabled') === 'true') return
     const stageId = button?.dataset?.researchStage
     if (stageId) onStageSelect(stageId)
   })
@@ -191,15 +194,15 @@ export function renderResearchStageView({ consoleElement, tabContainer, panels =
     button.setAttribute('aria-selected', String(active))
     button.dataset.status = stage?.status ?? 'locked'
     const status = button.querySelector('small')
-    if (status) status.textContent = stage?.count ? `${stage.count}件` : stage?.message ?? '未開始'
+    if (status) status.textContent = stage?.shortMessage || (stage?.count ? `${stage.count}件` : stage?.message ?? '未開始')
   })
   panels.forEach((panel) => {
     panel.hidden = panel.dataset.researchPanel !== activeStage
   })
 }
 
-function stage(id, label, status, count, message) {
-  return { id, label, status, count: Number(count) || 0, message }
+function stage(id, label, status, count, message, shortMessage = '') {
+  return { id, label, status, count: Number(count) || 0, message, shortMessage }
 }
 
 export function deriveResearchStageStates(metrics = {}) {
@@ -215,11 +218,33 @@ export function deriveResearchStageStates(metrics = {}) {
   const finalEvidenceCount = Number(metrics.finalEvidenceCount) || everbeeResultCount
   const activeService = String(metrics.activeService ?? '')
 
+  const etsyTotal = etsyEligibleCount
+  const etsyRemaining = Math.max(0, etsyPendingCount)
+  const candidateMessage = candidateCount > 0
+    ? `${candidateCount}件生成・${etsyEligibleCount}件がEtsy確認対象`
+    : '候補を確認'
+  const candidateShortMessage = candidateCount > 0
+    ? `${etsyEligibleCount}/${candidateCount}件 Etsy対象`
+    : ''
+  const etsyMessage = etsyTotal > 0
+    ? `${etsyCompletedCount}/${etsyTotal}件確認済み・残り${etsyRemaining}件`
+    : '候補待ち'
+  const etsyShortMessage = etsyTotal > 0 ? `${etsyCompletedCount}/${etsyTotal}件 済` : ''
+  const etsyStatus = activeService === 'etsy'
+    ? 'progress'
+    : etsyCompletedCount > 0 && etsyRemaining === 0
+      ? 'complete'
+      : etsyCompletedCount > 0
+        ? 'review'
+        : etsyTotal > 0
+          ? 'available'
+          : 'locked'
+
   return [
     stage('conditions', '条件', candidateCount > 0 ? 'complete' : 'available', candidateCount, candidateCount > 0 ? '候補作成済み' : '条件を入力'),
-    stage('candidates', '候補', readyCandidateCount > 0 ? 'complete' : candidateCount > 0 ? 'review' : 'locked', readyCandidateCount, readyCandidateCount > 0 ? 'Etsy公式へ送信可能' : '候補を確認'),
-    stage('etsy', 'Etsy公式', activeService === 'etsy' ? 'progress' : etsyCompletedCount > 0 && etsyPendingCount === 0 ? 'complete' : etsyCompletedCount > 0 ? 'review' : etsyEligibleCount > 0 ? 'available' : 'locked', etsyCompletedCount, etsyPendingCount > 0 ? `${etsyPendingCount}件が未完了` : etsyEligibleCount > 0 ? `${etsyEligibleCount}件を確認可能` : '候補待ち'),
-    stage('everbee', 'EverBee', activeService === 'everbee' ? 'progress' : everbeeResultCount > 0 ? 'complete' : etsyCompletedCount > 0 ? 'available' : 'locked', everbeeResultCount, everbeeResultCount > 0 ? '売上確認済み' : etsyCompletedCount > 0 ? 'Etsy公式確認済みを送信' : 'Etsy公式確認待ち'),
+    stage('candidates', '候補', readyCandidateCount > 0 ? 'complete' : candidateCount > 0 ? 'review' : 'locked', candidateCount, candidateMessage, candidateShortMessage),
+    stage('etsy', 'Etsy公式', etsyStatus, etsyCompletedCount, etsyMessage, etsyShortMessage),
+    stage('everbee', 'EverBee', activeService === 'everbee' ? 'progress' : everbeeResultCount > 0 ? 'complete' : etsyCompletedCount > 0 && etsyRemaining === 0 ? 'available' : 'locked', everbeeResultCount, everbeeResultCount > 0 ? '売上確認済み' : etsyCompletedCount > 0 && etsyRemaining === 0 ? 'Etsy公式確認済みを送信' : 'Etsy公式確認待ち'),
     stage('results', '最終結果', finalEvidenceCount > 0 ? 'complete' : ['etsy', 'everbee'].includes(activeService) ? 'locked' : etsyCompletedCount > 0 || erankResultCount > 0 ? 'available' : 'locked', finalEvidenceCount, finalEvidenceCount > 0 ? '全評価結果を確認' : '売上確認待ち'),
   ]
 }

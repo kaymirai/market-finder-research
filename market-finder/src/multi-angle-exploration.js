@@ -1,9 +1,10 @@
 import {
   candidateEvidenceKey,
   EXPLORATION_ANGLE_ORDER,
+  isEfficientMarketplaceProbe,
   marketplaceInsightPlanForContext,
   normalizeExplorationCandidate,
-} from './multi-angle-candidates.js'
+} from './multi-angle-candidates.js?v=20260812-14'
 import { mergeRowsByKey } from './research-performance.js?v=20260720-1'
 
 const VALID_STATUSES = new Set([
@@ -41,6 +42,13 @@ function timestamp(value = '') {
 function uniqueStrings(value) {
   if (!Array.isArray(value)) return []
   return [...new Set(value.map((item) => String(item ?? '').trim()).filter(Boolean))]
+}
+function normalizedKeywordKey(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
 }
 
 function positiveInteger(value, fallback = 1) {
@@ -104,12 +112,19 @@ function normalizedProvenance(value) {
 
 function normalizedResultLanes(value) {
   const lanes = value && typeof value === 'object' ? value : {}
+  const compactLane = (items, resultLane) => (Array.isArray(items) ? items : [])
+    .map((item) => compactResultLaneCandidate({
+      ...item,
+      resultLane: String(item?.resultLane ?? '').trim() || resultLane,
+    }))
+    .filter(Boolean)
   return {
-    event: Array.isArray(lanes.event) ? [...lanes.event] : [],
-    evergreen: Array.isArray(lanes.evergreen) ? [...lanes.evergreen] : [],
-    seasonalReference: Array.isArray(lanes.seasonalReference)
-      ? [...lanes.seasonalReference]
-      : [],
+    event: compactLane(lanes.event, 'event'),
+    evergreen: compactLane(lanes.evergreen, 'evergreen'),
+    seasonalReference: compactLane(
+      lanes.seasonalReference,
+      'seasonal-reference',
+    ),
   }
 }
 
@@ -176,16 +191,58 @@ function withProvenance(provenance, candidate, angleId = '') {
   }
 }
 
+function compactResultLaneCandidate(candidate = {}) {
+  const normalized = normalizeExplorationCandidate(candidate)
+  if (!normalized) return null
+  const compact = {
+    keyword: normalized.keyword,
+    categoryId: normalized.categoryId,
+    eventId: normalized.eventId,
+    angleId: normalized.angleId,
+    angleIds: normalized.angleIds,
+    source: normalized.source,
+    sources: normalized.sources,
+    sourceKeywords: normalized.sourceKeywords,
+    resultLane: normalized.resultLane,
+    priorityScore: normalized.priorityScore,
+    timingStatus: normalized.timingStatus,
+  }
+  for (const field of [
+    'originEventId',
+    'originCategoryId',
+    'opportunityLabel',
+    'confidenceLabel',
+    'candidateStage',
+  ]) {
+    const value = String(candidate[field] ?? '').trim()
+    if (value) compact[field] = value
+  }
+  const evidenceStatus = String(candidate.evidenceState?.status ?? '').trim()
+  if (evidenceStatus) compact.evidenceState = { status: evidenceStatus }
+  const event = normalizedEventSnapshot(
+    candidate.event ?? candidate.eventSnapshot,
+    normalized.eventId,
+  )
+  if (event) compact.event = event
+  const daysUntil = Number(candidate.daysUntil)
+  if (Number.isFinite(daysUntil)) compact.daysUntil = daysUntil
+  return compact
+}
+
 function appendLane(resultLanes, lane, candidate) {
   const laneKey = lane === 'seasonal-reference'
     ? 'seasonalReference'
     : lane
-  const evidenceKey = candidateEvidenceKey(candidate)
+  const compactCandidate = compactResultLaneCandidate(candidate)
+  if (!compactCandidate) return resultLanes
+  const evidenceKey = candidateEvidenceKey(compactCandidate)
   const existing = resultLanes[laneKey] ?? []
   const index = existing.findIndex((item) => candidateEvidenceKey(item) === evidenceKey)
   const next = index < 0
-    ? [...existing, candidate]
-    : existing.map((item, itemIndex) => itemIndex === index ? { ...item, ...candidate } : item)
+    ? [...existing, compactCandidate]
+    : existing.map((item, itemIndex) => itemIndex === index
+      ? { ...item, ...compactCandidate }
+      : item)
   return {
     ...resultLanes,
     [laneKey]: next,
@@ -224,6 +281,7 @@ export function createMultiAngleExplorationState(saved = {}) {
       categoryId,
     }, currentAngleId))
     .filter(Boolean)
+    .filter(isEfficientMarketplaceProbe)
   const legacyCompletedAngles = uniqueStrings(saved?.completedAngles)
   const hasAttemptedAngleState = Array.isArray(saved?.attemptedAngles)
   const attemptedAngles = hasAttemptedAngleState
@@ -275,7 +333,7 @@ export function multiAngleAutomationControl(state = {}, workActive = false) {
       label: '目標まで勝ち候補を探す',
     }
   }
-  if (['winner-found', 'exhausted'].includes(status)) {
+  if (status === 'winner-found') {
     return {
       action: 'new-cycle',
       label: '新しい調査を始める',
@@ -503,7 +561,7 @@ export function pauseMultiAngleWorkAfterReload(snapshot = {}, now = '') {
     exploration: pauseMultiAngleExploration(exploration, 'reload-required', now),
     pendingEvidenceAutomation: {
       ...pending,
-      active: false,
+      active: uniqueStrings(pending?.targetKeywords).length > 0,
       scheduled: false,
       targetKeywords: uniqueStrings(pending?.targetKeywords),
     },
@@ -672,6 +730,7 @@ export function resolveMultiAngleImportedResearchContext(
       && !String(row?.researchEventId ?? '').trim()
   ) || (
     !Object.prototype.hasOwnProperty.call(row, 'researchEventId')
+      && existingRow != null
       && Object.prototype.hasOwnProperty.call(existingRow, 'researchEventId')
       && !String(existingRow?.researchEventId ?? '').trim()
   )
@@ -752,6 +811,16 @@ export function resolveMultiAngleImportedResearchContext(
       ?? '',
     ),
   }
+}
+
+export function shouldRegenerateMarketplaceCandidates({ addedCount = 0, autoRunning = false } = {}) {
+  return Number(addedCount) > 0 && !autoRunning
+}
+
+export function isMarketplaceDateAxisLabel(value = '') {
+  const label = String(value ?? '').replace(/\s+/g, ' ').trim()
+  return /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?$/i.test(label)
+    || /^\d{1,2}月\d{1,2}日$/.test(label)
 }
 
 export function resolveMultiAngleExportResearchContext(
@@ -941,7 +1010,22 @@ export function nextMultiAngleBatch({
   const pendingRetryAngles = new Set(current.retryQueue.map((entry) => (
     String(entry.candidate?.angleId ?? current.currentAngleId).trim()
   )).filter(Boolean))
+  const reopenedEarlierAngles = angleOrder.filter((angleId, index) => (
+    index < current.angleIndex
+    && (completed.has(angleId) || empty.has(angleId))
+    && (pools[angleId] ?? []).some((rawCandidate) => {
+      const candidate = hydrateCandidate(rawCandidate, current, angleId)
+      return candidate
+        && candidate.resultLane !== 'seasonal-reference'
+        && !used.has(candidateEvidenceKey(candidate))
+    })
+  ))
+  reopenedEarlierAngles.forEach((angleId) => {
+    completed.delete(angleId)
+    empty.delete(angleId)
+  })
   const anglesToReview = uniqueStrings([
+    ...reopenedEarlierAngles,
     ...angleOrder.filter((angleId, index) => (
       index < current.angleIndex
       && attempted.has(angleId)
@@ -1093,6 +1177,42 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
   }
 }
 
+// A restored cycle can already be exhausted while its selected rows are still
+// waiting for evidence.  When that evidence finishes later, preserve the
+// exhausted route history but reconcile the verified winners into its target.
+export function reconcileMultiAngleWinners(state = {}, rows = [], now = '') {
+  const current = createMultiAngleExplorationState(state)
+  const observedRows = Array.isArray(rows) ? rows : []
+  const winners = uniqueStrings(observedRows
+    .filter((row) => {
+      const grade = String(
+        row?.opportunityLabel
+        ?? row?.everbeeRow?.score?.opportunityLabel
+        ?? '',
+      ).trim().toUpperCase()
+      const resultLane = String(
+        row?.resultLane
+        ?? row?.candidate?.resultLane
+        ?? '',
+      ).trim()
+      return row?.evidenceState?.status === 'verified'
+        && resultLane !== 'seasonal-reference'
+        && ['A', 'B'].includes(grade)
+    })
+    .map((row) => row.keyword))
+  const winnerKeywords = uniqueStrings(winners)
+  const targetReached = winnerKeywords.length >= current.targetWinnerCount
+  const wasIncorrectlyComplete = current.status === 'winner-found' && !targetReached
+  const updatedAt = timestamp(now)
+
+  return {
+    ...current,
+    status: targetReached ? 'winner-found' : wasIncorrectlyComplete ? 'running' : current.status,
+    winnerKeywords,
+    completedAt: targetReached ? current.completedAt || updatedAt : wasIncorrectlyComplete ? '' : current.completedAt,
+    updatedAt,
+  }
+}
 export function recordMultiAngleFailure(
   state = {},
   rawCandidate = {},
@@ -1183,6 +1303,50 @@ export function resumeMultiAngleExploration(state = {}, now = '') {
     status: 'running',
     pauseReason: '',
     updatedAt: timestamp(now),
+  }
+}
+
+export function reopenExhaustedMultiAngleExploration(state = {}, pools = {}, now = '') {
+  const current = createMultiAngleExplorationState(state)
+  if (current.status !== 'exhausted') return resumeMultiAngleExploration(current, now)
+  const used = new Set([
+    ...current.evidenceKeys,
+    ...current.queuedEvidenceKeys,
+    ...current.failedEvidenceKeys,
+    ...current.retryQueue.map((entry) => entry.evidenceKey),
+  ])
+  const reopenedAngles = EXPLORATION_ANGLE_ORDER.filter((angleId) => (
+    (pools[angleId] ?? []).some((rawCandidate) => {
+      const candidate = hydrateCandidate(rawCandidate, current, angleId)
+      return candidate
+        && candidate.resultLane !== 'seasonal-reference'
+        && !used.has(candidateEvidenceKey(candidate))
+    })
+  ))
+  if (reopenedAngles.length === 0) return current
+  const reopened = new Set(reopenedAngles)
+  const completedAngles = current.completedAngles.filter((angleId) => !reopened.has(angleId))
+  const emptyAngles = current.emptyAngles.filter((angleId) => !reopened.has(angleId))
+  const currentAngleId = reopenedAngles[0]
+  return {
+    ...current,
+    status: 'running',
+    currentAngleId,
+    angleIndex: EXPLORATION_ANGLE_ORDER.indexOf(currentAngleId),
+    completedAngles,
+    emptyAngles,
+    exhaustedAngles: uniqueStrings([...completedAngles, ...emptyAngles]),
+    completedAt: '',
+    pauseReason: '',
+    updatedAt: timestamp(now),
+  }
+}
+
+export function resumeExhaustedMultiAngleExploration(state = {}, pools = {}, now = '') {
+  const resumed = reopenExhaustedMultiAngleExploration(state, pools, now)
+  return {
+    state: resumed,
+    requiresFreshCycle: resumed.status === 'exhausted',
   }
 }
 

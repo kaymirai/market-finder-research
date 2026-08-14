@@ -1316,16 +1316,30 @@
         return results;
     }
     function extractMetrics(keyword) {
+        var _a;
         const rawBodyText = document.body.innerText || '';
         const bodyText = normalizeText(rawBodyText);
         const statisticsMetrics = extractKeywordStatisticsMetrics(bodyText);
         const visualMetrics = extractFromVisualGrid(keyword);
         const tableMetrics = extractFromTables(keyword);
-        const erankSearchVolume = statisticsMetrics.erankSearchVolume || visualMetrics.erankSearchVolume || tableMetrics.erankSearchVolume;
-        const erankClicks = statisticsMetrics.erankClicks || visualMetrics.erankClicks || tableMetrics.erankClicks;
-        const erankCtr = statisticsMetrics.erankCtr || visualMetrics.erankCtr || tableMetrics.erankCtr;
-        const erankCompetition = statisticsMetrics.erankCompetition || visualMetrics.erankCompetition || tableMetrics.erankCompetition;
-        const erankKeywordDifficulty = visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty;
+        const policy = globalThis.EtsyMiraiErankMetricPolicy;
+        const mergedMetrics = (_a = policy === null || policy === void 0 ? void 0 : policy.mergeErankMetrics({
+            statisticsText: keywordStatisticsSection(bodyText),
+            statisticsMetrics,
+            visualMetrics,
+            tableMetrics,
+        })) !== null && _a !== void 0 ? _a : {
+            erankSearchVolume: statisticsMetrics.erankSearchVolume,
+            erankClicks: statisticsMetrics.erankClicks,
+            erankCtr: statisticsMetrics.erankCtr,
+            erankCompetition: statisticsMetrics.erankCompetition || visualMetrics.erankCompetition || tableMetrics.erankCompetition,
+            erankKeywordDifficulty: visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty,
+        };
+        const erankSearchVolume = mergedMetrics.erankSearchVolume;
+        const erankClicks = mergedMetrics.erankClicks;
+        const erankCtr = mergedMetrics.erankCtr;
+        const erankCompetition = statisticsMetrics.erankCompetition || mergedMetrics.erankCompetition;
+        const erankKeywordDifficulty = mergedMetrics.erankKeywordDifficulty;
         const erankTrend = visualMetrics.erankTrend || tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText);
         const relatedKeywords = extractRelatedKeywordRows(keyword);
         const erankCheckedAt = new Date().toISOString();

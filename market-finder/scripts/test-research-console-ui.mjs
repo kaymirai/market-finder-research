@@ -32,6 +32,10 @@ class FakeButton {
     this.attributes.set(name, value)
   }
 
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null
+  }
+
   closest(selector) {
     return selector === '[data-research-stage]' ? this : null
   }
@@ -224,8 +228,8 @@ test('uses the Etsy automation as the active global header service', () => {
   assert.equal(header.canStop, true)
 })
 
-test('enables global Stop for running or paused multi-angle work but not terminal states', () => {
-  for (const status of ['running', 'paused']) {
+test('enables global Stop only for running multi-angle work and exposes paused work as idle', () => {
+  for (const status of ['running']) {
     const header = deriveResearchHeaderState({
       connected: true,
       multiAngleStatus: status,
@@ -234,6 +238,14 @@ test('enables global Stop for running or paused multi-angle work but not termina
     assert.equal(header.stopKind, 'multi-angle')
     assert.match(header.stopReason, /探索|調査/)
   }
+
+  const paused = deriveResearchHeaderState({
+    connected: true,
+    multiAngleStatus: 'paused',
+  })
+  assert.equal(paused.canStop, false)
+  assert.equal(paused.stopKind, '')
+  assert.equal(paused.activity, '一時停止中')
 
   for (const status of ['idle', 'stopped', 'winner-found', 'exhausted']) {
     const header = deriveResearchHeaderState({
@@ -266,6 +278,18 @@ test('clicking a research stage tab shows only its panel', () => {
   assert.equal(dom.consoleElement.dataset.activeStage, 'etsy')
   assert.equal(dom.tabContainer.buttons.find((button) => button.dataset.researchStage === 'etsy').attributes.get('aria-selected'), 'true')
   assert.deepEqual(dom.panels.map((panel) => panel.hidden), [true, true, false, true, true])
+})
+
+test('ignores a locked research stage tab', () => {
+  const dom = createResearchConsoleDom()
+  const selected = []
+  const locked = dom.tabContainer.buttons.find((button) => button.dataset.researchStage === 'results')
+  locked.setAttribute('aria-disabled', 'true')
+
+  bindResearchStageTabs(dom.tabContainer, (stageId) => selected.push(stageId))
+  dom.tabContainer.click('results')
+
+  assert.deepEqual(selected, [])
 })
 
 test('content updates cannot reveal a non-active research panel', () => {
@@ -324,6 +348,24 @@ test('derives progress, review, complete, and available states', () => {
   assert.equal(stages.find((item) => item.id === 'everbee').status, 'locked')
   assert.equal(stages.find((item) => item.id === 'etsy').status, 'progress')
   assert.equal(stages.find((item) => item.id === 'results').status, 'locked')
+})
+
+test('uses one candidate denominator across candidate and Etsy progress labels', () => {
+  const stages = deriveResearchStageStates({
+    candidateCount: 80,
+    readyCandidateCount: 79,
+    etsyEligibleCount: 79,
+    etsyCompletedCount: 20,
+    etsyPendingCount: 59,
+  })
+
+  const candidates = stages.find((item) => item.id === 'candidates')
+  const etsy = stages.find((item) => item.id === 'etsy')
+  assert.equal(candidates.message, '80件生成・79件がEtsy確認対象')
+  assert.equal(candidates.shortMessage, '79/80件 Etsy対象')
+  assert.equal(etsy.message, '20/79件確認済み・残り59件')
+  assert.equal(etsy.shortMessage, '20/79件 済')
+  assert.equal(etsy.status, 'review')
 })
 
 test('makes EverBee available after Etsy is checked without requiring eRank evidence', () => {

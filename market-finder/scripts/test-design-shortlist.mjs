@@ -39,26 +39,28 @@ test('reads the grade from a labelled opportunity value', () => {
   assert.equal(isDesignShortlistEligible(row('d shirt', { label: 'D: 除外候補' })), false)
 })
 
-test('hands over four themes with several keywords each, not one flat list', () => {
+test('hands over every eligible A/B theme on one page instead of stopping at four', () => {
   const rows = [
     ...clusterRows('ghost', 6, 99),
     ...clusterRows('cat', 6, 92),
     ...clusterRows('teacher', 6, 85),
     ...clusterRows('nurse', 6, 78),
     ...clusterRows('coffee', 6, 70),
+    ...clusterRows('running', 6, 65),
   ]
 
   const plan = selectDesignClusters(rows)
 
-  assert.equal(plan.clusters.length, DESIGN_CLUSTER_COUNT)
-  assert.deepEqual(plan.clusters.map((cluster) => cluster.key), ['ghost', 'cat', 'teacher', 'nurse'])
+  assert.equal(plan.clusters.length, 6)
+  assert.deepEqual(plan.clusters.map((cluster) => cluster.key), ['ghost', 'cat', 'teacher', 'nurse', 'coffee', 'running'])
   plan.clusters.forEach((cluster) => {
     assert.ok(cluster.items.length >= DESIGN_PER_CLUSTER_MIN)
     assert.ok(cluster.items.length <= DESIGN_PER_CLUSTER_MAX)
   })
-  assert.equal(plan.items.length, 24)
-  assert.equal(plan.totalClusters, 5)
-  assert.equal(plan.hasMore, true)
+  assert.equal(plan.items.length, 36)
+  assert.equal(plan.totalClusters, 6)
+  assert.equal(plan.hasMore, false)
+  assert.equal(plan.pageCount, 1)
 })
 
 test('orders clusters by their strongest keyword', () => {
@@ -86,12 +88,13 @@ test('prefers the deeper theme when scores tie', () => {
   assert.equal(plan.clusters[1].key, 'aaa')
 })
 
-test('caps a deep cluster at the per-cluster maximum', () => {
+test('keeps every eligible A/B keyword inside a deep theme by default', () => {
   const plan = selectDesignClusters(clusterRows('ghost', 20, 95))
 
   assert.equal(plan.clusters.length, 1)
-  assert.equal(plan.clusters[0].items.length, DESIGN_PER_CLUSTER_MAX)
+  assert.equal(plan.clusters[0].items.length, 20)
   assert.equal(plan.clusters[0].available, 20)
+  assert.equal(plan.items.length, 20)
 })
 
 test('flags a cluster too thin to carry a series instead of hiding it', () => {
@@ -108,7 +111,7 @@ test('flags a cluster too thin to carry a series instead of hiding it', () => {
   assert.equal(plan.thinClusters, 1)
 })
 
-test('pages to the next themes without dropping any', () => {
+test('supports explicit pagination without dropping any themes', () => {
   const rows = [
     ...clusterRows('a', 5, 99),
     ...clusterRows('b', 5, 95),
@@ -118,11 +121,14 @@ test('pages to the next themes without dropping any', () => {
     ...clusterRows('f', 5, 75),
   ]
 
-  const first = selectDesignClusters(rows)
-  const second = selectDesignClusters(rows, { offset: DESIGN_CLUSTER_COUNT })
+  const first = selectDesignClusters(rows, { clusterCount: DESIGN_CLUSTER_COUNT })
+  const second = selectDesignClusters(rows, {
+    clusterCount: DESIGN_CLUSTER_COUNT,
+    offset: DESIGN_CLUSTER_COUNT,
+  })
 
-  assert.deepEqual(first.clusters.map((cluster) => cluster.key), ['a', 'b', 'c', 'd'])
-  assert.deepEqual(second.clusters.map((cluster) => cluster.key), ['e', 'f'])
+  assert.deepEqual(first.clusters.map((cluster) => cluster.key), ['a', 'b', 'c', 'd', 'e'])
+  assert.deepEqual(second.clusters.map((cluster) => cluster.key), ['f'])
   assert.equal(second.page, 2)
   assert.equal(second.pageCount, 2)
   assert.equal(second.hasMore, false)

@@ -5,8 +5,10 @@ import {
   createMultiAngleExplorationState,
   nextMultiAngleBatch,
   pauseMultiAngleExploration,
+  reconcileMultiAngleWinners,
   recordMultiAngleBatch,
   recordMultiAngleFailure,
+  resumeExhaustedMultiAngleExploration,
   resumeMultiAngleExploration,
   startMultiAngleExploration,
   stopMultiAngleExploration,
@@ -20,6 +22,31 @@ const context = {
   categoryId: 'shirt',
   targetWinnerCount: 2,
 }
+
+test('drops persisted measured recombinations that are too long for Marketplace validation', () => {
+  const restored = createMultiAngleExplorationState({
+    status: 'paused',
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    currentAngleId: 'recent-sales',
+    currentBatchCandidates: [{
+      keyword: 'halloween medical assistant logo corporate gifting shirt',
+      source: 'measured-c-recombination',
+      eventId: 'halloween',
+      categoryId: 'shirt',
+    }, {
+      keyword: 'halloween medical assistant shirt',
+      source: 'measured-c-recombination',
+      eventId: 'halloween',
+      categoryId: 'shirt',
+    }],
+  })
+
+  assert.deepEqual(
+    restored.currentBatchCandidates.map((candidate) => candidate.keyword),
+    ['halloween medical assistant shirt'],
+  )
+})
 
 test('moves to the next angle without repeating the same evidence lookup and preserves provenance', () => {
   const started = startMultiAngleExploration({}, context, '2026-07-30T00:00:00Z')
@@ -67,6 +94,134 @@ test('does not count unverified A/B or verified C/D rows as winners', () => {
 
   assert.equal(evaluated.status, 'running')
   assert.deepEqual(evaluated.winnerKeywords, [])
+})
+
+test('requests a fresh cycle when an exhausted search has no unused candidates to reopen', () => {
+  const exhausted = createMultiAngleExplorationState({
+    status: 'exhausted',
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    evidenceKeys: ['ghost shirt|shirt|halloween'],
+  })
+
+  const result = resumeExhaustedMultiAngleExploration(exhausted, {
+    'demand-neighborhood': [{
+      keyword: 'ghost shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+    }],
+  })
+
+  assert.equal(result.requiresFreshCycle, true)
+  assert.equal(result.state.status, 'exhausted')
+})
+
+test('counts verified A/B rows when saved exhausted work finishes verification', () => {
+  const exhausted = createMultiAngleExplorationState({
+    ...context,
+    status: 'exhausted',
+    winnerKeywords: [],
+  })
+
+  const reconciled = reconcileMultiAngleWinners(exhausted, [
+    {
+      keyword: 'paramedic shirt',
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'A',
+      resultLane: 'evergreen',
+    },
+    {
+      keyword: 'pharmacy graduation gift',
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'B',
+      resultLane: 'event',
+    },
+    {
+      keyword: 'halloween ghost shirt',
+      evidenceState: { status: 'verified' },
+      opportunityLabel: 'C',
+      resultLane: 'event',
+    },
+  ], '2026-08-01T00:00:00Z')
+
+  assert.equal(reconciled.status, 'winner-found')
+  assert.deepEqual(reconciled.winnerKeywords, [
+    'paramedic shirt',
+    'pharmacy graduation gift',
+  ])
+  assert.equal(reconciled.completedAt, '2026-08-01T00:00:00Z')
+})
+
+test('stores compact result-lane summaries instead of duplicating full evidence rows', () => {
+  const started = startMultiAngleExploration({}, context)
+  const productRows = Array.from({ length: 14 }, (_, index) => ({
+    listingId: `listing-${index}`,
+    title: `Spooky dental product ${index}`,
+    monthlySales: index + 1,
+    monthlyRevenue: (index + 1) * 25,
+    listingAgeMonths: index + 1,
+  }))
+  const evaluated = recordMultiAngleBatch(started, [{
+    keyword: 'halloween dentist shirt',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    angleId: 'attribute-combination',
+    source: 'curated-taxonomy',
+    evidenceState: { status: 'verified', nextStage: '' },
+    opportunityLabel: 'C',
+    confidenceLabel: 'High',
+    candidateStage: 'sales-checked',
+    raw: { productRows, notes: 'full raw evidence' },
+    normalized: { productRows, listingsAnalyzed: 2704 },
+    everbeeRow: { productRows, listingsAnalyzed: 2704 },
+    scoreState: { score: 42, details: { productRows } },
+  }])
+
+  const stored = evaluated.resultLanes.event[0]
+  assert.equal(stored.keyword, 'halloween dentist shirt')
+  assert.equal(stored.opportunityLabel, 'C')
+  assert.equal(stored.confidenceLabel, 'High')
+  assert.equal(stored.candidateStage, 'sales-checked')
+  for (const heavyField of ['raw', 'normalized', 'everbeeRow', 'scoreState']) {
+    assert.equal(Object.hasOwn(stored, heavyField), false)
+  }
+  assert.ok(JSON.stringify(stored).length < 2_000)
+})
+
+test('compacts legacy full result-lane evidence while restoring saved state', () => {
+  const productRows = Array.from({ length: 14 }, (_, index) => ({
+    listingId: `legacy-listing-${index}`,
+    title: `Legacy product ${index}`,
+    monthlySales: index + 1,
+  }))
+  const restored = createMultiAngleExplorationState({
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    resultLanes: {
+      event: [{
+        keyword: 'legacy halloween nurse shirt',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+        angleId: 'recent-sales',
+        resultLane: 'event',
+        opportunityLabel: 'B',
+        confidenceLabel: 'High',
+        raw: { productRows },
+        normalized: { productRows },
+        everbeeRow: { productRows },
+        scoreState: { details: { productRows } },
+      }],
+    },
+  })
+
+  const stored = restored.resultLanes.event[0]
+  assert.equal(stored.keyword, 'legacy halloween nurse shirt')
+  assert.equal(stored.opportunityLabel, 'B')
+  assert.equal(stored.confidenceLabel, 'High')
+  for (const heavyField of ['raw', 'normalized', 'everbeeRow', 'scoreState']) {
+    assert.equal(Object.hasOwn(stored, heavyField), false)
+  }
+  assert.ok(JSON.stringify(restored.resultLanes).length < 2_000)
 })
 
 test('finishes as exhausted after every angle has no unseen candidates', () => {
@@ -150,6 +305,42 @@ test('keeps a ninth candidate in the same angle after recording a limit-eight ba
   ])
   assert.equal(ninth.state.currentAngleId, 'demand-neighborhood')
   assert.deepEqual(ninth.state.completedAngles, [])
+})
+
+test('returns to a completed higher-priority angle when new evidence adds an unseen candidate', () => {
+  const state = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    currentAngleId: 'recent-sales',
+    angleIndex: 2,
+    evidenceKeys: ['halloween dentist shirt|shirt|halloween'],
+    attemptedAngles: ['demand-neighborhood', 'attribute-combination', 'recent-sales'],
+    completedAngles: ['demand-neighborhood', 'attribute-combination'],
+  })
+  const result = nextMultiAngleBatch({
+    state,
+    pools: {
+      'demand-neighborhood': [{
+        keyword: 'dentist halloween shirt',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+        source: 'archived-etsy-related',
+        priorityScore: 95,
+      }],
+      'recent-sales': [{
+        keyword: 'halloween teacher ghost shirt',
+        categoryId: 'shirt',
+        eventId: 'halloween',
+      }],
+    },
+  })
+
+  assert.equal(result.state.currentAngleId, 'demand-neighborhood')
+  assert.deepEqual(result.candidates.map((candidate) => candidate.keyword), [
+    'dentist halloween shirt',
+  ])
+  assert.deepEqual(result.state.completedAngles, ['attribute-combination'])
 })
 
 test('promotes a definitively failed angle only after no unseen or retry work remains', () => {
@@ -292,7 +483,7 @@ test('normalizes legacy exhausted angles as empty without inferring completion f
   assert.deepEqual(currentFormat.emptyAngles, ['attribute-combination'])
 })
 
-test('treats winner-found and exhausted as completed cycles with one new-cycle action', () => {
+test('starts a new cycle after winners but lets an exhausted cycle check newly derived candidates', () => {
   assert.equal(typeof multiAngleApi.multiAngleAutomationControl, 'function')
 
   assert.deepEqual(
@@ -305,10 +496,45 @@ test('treats winner-found and exhausted as completed cycles with one new-cycle a
   assert.deepEqual(
     multiAngleApi.multiAngleAutomationControl({ status: 'exhausted' }),
     {
-      action: 'new-cycle',
-      label: '新しい調査を始める',
+      action: 'resume',
+      label: '目標まで探索を再開',
     },
   )
+})
+
+test('reopens only exhausted angles that gained unseen derived candidates', () => {
+  assert.equal(typeof multiAngleApi.reopenExhaustedMultiAngleExploration, 'function')
+  const exhausted = createMultiAngleExplorationState({
+    status: 'exhausted',
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    currentAngleId: 'evergreen',
+    angleIndex: 5,
+    evidenceKeys: ['halloween carpenter shirt|shirt|halloween'],
+    completedAngles: ['attribute-combination', 'recent-sales'],
+    emptyAngles: ['demand-neighborhood', 'adjacent-product', 'market-gap', 'evergreen'],
+    completedAt: '2026-08-01T00:00:00Z',
+  })
+  const reopened = multiAngleApi.reopenExhaustedMultiAngleExploration(exhausted, {
+    'recent-sales': [{
+      keyword: 'halloween retro carpenter shirt',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+    }],
+    evergreen: [{
+      keyword: 'retro carpenter shirt',
+      categoryId: 'shirt',
+      eventId: '',
+    }],
+  }, '2026-08-01T00:01:00Z')
+
+  assert.equal(reopened.status, 'running')
+  assert.equal(reopened.currentAngleId, 'recent-sales')
+  assert.equal(reopened.angleIndex, 2)
+  assert.equal(reopened.completedAt, '')
+  assert.equal(reopened.completedAngles.includes('recent-sales'), false)
+  assert.equal(reopened.emptyAngles.includes('evergreen'), false)
+  assert.equal(reopened.emptyAngles.includes('market-gap'), true)
 })
 
 test('prepares an exhausted cycle as fresh idle work while preserving saved references and archives', () => {
@@ -522,7 +748,7 @@ test('starts a reused custom-event id with no live evidence from the archived cy
   assert.equal(prepared.seoPlan, null)
 })
 
-test('reload pauses active multi-angle work without losing its batch retry or targets', () => {
+test('reload preserves an active checkpoint for automatic resume without losing its batch', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
 
   const snapshot = {
@@ -564,7 +790,7 @@ test('reload pauses active multi-angle work without losing its batch retry or ta
     snapshot.exploration.currentBatchCandidates,
   )
   assert.deepEqual(restored.exploration.retryQueue, snapshot.exploration.retryQueue)
-  assert.equal(restored.pendingEvidenceAutomation.active, false)
+  assert.equal(restored.pendingEvidenceAutomation.active, true)
   assert.equal(restored.pendingEvidenceAutomation.scheduled, false)
   assert.deepEqual(
     restored.pendingEvidenceAutomation.targetKeywords,
@@ -1874,6 +2100,72 @@ test('custom event candidate and imported row keep the frozen Alpha metadata aft
   })
 })
 
+test('first Etsy import accepts a null existing row', () => {
+  const halloween = {
+    id: 'halloween',
+    label: 'Halloween',
+    jpLabel: 'ハロウィン',
+    searchTerm: 'halloween',
+    displayTerm: 'Halloween',
+    month: 10,
+  }
+  const shirt = {
+    id: 'shirt',
+    label: 'Shirt',
+    searchTerm: 'shirt',
+    tags: ['shirt'],
+  }
+  const started = startMultiAngleExploration({}, {
+    activeEventId: halloween.id,
+    categoryId: shirt.id,
+    eventSnapshot: halloween,
+    categorySnapshot: shirt,
+  })
+
+  const imported = multiAngleApi.resolveMultiAngleImportedResearchContext(
+    started,
+    {
+      row: { etsySearches30d: 0, etsyListings: 0 },
+      existingRow: null,
+      candidate: { eventId: 'halloween', categoryId: 'shirt' },
+    },
+  )
+
+  assert.deepEqual(imported, {
+    eventId: 'halloween',
+    eventLabel: 'ハロウィン',
+    eventSearchTerm: 'halloween',
+    categoryId: 'shirt',
+    categoryLabel: 'Shirt',
+    categorySearchTerm: 'shirt',
+  })
+})
+
+test('automatic Etsy batches defer related-candidate regeneration until the batch is idle', () => {
+  assert.equal(typeof multiAngleApi.shouldRegenerateMarketplaceCandidates, 'function')
+  assert.equal(multiAngleApi.shouldRegenerateMarketplaceCandidates({
+    addedCount: 9,
+    autoRunning: true,
+  }), false)
+  assert.equal(multiAngleApi.shouldRegenerateMarketplaceCandidates({
+    addedCount: 9,
+    autoRunning: false,
+  }), true)
+  assert.equal(multiAngleApi.shouldRegenerateMarketplaceCandidates({
+    addedCount: 0,
+    autoRunning: false,
+  }), false)
+})
+
+test('Marketplace Insights date-axis labels are not research keywords', () => {
+  assert.equal(typeof multiAngleApi.isMarketplaceDateAxisLabel, 'function')
+  assert.equal(multiAngleApi.isMarketplaceDateAxisLabel('jul 1'), true)
+  assert.equal(multiAngleApi.isMarketplaceDateAxisLabel('September 30'), true)
+  assert.equal(multiAngleApi.isMarketplaceDateAxisLabel('7月1日'), true)
+  assert.equal(multiAngleApi.isMarketplaceDateAxisLabel('july 4th shirt'), false)
+  assert.equal(multiAngleApi.isMarketplaceDateAxisLabel('halloween nurse shirt'), false)
+})
+
 test('fixed imports replace stale row metadata consistently and keep only explicit evergreen eventless', () => {
   const christmas = {
     id: 'christmas',
@@ -2215,4 +2507,36 @@ test('marketplace extension and global stops preserve a resumable batch', () => 
       [`${source} stop candidate|shirt|halloween`],
     )
   }
+})
+
+test('removes stale winners and reopens a winner-found run when current evidence no longer qualifies', () => {
+  const stale = createMultiAngleExplorationState({
+    ...context,
+    status: 'winner-found',
+    winnerKeywords: ['old a', 'old b'],
+    completedAt: '2026-08-01T00:00:00Z',
+  })
+  const reconciled = reconcileMultiAngleWinners(stale, [
+    { keyword: 'old a', evidenceState: { status: 'verified' }, opportunityLabel: 'C' },
+    { keyword: 'old b', evidenceState: { status: 'failed' }, opportunityLabel: 'A' },
+  ], '2026-08-12T00:00:00Z')
+  assert.equal(reconciled.status, 'running')
+  assert.deepEqual(reconciled.winnerKeywords, [])
+  assert.equal(reconciled.completedAt, '')
+})
+
+test('drops a saved winner that is absent from the current reevaluated evidence', () => {
+  const stale = createMultiAngleExplorationState({
+    ...context,
+    status: 'winner-found',
+    winnerKeywords: ['old unreviewed winner'],
+    completedAt: '2026-08-01T00:00:00Z',
+  })
+  const reconciled = reconcileMultiAngleWinners(stale, [{
+    keyword: 'current verified winner',
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'B',
+  }], '2026-08-12T00:00:00Z')
+
+  assert.deepEqual(reconciled.winnerKeywords, ['current verified winner'])
 })

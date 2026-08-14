@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import { selectLatestArchiveFiles } from '../src/evidence-archive-restore.js'
+
 const root = new URL('../', import.meta.url)
 const [app, html] = await Promise.all([
   readFile(new URL('src/app.js', root), 'utf8'),
@@ -32,6 +34,36 @@ async function waitForServer() {
   }
   throw new Error('static server did not start')
 }
+
+test('loads only the newest cumulative archive for each research context', () => {
+  const shirtHalloweenEarly = '2026-08-01T05-34-46-583Z-shirt-halloween.json'
+  const shirtHalloweenLatest = '2026-08-01T09-29-19-397Z-shirt-halloween.json'
+  const mugHalloween = '2026-08-01T08-00-00-000Z-mug-halloween.json'
+  const shirtChristmas = '2026-08-01T08-10-00-000Z-shirt-christmas.json'
+
+  assert.deepEqual(selectLatestArchiveFiles([
+    shirtHalloweenEarly,
+    mugHalloween,
+    shirtChristmas,
+    shirtHalloweenLatest,
+  ]), [
+    mugHalloween,
+    shirtChristmas,
+    shirtHalloweenLatest,
+  ])
+})
+
+test('reuses one archive vocabulary analysis for both archive-driven panels', () => {
+  assert.match(app, /const archiveAnalysis = currentModifierAnalysis\(\)/)
+  assert.match(app, /renderBuyerIdentitySuggestions\(\{ analysis: archiveAnalysis \}\)/)
+  assert.match(app, /renderModifierEvidence\(archiveAnalysis\)/)
+})
+
+test('initializes buyer suggestions without archive-only options', () => {
+  const initBody = app.match(/function init\(\) \{([\s\S]*?)\r?\n\}\r?\n\r?\ninit\(\)/)?.[1] ?? ''
+  assert.match(initBody, /\r?\n  renderBuyerIdentitySuggestions\(\)\r?\n/)
+  assert.doesNotMatch(initBody, /options\.renderSuggestions/)
+})
 
 test('stores research evidence on disk and lists it back', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'market-finder-archive-'))
@@ -188,6 +220,9 @@ test('updates one version-three archive for the same run and creates a new file 
 
 test('feeds versioned contextual archives into the next candidate search', () => {
   assert.match(app, /analyzeMarketplaceVocabulary\(marketplaceLearningRecords\(\)/)
+  const learningBody = app.match(/function marketplaceLearningRecords\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(learningBody, /liveMarketplaceLearningRecord\(\)/)
+  assert.doesNotMatch(learningBody, /evidenceArchiveRecord\(\)/)
   assert.match(app, /learnedBuyerIntentSignals\(analysis/)
   assert.match(app, /learnedSignals: learnedSignalsForGeneration\(\)/)
   assert.match(app, /version: 3/)
@@ -204,12 +239,18 @@ test('feeds versioned contextual archives into the next candidate search', () =>
   assert.match(app, /runId: String\(record\.runId \?\? ''\)/)
   assert.match(app, /function scheduleEvidenceAutoArchive\(/)
   assert.match(app, /function addResearchRows\(rows\)[\s\S]{0,650}scheduleEvidenceAutoArchive\(\)/)
+  const loadBody = app.match(/async function loadEvidenceArchives\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.doesNotMatch(loadBody, /scheduleEvidenceAutoArchive\(\)/)
+  assert.match(
+    app,
+    /function scheduleEvidenceAutoArchive\(\)[\s\S]{0,700}const record = evidenceArchiveRecord\(\)[\s\S]{0,240}saveEvidenceArchive\(\{ automatic: true, record \}\)/,
+  )
   assert.match(app, /自動保管/)
   assert.match(app, /function evidenceArchiveBlockReason\(options = \{\}\)/)
   assert.match(app, /const record = options\.record && typeof options\.record === 'object'/)
   assert.match(app, /file:\/\/ で開いています/)
   assert.match(app, /elements\.evidenceArchiveBtn\.disabled = Boolean\(blocked\)/)
-  assert.match(app, /filesToLoad = \(files \?\? \[\]\)\.slice\(-EVIDENCE_ARCHIVE_LOAD_LIMIT\)/)
+  assert.match(app, /selectLatestArchiveFiles\(files, \{\s*limit: EVIDENCE_ARCHIVE_LOAD_LIMIT/)
   assert.match(app, /loadEvidenceArchives\(\)/)
   assert.match(html, /id="evidenceArchiveBtn"/)
   assert.match(html, /id="evidenceArchiveStatus"/)

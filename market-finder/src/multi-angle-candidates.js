@@ -3,6 +3,7 @@ import {
   normalizePhrase,
 } from '../../shared/market-keyword-engine/index.js?v=20260730-13'
 import { eventSignalTerms } from './event-market-tracks.js?v=20260730-4'
+import { NICHE_AXIS_ORDER, taxonomyTerms } from './niche-taxonomy.js?v=20260726-1'
 
 export const EXPLORATION_ANGLE_ORDER = Object.freeze([
   'demand-neighborhood',
@@ -23,6 +24,13 @@ function normalizedSources(value) {
   return [...new Set(values
     .map((source) => String(source ?? '').trim().toLowerCase())
     .filter(Boolean))]
+}
+
+export function isEfficientMarketplaceProbe(candidate = {}) {
+  if (normalizePhrase(candidate.keyword).split(' ').filter(Boolean).length > 5) return false
+  const sources = normalizedSources([candidate.source, ...(candidate.sources ?? [])])
+  if (!sources.includes('measured-c-recombination')) return true
+  return true
 }
 
 function categoryMatchTerms(category = {}) {
@@ -119,6 +127,129 @@ function optionalNumber(value) {
   return Number.isFinite(number) ? number : null
 }
 
+function phraseWithoutTerms(phrase, terms = []) {
+  return normalizedList(terms)
+    .sort((left, right) => right.length - left.length)
+    .reduce((result, term) => {
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      return normalizePhrase(result.replace(new RegExp(`(^|\\s)${escaped}(?=\\s|$)`, 'g'), ' '))
+    }, normalizePhrase(phrase))
+}
+
+function measuredSeedContextMatches(row, event, category) {
+  const rowEventId = String(row?.raw?.researchEventId ?? row?.researchEventId ?? '').trim()
+  const rowCategoryId = String(row?.raw?.researchCategoryId ?? row?.researchCategoryId ?? '').trim()
+  return rowEventId === String(event?.id ?? '').trim()
+    && rowCategoryId === String(category?.id ?? '').trim()
+}
+
+function seedAxisIds(seedCore) {
+  return new Set(NICHE_AXIS_ORDER.filter((axisId) => (
+    taxonomyTerms(axisId).some((term) => phraseContainsTerm(seedCore, term))
+  )))
+}
+
+function modifierPhrase(candidate = {}) {
+  const axisId = String(candidate.axisId ?? candidate.specificityAxis ?? '').trim()
+  const term = normalizePhrase(candidate.axisTerm ?? candidate.modifier)
+  if (!term) return ''
+  if (axisId === 'buyer-context' && term === 'gift for') return 'gift for mom'
+  if (axisId === 'buyer-context' && term === 'gift from') return 'gift from daughter'
+  return term
+}
+
+export function deriveMeasuredSeedCandidates({
+  measuredRows = [],
+  modifierCandidates = [],
+  event = {},
+  category = {},
+  limit = 80,
+} = {}) {
+  const eventTerm = normalizePhrase(event.searchTerm)
+  const productTerm = normalizePhrase(category.searchTerm)
+  if (!eventTerm || !productTerm) return []
+  const otherEventSignals = knownOtherEventSignals(event.id)
+  const categoryTerms = categoryMatchTerms(category)
+  const fallbackAxisOrder = ['style', 'relationship', 'buyer-context', 'hobby', 'pet', 'career']
+  const curatedModifiers = fallbackAxisOrder.flatMap((axisId) => (
+    taxonomyTerms(axisId).map((axisTerm) => ({
+      axisId,
+      axisTerm,
+      source: 'curated-taxonomy',
+    }))
+  ))
+  const seeds = (Array.isArray(measuredRows) ? measuredRows : [])
+    .filter((row) => measuredSeedContextMatches(row, event, category))
+    .filter((row) => row?.evidenceState?.status === 'verified')
+    .filter((row) => String(row?.opportunityLabel ?? '').trim() === 'C')
+    .filter((row) => Number(row?.scoreState?.score) >= 70)
+    .filter((row) => row?.validation?.ambiguousIntent !== true)
+    .filter((row) => row?.everbeeRow?.score?.validation?.ambiguousIntent !== true)
+    .filter((row) => !otherEventSignals.some((term) => phraseContainsTerm(row.keyword, term)))
+    .sort((left, right) => Number(right?.scoreState?.score) - Number(left?.scoreState?.score))
+  const savedModifiers = Array.isArray(modifierCandidates) ? modifierCandidates : []
+  const modifierKeys = new Set()
+  const modifiers = (savedModifiers.length > 0 ? savedModifiers : curatedModifiers)
+    .map((candidate) => ({
+      candidate,
+      axisId: String(candidate?.axisId ?? candidate?.specificityAxis ?? '').trim(),
+      phrase: modifierPhrase(candidate),
+    }))
+    .filter(({ axisId, phrase }) => NICHE_AXIS_ORDER.includes(axisId) && phrase)
+    .filter(({ axisId, phrase }) => {
+      const key = `${axisId}|${phrase}`
+      if (modifierKeys.has(key)) return false
+      modifierKeys.add(key)
+      return true
+    })
+  const byKey = new Map()
+
+  for (const seed of seeds) {
+    const withoutEvent = phraseWithoutTerms(seed.keyword, [eventTerm])
+    const seedCore = phraseWithoutTerms(withoutEvent, categoryTerms)
+    if (!seedCore) continue
+    const occupiedAxes = seedAxisIds(seedCore)
+    for (const { candidate, axisId, phrase } of modifiers) {
+      if (occupiedAxes.has(axisId) || phraseContainsTerm(seedCore, phrase)) continue
+      const common = {
+        categoryId: String(category.id ?? '').trim(),
+        source: 'measured-c-recombination',
+        sources: ['measured-c-recombination', String(candidate.source ?? 'curated-taxonomy')],
+        sourceKeywords: [seed.keyword, phrase],
+        parentKeyword: normalizePhrase(seed.keyword),
+        parentOpportunityLabel: 'C',
+        specificityAxis: axisId,
+        priorityScore: Number(seed?.scoreState?.score) || 70,
+      }
+      const eventKeyword = normalizePhrase(`${eventTerm} ${phrase} ${seedCore} ${productTerm}`)
+      const evergreenKeyword = normalizePhrase(`${phrase} ${seedCore} ${productTerm}`)
+      ;[{
+        ...common,
+        keyword: eventKeyword,
+        eventId: String(event.id ?? '').trim(),
+        angleId: 'recent-sales',
+      }, {
+        ...common,
+        keyword: evergreenKeyword,
+        eventId: '',
+        angleId: 'evergreen',
+        resultLane: 'evergreen',
+      }].forEach((derived) => {
+        if (
+          !derived.keyword
+          || normalizePhrase(derived.keyword) === normalizePhrase(seed.keyword)
+          || !isEfficientMarketplaceProbe(derived)
+          || otherEventSignals.some((term) => phraseContainsTerm(derived.keyword, term))
+        ) return
+        const key = candidateEvidenceKey(derived)
+        if (!byKey.has(key)) byKey.set(key, derived)
+      })
+      if (byKey.size >= Math.max(1, Number(limit) || 80)) return [...byKey.values()]
+    }
+  }
+  return [...byKey.values()]
+}
+
 function candidateContext(candidate = {}) {
   return {
     eventId: String(
@@ -212,6 +343,83 @@ export function marketplaceRelatedTermCandidates(plan = {}, context = {}) {
     categoryId: activeCategoryId,
     source: 'marketplace-insights',
   }))
+}
+
+export function archivedDemandNeighborhoodCandidates(records = [], context = {}) {
+  const activeEventId = String(context.eventId ?? context.activeEventId ?? '').trim()
+  const activeCategoryId = String(context.categoryId ?? '').trim()
+  const ignoredConcepts = new Set([
+    'shirt', 'shirts', 'tshirt', 'halloween', 'gift', 'funny', 'cute', 'retro',
+  ])
+  const conceptsFor = (value) => normalizePhrase(value)
+    .split(' ')
+    .filter((token) => token.length >= 4 && !ignoredConcepts.has(token))
+    .map((token) => token.slice(0, 4))
+  const prioritySeeds = (Array.isArray(context.prioritySeeds) ? context.prioritySeeds : [])
+    .map((seed) => ({
+      concepts: new Set(conceptsFor(seed?.keyword)),
+      opportunityLabel: String(seed?.opportunityLabel ?? '').toUpperCase(),
+      score: optionalNumber(seed?.score) ?? 0,
+    }))
+    .filter((seed) => seed.concepts.size > 0)
+  const seedBoostFor = (keyword) => {
+    const concepts = conceptsFor(keyword)
+    return prioritySeeds.reduce((best, seed) => {
+      if (!concepts.some((concept) => seed.concepts.has(concept))) return best
+      const gradeBoost = ['A', 'B'].includes(seed.opportunityLabel) ? 70 : 25
+      return Math.max(best, gradeBoost + Math.max(0, seed.score - 70))
+    }, 0)
+  }
+  const alreadyMeasured = new Set()
+  ;(Array.isArray(records) ? records : []).forEach((record) => {
+    if (
+      String(record?.eventId ?? record?.context?.eventId ?? '').trim() !== activeEventId
+      || String(record?.categoryId ?? record?.context?.categoryId ?? '').trim() !== activeCategoryId
+    ) return
+    ;(record?.drilldownNodes ?? []).forEach((node) => {
+      const keyword = normalizePhrase(node?.keyword)
+      if (keyword) alreadyMeasured.add(keyword)
+    })
+    const exploration = record?.multiAngleExploration ?? {}
+    ;[
+      ...(exploration.evidenceKeys ?? []),
+      ...(exploration.failedEvidenceKeys ?? []),
+    ].forEach((key) => {
+      const keyword = normalizePhrase(String(key ?? '').split('|')[0])
+      if (keyword) alreadyMeasured.add(keyword)
+    })
+  })
+
+  const byKeyword = new Map()
+  ;(Array.isArray(records) ? records : []).forEach((record) => {
+    if (
+      String(record?.eventId ?? record?.context?.eventId ?? '').trim() !== activeEventId
+      || String(record?.categoryId ?? record?.context?.categoryId ?? '').trim() !== activeCategoryId
+    ) return
+    ;(record?.demandKeywords ?? []).forEach((row) => {
+      const keyword = normalizePhrase(row?.keyword)
+      const wordCount = keyword.split(' ').filter(Boolean).length
+      if (!keyword || wordCount > 5 || alreadyMeasured.has(keyword)) return
+      const demand = optionalNumber(row?.etsySearches30d)
+      const candidate = {
+        keyword,
+        eventId: activeEventId,
+        categoryId: activeCategoryId,
+        source: 'archived-etsy-related',
+        priorityScore: 90
+          + Math.min(30, Math.max(0, demand ?? 0) / 10)
+          + seedBoostFor(keyword),
+      }
+      const existing = byKeyword.get(keyword)
+      if (!existing || candidate.priorityScore > existing.priorityScore) {
+        byKeyword.set(keyword, candidate)
+      }
+    })
+  })
+  return [...byKeyword.values()].sort((left, right) => (
+    right.priorityScore - left.priorityScore
+    || left.keyword.localeCompare(right.keyword, 'en')
+  ))
 }
 
 export function normalizeArchivedSupplyListings(rows = []) {
@@ -366,7 +574,7 @@ function mergeCandidate(existing, incoming) {
 function addCandidates(byEvidence, rawCandidates, defaults) {
   for (const rawCandidate of rawCandidates) {
     const normalized = normalizeExplorationCandidate({ ...defaults, ...rawCandidate })
-    if (!normalized) continue
+    if (!normalized || !isEfficientMarketplaceProbe(normalized)) continue
     normalized.resultLane = resultLaneFor(normalized, defaults.activeEventId)
     const key = candidateEvidenceKey(normalized)
     byEvidence.set(key, byEvidence.has(key) ? mergeCandidate(byEvidence.get(key), normalized) : normalized)
@@ -467,6 +675,13 @@ export function buildMultiAngleCandidatePools(input = {}) {
   const sellingTitleCandidates = (input.drilldownCandidates ?? [])
     .filter((candidate) => candidateMatchesResearchContext(candidate, common))
     .filter(hasEverbeeTitleSource)
+  const measuredSeedCandidates = deriveMeasuredSeedCandidates({
+    measuredRows: input.measuredRows,
+    modifierCandidates: input.modifierCandidates,
+    event,
+    category,
+    limit: input.measuredSeedLimit,
+  })
 
   addCandidates(byEvidence, restoreSavedSeasonalReferences({
     saved: input.savedNextCycleCandidates,
@@ -496,6 +711,14 @@ export function buildMultiAngleCandidatePools(input = {}) {
     angleId: 'attribute-combination',
   })
   addCandidates(byEvidence, sellingTitleCandidates, {
+    ...common,
+    angleId: 'recent-sales',
+  })
+  addCandidates(byEvidence, input.archivedDemandCandidates ?? [], {
+    ...common,
+    angleId: 'demand-neighborhood',
+  })
+  addCandidates(byEvidence, measuredSeedCandidates.filter((candidate) => candidate.eventId === activeEventId), {
     ...common,
     angleId: 'recent-sales',
   })
@@ -539,6 +762,12 @@ export function buildMultiAngleCandidatePools(input = {}) {
     angleId: 'evergreen',
     resultLane: 'evergreen',
   })
+  addCandidates(byEvidence, measuredSeedCandidates.filter((candidate) => !candidate.eventId), {
+    ...common,
+    eventId: '',
+    angleId: 'evergreen',
+    resultLane: 'evergreen',
+  })
   addCandidates(byEvidence, (input.seasonalReferenceCandidates ?? [])
     .filter((candidate) => candidate.eventId && candidate.eventId !== activeEventId && candidate.timingStatus === 'timely'), {
     ...common,
@@ -551,5 +780,10 @@ export function buildMultiAngleCandidatePools(input = {}) {
     const angleId = candidate.angleIds.find((angle) => Object.hasOwn(pools, angle))
     if (angleId) pools[angleId].push({ ...candidate, angleId })
   }
+  Object.values(pools).forEach((candidates) => {
+    candidates.sort((left, right) => (
+      (right.priorityScore ?? 0) - (left.priorityScore ?? 0)
+    ))
+  })
   return pools
 }

@@ -9,13 +9,40 @@ import {
   finalEvidenceFilterMatches,
   formatEvidenceMetric,
   hasCollectedEvidence,
+  isAutomatableEvidenceRow,
   isEtsyEvidenceChecked,
+  limitFinalEvidenceRows,
   pendingEvidenceBatch,
   sanitizeLegacyMarketplaceInsightRow,
   selectEtsyConfirmationKeywords,
   selectedResearchRoundKeywords,
+  shouldExcludeFinalEvidenceRow,
+  toggleFinalEvidenceSelection,
   verificationStageForRow,
 } from '../src/final-evidence-matrix.js'
+
+test('closes an expanded evidence row when its detail button is clicked again', () => {
+  assert.equal(toggleFinalEvidenceSelection('paramedic|shirt|halloween', 'paramedic|shirt|halloween'), '')
+  assert.equal(toggleFinalEvidenceSelection('', 'paramedic|shirt|halloween'), 'paramedic|shirt|halloween')
+  assert.equal(toggleFinalEvidenceSelection('nurse|shirt|halloween', 'paramedic|shirt|halloween'), 'paramedic|shirt|halloween')
+})
+
+test('limits the initial evidence table render while preserving the total count', () => {
+  const rows = Array.from({ length: 368 }, (_, index) => ({ keyword: `keyword ${index + 1}` }))
+
+  assert.deepEqual(limitFinalEvidenceRows(rows, 40), {
+    rows: rows.slice(0, 40),
+    total: 368,
+    shown: 40,
+    hasMore: true,
+  })
+  assert.deepEqual(limitFinalEvidenceRows(rows.slice(0, 12), 40), {
+    rows: rows.slice(0, 12),
+    total: 12,
+    shown: 12,
+    hasMore: false,
+  })
+})
 
 test('keeps empty and attempt-only rows out of evidence while retaining measured and failed rows', () => {
   const emptyRows = Array.from({ length: 1000 }, (_, index) => ({
@@ -224,6 +251,48 @@ test('keeps graph dates and non-candidate phrases out of automatic evidence veri
   )
 })
 
+test('keeps measured broad entry phrases eligible for the next automatic evidence stage', () => {
+  assert.equal(isAutomatableEvidenceRow({
+    keyword: 'halloween shirt',
+    normalized: {
+      candidateClass: { action: 'explore' },
+      etsySearches30d: 66900,
+      etsyListings: 597500,
+    },
+    candidateStage: 'demand-checked',
+  }), true)
+
+  assert.equal(isAutomatableEvidenceRow({
+    keyword: 'daily searches',
+    normalized: { candidateClass: { action: 'explore' } },
+    candidateStage: 'demand-checked',
+  }), false)
+
+  assert.equal(isAutomatableEvidenceRow({
+    keyword: 'halloween sweatshirt',
+    normalized: {
+      candidateClass: { action: 'reject' },
+      etsySearches30d: 14500,
+      etsyListings: 225600,
+    },
+    candidateStage: 'reject',
+  }), false)
+})
+
+test('excludes a rejected product mismatch without spending an EverBee lookup', () => {
+  assert.equal(shouldExcludeFinalEvidenceRow({
+    candidateStage: 'reject',
+    hasEverbeeData: false,
+    opportunityLabel: '',
+  }), true)
+
+  assert.equal(shouldExcludeFinalEvidenceRow({
+    candidateStage: 'demand-checked',
+    hasEverbeeData: false,
+    opportunityLabel: '',
+  }), false)
+})
+
 test('removes legacy 30-day label artifacts while preserving versioned real values', () => {
   const legacy = sanitizeLegacyMarketplaceInsightRow({
     keyword: 'halloween sewing shirt',
@@ -374,6 +443,9 @@ test('names one verified A or B keyword as the primary keyword to use', () => {
   assert.equal(decision.primaryKeyword, 'halloween nurse ghost shirt')
   assert.equal(decision.primaryLabel, 'A')
   assert.deepEqual(decision.alternatives, ['gothic bat teacher shirt', 'retro ghost teacher shirt'])
+  assert.equal(decision.recommendedCount, 3)
+  assert.deepEqual(decision.recommendedKeywords.map((item) => item.keyword), ['halloween nurse ghost shirt', 'gothic bat teacher shirt', 'retro ghost teacher shirt'])
+  assert.deepEqual(decision.gradeCounts, { A: 2, B: 1, C: 0, D: 0 })
 })
 
 test('does not pretend to recommend a keyword while verification remains', () => {
@@ -397,6 +469,21 @@ test('does not pretend to recommend a keyword while verification remains', () =>
   assert.equal(decision.pendingCount, 1)
 })
 
+test('separates retryable failures from pending automatic verification', () => {
+  const decision = deriveFinalKeywordDecision([
+    {
+      keyword: 'halloween nurse shirt',
+      evidenceState: { status: 'failed', nextStage: 'pending-everbee' },
+      opportunityLabel: '',
+      scoreState: { score: null },
+    },
+  ])
+
+  assert.equal(decision.status, 'retry')
+  assert.equal(decision.pendingCount, 0)
+  assert.equal(decision.actionablePendingCount, 0)
+  assert.equal(decision.failedCount, 1)
+})
 test('clearly rejects the batch when verification is finished without an A or B keyword', () => {
   const decision = deriveFinalKeywordDecision([
     {

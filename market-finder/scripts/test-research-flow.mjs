@@ -5,9 +5,34 @@ import {
   buildEtsyCandidatesFromPool,
   buildEtsyCandidatesFromErank,
   extensionResultsImportMode,
+  everbeeHandoffState,
+  initialResearchRoundKeywords,
   marketplaceCompletedKeywords,
   shouldDiscardMarketplacePlan,
 } from '../src/research-flow.js'
+
+test('allows the EverBee action to accept completed Etsy results after reload', () => {
+  assert.deepEqual(everbeeHandoffState({
+    busy: false,
+    restoredAwaiting: true,
+    remainingEtsyCount: 0,
+    officialKeywordCount: 28,
+    erankResultCount: 0,
+  }), {
+    disabled: false,
+    acceptRestoredOnStart: true,
+  })
+})
+
+test('keeps every generated candidate in the initial review round', () => {
+  const candidates = Array.from({ length: 80 }, (_, index) => ({
+    keyword: `candidate ${index + 1}`,
+    status: index === 79 ? 'review' : 'ready',
+  }))
+
+  assert.equal(initialResearchRoundKeywords(candidates).length, 80)
+  assert.equal(initialResearchRoundKeywords(candidates).at(-1), 'candidate 80')
+})
 
 test('builds Etsy candidates only from usable eRank results', () => {
   const rows = [
@@ -326,11 +351,11 @@ test('restores completed extension results only when the page has no local resul
   assert.equal(extensionResultsImportMode(completed, [], true), 'current')
 })
 
-test('imports active extension results as the current research run', () => {
+test('defers active extension results until the batch completes', () => {
   assert.equal(extensionResultsImportMode({
     active: true,
     results: [{ keyword: 'ghost shirt' }],
-  }, [], false), 'current')
+  }, [], false), 'ignore')
   assert.equal(extensionResultsImportMode({ active: false, results: [] }, [], false), 'ignore')
 })
 

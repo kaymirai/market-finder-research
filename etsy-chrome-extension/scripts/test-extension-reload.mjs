@@ -9,6 +9,7 @@ const backgroundTypeScriptSource = await readFile(new URL('../src/background.ts'
 const erankContentTypeScriptSource = await readFile(new URL('../src/erankContent.ts', import.meta.url), 'utf8')
 const bridgeSource = await readFile(new URL('../dist/marketFinderBridge.js', import.meta.url), 'utf8')
 const everbeeSource = await readFile(new URL('../dist/everbeeContent.js', import.meta.url), 'utf8')
+const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'))
 
 function createChromeMock() {
   return {
@@ -465,7 +466,7 @@ test('reads seller review counts without dropping rows that have none', () => {
   assert.equal(byId.size, 3)
 })
 
-test('reloads open Market Finder and research tabs when an unpacked extension is reloaded', () => {
+test('does not force-reload open pages when the extension is updated', () => {
   let installedListener = null
   let queryOptions = null
   const reloadedTabIds = []
@@ -505,14 +506,8 @@ test('reloads open Market Finder and research tabs when an unpacked extension is
 
   assert.equal(typeof installedListener, 'function')
   installedListener({ reason: 'update' })
-  assert.deepEqual(Array.from(queryOptions.url), [
-    'http://localhost/*',
-    'http://127.0.0.1/*',
-    'https://erank.com/*',
-    'https://*.erank.com/*',
-    'https://*.everbee.io/*',
-  ])
-  assert.deepEqual(reloadedTabIds, [17, 29])
+  assert.equal(queryOptions, null)
+  assert.deepEqual(reloadedTabIds, [])
 })
 
 test('retries Etsy Marketplace Insights capture until usable metrics are ready', async () => {
@@ -543,6 +538,490 @@ test('retries Etsy Marketplace Insights capture until usable metrics are ready',
   assert.equal(attempts, 3)
   assert.equal(result.ok, true)
   assert.equal(result.etsySearches30d, 42)
+})
+
+test('opens each Etsy Marketplace Insights keyword through its stable result URL', () => {
+  const hooks = {}
+  runInNewContext(backgroundSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    fetch,
+    setTimeout,
+    URL,
+  })
+
+  assert.equal(typeof hooks.etsyMarketplaceInsightSearchUrl, 'function')
+  assert.equal(
+    hooks.etsyMarketplaceInsightSearchUrl('halloween dentist shirt'),
+    'https://www.etsy.com/your/shops/me/marketplace-insights/search?query=halloween%20dentist%20shirt&search_trigger=results_search_bar&search_term_type=any_phrase',
+  )
+})
+
+test('replaces an Etsy Marketplace Insights tab whose navigation callback never answers', async () => {
+  let backgroundListener = null
+  let createdTab = null
+  const existingUrl = 'https://www.etsy.com/your/shops/me/marketplace-insights/search?query=old'
+  const chrome = {
+    runtime: {
+      lastError: undefined,
+      getManifest() {
+        return { version: '1.43' }
+      },
+      onInstalled: { addListener() {} },
+      onMessage: {
+        addListener(value) {
+          backgroundListener = value
+        },
+      },
+    },
+    storage: { local: { set() {} } },
+    tabs: {
+      query(_options, callback) {
+        callback([{ id: 41, url: existingUrl }])
+      },
+      update() {
+        // Reproduces the real stuck tab: Chrome never invokes the callback.
+      },
+      create(options, callback) {
+        createdTab = { id: 77, url: options.url, status: 'complete' }
+        callback(createdTab)
+      },
+      get(tabId, callback) {
+        callback(tabId === 77 ? createdTab : null)
+      },
+      onUpdated: {
+        addListener() {},
+        removeListener() {},
+      },
+    },
+  }
+
+  const hostSetTimeout = setTimeout
+  const hostClearTimeout = clearTimeout
+  runInNewContext(backgroundSource, {
+    chrome,
+    clearTimeout: hostClearTimeout,
+    console,
+    fetch,
+    setTimeout(callback, delayMs) {
+      const testDelay = delayMs === 30000 ? 1000 : delayMs === 5000 ? 1 : 0
+      return hostSetTimeout(callback, testDelay)
+    },
+    URL,
+  })
+
+  const run = new Promise((resolve) => {
+    backgroundListener(
+      { action: 'RUN_ETSY_MARKETPLACE_INSIGHT', query: 'halloween medical secretary shirt' },
+      { tab: { id: 5 } },
+      resolve,
+    )
+  })
+  const response = await Promise.race([
+    run,
+    new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 100)),
+  ])
+
+  assert.equal(response.timedOut, undefined)
+  assert.equal(response.started, true)
+  assert.equal(response.tabId, 77)
+  assert.equal(
+    createdTab.url,
+    'https://www.etsy.com/your/shops/me/marketplace-insights/search?query=halloween%20medical%20secretary%20shirt&search_trigger=results_search_bar&search_term_type=any_phrase',
+  )
+})
+
+test('Etsy Marketplace Insights content script returns the visible keyword metrics', async () => {
+  let contentSource = ''
+  try {
+    contentSource = await readFile(new URL('../dist/etsyMarketplaceContent.js', import.meta.url), 'utf8')
+  } catch {
+    // The assertion below reports the missing production artifact as the intended RED failure.
+  }
+  assert.ok(contentSource, 'dedicated Etsy Marketplace Insights content script is missing')
+
+  const manifestEntry = manifest.content_scripts.find((entry) => (
+    entry.js.includes('dist/etsyMarketplaceContent.js')
+  ))
+  assert.deepEqual(manifestEntry?.matches, [
+    'https://www.etsy.com/your/shops/me/marketplace-insights/*',
+    'https://*.etsy.com/your/shops/me/marketplace-insights/*',
+  ])
+
+  const fixture = {
+    query: 'halloween it manager shirt',
+    heading: 'Similar search terms',
+    summary: '',
+    remaining: '14 searches remaining',
+    related: [
+      {
+        keyword: 'halloween it manager shirt',
+        searches: '3',
+        listings: '2.8k',
+        conversion: 'Low',
+      },
+      {
+        keyword: 'jul 1',
+        searches: '0',
+        listings: '0',
+        conversion: '',
+      },
+      {
+        keyword: 'halloween help desk shirt',
+        searches: '12',
+        listings: '840',
+        conversion: 'High',
+      },
+    ],
+  }
+  let listener = null
+  const document = marketplaceDocument(fixture)
+  runInNewContext(contentSource, {
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener(value) {
+            listener = value
+          },
+        },
+      },
+    },
+    document,
+    URL,
+  })
+
+  assert.equal(typeof listener, 'function')
+  const response = await new Promise((resolve) => {
+    const keepChannelOpen = listener(
+      { action: 'ETSY_MARKETPLACE_CAPTURE', query: fixture.query },
+      {},
+      resolve,
+    )
+    assert.equal(keepChannelOpen, true)
+  })
+  assert.equal(response.ok, true)
+  assert.equal(response.result.etsySearches30d, 3)
+  assert.equal(response.result.etsyListings, 2800)
+  assert.deepEqual(Array.from(response.result.etsyRelatedTerms), ['halloween help desk shirt'])
+})
+
+test('background captures Etsy Marketplace Insights through the dedicated content script', async () => {
+  let backgroundListener = null
+  const sentMessages = []
+  const chrome = {
+    runtime: {
+      lastError: undefined,
+      getManifest() {
+        return { version: '1.43' }
+      },
+      onInstalled: { addListener() {} },
+      onMessage: {
+        addListener(value) {
+          backgroundListener = value
+        },
+      },
+    },
+    storage: { local: { set() {} } },
+    tabs: {
+      query(_options, callback) {
+        callback([{
+          id: 41,
+          url: 'https://www.etsy.com/your/shops/me/marketplace-insights/search?query=halloween%20it%20manager%20shirt',
+        }])
+      },
+      sendMessage(tabId, message, callback) {
+        sentMessages.push({ tabId, message })
+        callback({
+          ok: true,
+          result: {
+            ok: true,
+            keyword: message.query,
+            etsySearches30d: 3,
+            etsyListings: 2800,
+            etsyRelatedTerms: [],
+            etsyRelatedKeywordMetrics: [],
+            etsyCheckedAt: '2026-07-31T00:00:00.000Z',
+            remainingSearches: 14,
+            error: '',
+          },
+        })
+      },
+    },
+    scripting: {
+      async executeScript() {
+        throw new Error('inline page-function injection must not be used')
+      },
+    },
+  }
+
+  runInNewContext(backgroundSource, {
+    chrome,
+    clearTimeout,
+    console,
+    fetch,
+    setTimeout,
+    URL,
+  })
+  assert.equal(typeof backgroundListener, 'function')
+
+  const response = await new Promise((resolve) => {
+    const keepChannelOpen = backgroundListener(
+      { action: 'CAPTURE_ETSY_MARKETPLACE_INSIGHT', query: 'halloween it manager shirt' },
+      {},
+      resolve,
+    )
+    assert.equal(keepChannelOpen, true)
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.result.etsyListings, 2800)
+  assert.equal(sentMessages.length, 1)
+  assert.equal(sentMessages[0].tabId, 41)
+  assert.equal(sentMessages[0].message.action, 'ETSY_MARKETPLACE_CAPTURE')
+  assert.equal(sentMessages[0].message.query, 'halloween it manager shirt')
+})
+
+async function captureThroughBackgroundWithTabResponse(tabResponse) {
+  let backgroundListener = null
+  const chrome = {
+    runtime: {
+      lastError: undefined,
+      getManifest() {
+        return { version: '1.43' }
+      },
+      onInstalled: { addListener() {} },
+      onMessage: {
+        addListener(value) {
+          backgroundListener = value
+        },
+      },
+    },
+    storage: { local: { set() {} } },
+    tabs: {
+      query(_options, callback) {
+        callback([{
+          id: 41,
+          url: 'https://www.etsy.com/your/shops/me/marketplace-insights/search?query=halloween%20it%20manager%20shirt',
+        }])
+      },
+      sendMessage(_tabId, _message, callback) {
+        callback(tabResponse)
+      },
+    },
+    scripting: {
+      async executeScript() {
+        throw new Error('unexpected content script fallback')
+      },
+    },
+  }
+
+  runInNewContext(backgroundSource, {
+    chrome,
+    clearTimeout,
+    console,
+    fetch,
+    setTimeout,
+    URL,
+  })
+
+  return new Promise((resolve) => {
+    backgroundListener(
+      { action: 'CAPTURE_ETSY_MARKETPLACE_INSIGHT', query: 'halloween it manager shirt' },
+      {},
+      resolve,
+    )
+  })
+}
+
+test('reinjects the Etsy capture script when the first content message never answers', async () => {
+  let backgroundListener = null
+  let messageAttempts = 0
+  let injectionAttempts = 0
+  const chrome = {
+    runtime: {
+      lastError: undefined,
+      getManifest() {
+        return { version: '1.43' }
+      },
+      onInstalled: { addListener() {} },
+      onMessage: {
+        addListener(value) {
+          backgroundListener = value
+        },
+      },
+    },
+    storage: { local: { set() {} } },
+    tabs: {
+      query(_options, callback) {
+        callback([{
+          id: 41,
+          url: 'https://www.etsy.com/your/shops/me/marketplace-insights/search?query=halloween%20it%20manager%20shirt',
+        }])
+      },
+      sendMessage(_tabId, _message, callback) {
+        messageAttempts += 1
+        if (messageAttempts === 1) return
+        callback({
+          ok: true,
+          result: {
+            ok: true,
+            keyword: 'halloween it manager shirt',
+            etsySearches30d: 0,
+            etsyListings: 0,
+            etsyRelatedTerms: [],
+            etsyRelatedKeywordMetrics: [],
+            etsyCheckedAt: '2026-08-01T00:00:00.000Z',
+            remainingSearches: 14,
+            error: '',
+          },
+        })
+      },
+    },
+    scripting: {
+      async executeScript() {
+        injectionAttempts += 1
+      },
+    },
+  }
+
+  runInNewContext(backgroundSource, {
+    chrome,
+    clearTimeout() {},
+    console,
+    fetch,
+    setTimeout(callback) {
+      queueMicrotask(callback)
+      return 1
+    },
+    URL,
+  })
+
+  const capture = new Promise((resolve) => {
+    backgroundListener(
+      { action: 'CAPTURE_ETSY_MARKETPLACE_INSIGHT', query: 'halloween it manager shirt' },
+      {},
+      resolve,
+    )
+  })
+  const response = await Promise.race([
+    capture,
+    new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 100)),
+  ])
+
+  assert.equal(response.timedOut, undefined)
+  assert.equal(response.ok, true)
+  assert.equal(response.result.etsySearches30d, 0)
+  assert.equal(messageAttempts, 2)
+  assert.equal(injectionAttempts, 1)
+})
+
+test('labels an Etsy content-script response error at the message boundary', async () => {
+  const response = await captureThroughBackgroundWithTabResponse({
+    ok: false,
+    error: 'probe failure',
+  })
+
+  assert.equal(response.ok, false)
+  assert.match(response.error, /ETSY_CAPTURE_MESSAGE: probe failure/)
+})
+
+test('labels an Etsy result-shape failure at the merge boundary', async () => {
+  const response = await captureThroughBackgroundWithTabResponse({
+    ok: true,
+    result: {
+      ok: true,
+      keyword: 'halloween it manager shirt',
+      etsySearches30d: 0,
+      etsyListings: 0,
+      etsyRelatedTerms: null,
+      etsyRelatedKeywordMetrics: null,
+      etsyCheckedAt: '2026-07-31T00:00:00.000Z',
+      remainingSearches: 14,
+      error: '',
+    },
+  })
+
+  assert.equal(response.ok, false)
+  assert.match(response.error, /ETSY_CAPTURE_MERGE:/)
+})
+
+test('labels an Etsy DOM extraction exception inside the content script', async () => {
+  const contentSource = await readFile(new URL('../dist/etsyMarketplaceContent.js', import.meta.url), 'utf8')
+  let listener = null
+  const root = {
+    innerText: '',
+    querySelectorAll() {
+      throw new Error('probe extraction failure')
+    },
+  }
+  runInNewContext(contentSource, {
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener(value) {
+            listener = value
+          },
+        },
+      },
+    },
+    document: {
+      body: root,
+      querySelector() {
+        return root
+      },
+    },
+    URL,
+  })
+
+  const response = await new Promise((resolve) => {
+    listener({ action: 'ETSY_MARKETPLACE_CAPTURE', query: 'probe' }, {}, resolve)
+  })
+  assert.equal(response.ok, false)
+  assert.match(response.error, /ETSY_CONTENT_EXTRACT: probe extraction failure/)
+})
+
+test('safe visible Etsy extractor returns zero metrics from the real row shape', () => {
+  const fixture = {
+    query: 'halloween it manager shirt',
+    heading: '似たような検索ワード',
+    summary: 'halloween it manager shirt\n検索数\n—\n検索結果\n—',
+    remaining: '',
+    related: [
+      {
+        keyword: 'halloween it manager shirt',
+        searches: '0 0.0%',
+        listings: '0',
+        conversion: 'エラー',
+      },
+      {
+        keyword: 'halloween pain management shirt',
+        searches: '3',
+        listings: '2.8 千',
+        conversion: 'とても低い',
+      },
+    ],
+  }
+  const hooks = {}
+  const document = marketplaceDocument(fixture)
+  runInNewContext(backgroundSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    document,
+    fetch,
+    setTimeout,
+    URL,
+  })
+
+  assert.equal(typeof hooks.extractVisibleEtsyMarketplaceInsightInPage, 'function')
+  const result = hooks.extractVisibleEtsyMarketplaceInsightInPage(fixture.query)
+  assert.equal(result.ok, true)
+  assert.equal(result.etsySearches30d, 0)
+  assert.equal(result.etsyListings, 0)
+  assert.deepEqual(Array.from(result.etsyRelatedTerms), ['halloween pain management shirt'])
 })
 
 test('retries a transient Etsy capture exception before stopping automation', async () => {
@@ -595,6 +1074,33 @@ test('stops Etsy Marketplace Insights retries immediately on rate limiting', asy
       { attempts: 4, initialDelayMs: 0, retryDelayMs: 0 },
     ),
     /ETSY_MARKETPLACE_RATE_LIMITED/,
+  )
+  assert.equal(attempts, 1)
+})
+
+test('stops Etsy Marketplace Insights retries when the content message channel is unresponsive', async () => {
+  const hooks = {}
+  runInNewContext(backgroundSource, {
+    __ETSY_MIRAI_TEST_HOOKS__: hooks,
+    chrome: createChromeMock(),
+    clearTimeout,
+    console,
+    fetch,
+    setTimeout,
+    URL,
+  })
+
+  let attempts = 0
+  await assert.rejects(
+    hooks.waitForEtsyMarketplaceInsightResult(
+      async () => {
+        attempts += 1
+        throw new Error('ETSY_CAPTURE_MESSAGE: ETSY_CAPTURE_RESPONSE_TIMEOUT: no response')
+      },
+      async () => {},
+      { attempts: 4, initialDelayMs: 0, retryDelayMs: 0 },
+    ),
+    /ETSY_CAPTURE_RESPONSE_TIMEOUT/,
   )
   assert.equal(attempts, 1)
 })

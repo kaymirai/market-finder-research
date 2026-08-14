@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "EtsyMirai Research Helper",
-  "version": "1.39",
+  "version": "1.44",
   "description": "Market Finderのキーワード調査とEtsy商品画像取得を補助します。",
   "permissions": [
     "activeTab",
@@ -54,7 +54,17 @@
         "https://*.erank.com/*"
       ],
       "js": [
+        "dist/erankMetricPolicy.js",
         "dist/erankContent.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.etsy.com/your/shops/me/marketplace-insights/*",
+        "https://*.etsy.com/your/shops/me/marketplace-insights/*"
+      ],
+      "js": [
+        "dist/etsyMarketplaceContent.js"
       ]
     },
     {

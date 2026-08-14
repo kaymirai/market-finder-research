@@ -28,7 +28,7 @@ export function isDesignShortlistEligible(row) {
   return (row?.score?.riskTerms?.length ?? 0) === 0
 }
 
-export const DESIGN_CLUSTER_COUNT = 4
+export const DESIGN_CLUSTER_COUNT = 5
 export const DESIGN_PER_CLUSTER_MIN = 5
 export const DESIGN_PER_CLUSTER_MAX = 8
 
@@ -63,10 +63,16 @@ function groupByCluster(rows) {
 // several keywords behind it, so the handoff is a few deep clusters rather than a flat
 // list of unrelated keywords.
 export function selectDesignClusters(rows = [], options = {}) {
-  const clusterCount = Math.max(1, Math.floor(Number(options.clusterCount) || DESIGN_CLUSTER_COUNT))
-  const perCluster = Math.max(1, Math.floor(Number(options.perCluster) || DESIGN_PER_CLUSTER_MAX))
-  const minPerCluster = Math.max(1, Math.floor(Number(options.minPerCluster) || DESIGN_PER_CLUSTER_MIN))
   const allClusters = groupByCluster(rows)
+  const requestedClusterCount = Number(options.clusterCount)
+  const clusterCount = Number.isFinite(requestedClusterCount) && requestedClusterCount > 0
+    ? Math.max(1, Math.floor(requestedClusterCount))
+    : Math.max(DESIGN_CLUSTER_COUNT, allClusters.length)
+  const requestedPerCluster = Number(options.perCluster)
+  const perCluster = Number.isFinite(requestedPerCluster) && requestedPerCluster > 0
+    ? Math.max(1, Math.floor(requestedPerCluster))
+    : Math.max(DESIGN_PER_CLUSTER_MAX, ...allClusters.map((cluster) => cluster.rows.length), 0)
+  const minPerCluster = Math.max(1, Math.floor(Number(options.minPerCluster) || DESIGN_PER_CLUSTER_MIN))
   const offset = (() => {
     const raw = Math.max(0, Math.floor(Number(options.offset) || 0))
     return raw >= allClusters.length ? 0 : raw

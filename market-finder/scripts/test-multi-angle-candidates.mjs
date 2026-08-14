@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  archivedDemandNeighborhoodCandidates,
   buildMultiAngleCandidatePools,
   candidateEvidenceKey,
   candidateProvenanceKey,
+  deriveMeasuredSeedCandidates,
 } from '../src/multi-angle-candidates.js'
 import * as candidateApi from '../src/multi-angle-candidates.js'
 
@@ -13,6 +15,223 @@ const base = {
   category: { id: 'shirt', searchTerm: 'shirt', tags: ['tee'] },
   timingStatus: 'timely',
 }
+
+test('prioritizes unmeasured same-event Etsy related terms from archived evidence', () => {
+  const candidates = archivedDemandNeighborhoodCandidates([{
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    demandKeywords: [{
+      keyword: 'halloween dentist shirt',
+      etsySearches30d: 87,
+    }, {
+      keyword: 'respiratory therapist halloween shirt',
+      etsySearches30d: 65,
+    }, {
+      keyword: 'dental hygienist halloween shirt',
+      etsySearches30d: 51,
+    }, {
+      keyword: 'seven word halloween dental office team shirt phrase',
+      etsySearches30d: 100,
+    }],
+    drilldownNodes: [{ keyword: 'halloween dentist shirt' }],
+  }, {
+    eventId: 'christmas',
+    categoryId: 'shirt',
+    demandKeywords: [{ keyword: 'christmas dentist shirt', etsySearches30d: 200 }],
+  }], {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+  })
+
+  assert.deepEqual(candidates.map((candidate) => candidate.keyword), [
+    'respiratory therapist halloween shirt',
+    'dental hygienist halloween shirt',
+  ])
+  assert.equal(candidates[0].source, 'archived-etsy-related')
+  assert.ok(candidates[0].priorityScore > candidates[1].priorityScore)
+})
+
+test('puts variants of a verified winner ahead of unrelated high-volume related terms', () => {
+  const candidates = archivedDemandNeighborhoodCandidates([{
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    demandKeywords: [{
+      keyword: 'school psychologist halloween shirt',
+      etsySearches30d: 200,
+    }, {
+      keyword: 'dentist halloween shirt',
+      etsySearches30d: 10,
+    }, {
+      keyword: 'dental office halloween shirt',
+      etsySearches30d: 8,
+    }],
+  }], {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    prioritySeeds: [{
+      keyword: 'halloween dentist shirt',
+      opportunityLabel: 'B',
+      score: 74,
+    }],
+  })
+
+  assert.deepEqual(candidates.slice(0, 2).map((candidate) => candidate.keyword), [
+    'dentist halloween shirt',
+    'dental office halloween shirt',
+  ])
+
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    relatedTerms: [{
+      keyword: 'school psychologist halloween shirt',
+      eventId: 'halloween',
+      categoryId: 'shirt',
+    }],
+    archivedDemandCandidates: candidates,
+  })
+  assert.equal(pools['demand-neighborhood'][0].keyword, 'dentist halloween shirt')
+})
+
+test('derives unseen style and recipient hypotheses from strong verified C seeds without changing their grade', () => {
+  const candidates = deriveMeasuredSeedCandidates({
+    measuredRows: [{
+      keyword: 'halloween carpenter shirt',
+      opportunityLabel: 'C',
+      evidenceState: { status: 'verified' },
+      scoreState: { score: 80 },
+      raw: {
+        researchEventId: 'halloween',
+        researchCategoryId: 'shirt',
+      },
+    }],
+    modifierCandidates: [{
+      axisId: 'style',
+      axisTerm: 'retro',
+    }, {
+      axisId: 'relationship',
+      axisTerm: 'dad',
+    }, {
+      axisId: 'career',
+      axisTerm: 'nurse',
+    }],
+    event: base.event,
+    category: base.category,
+  })
+
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.keyword),
+    [
+      'halloween retro carpenter shirt',
+      'retro carpenter shirt',
+      'halloween dad carpenter shirt',
+      'dad carpenter shirt',
+    ],
+  )
+  assert.equal(candidates.every((candidate) => candidate.source === 'measured-c-recombination'), true)
+  assert.equal(candidates.every((candidate) => candidate.parentOpportunityLabel === 'C'), true)
+  assert.equal(candidates.some((candidate) => candidate.keyword.includes('nurse')), false)
+
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    measuredRows: [{
+      keyword: 'halloween carpenter shirt',
+      opportunityLabel: 'C',
+      evidenceState: { status: 'verified' },
+      scoreState: { score: 80 },
+      raw: {
+        researchEventId: 'halloween',
+        researchCategoryId: 'shirt',
+      },
+    }],
+    modifierCandidates: [{ axisId: 'style', axisTerm: 'retro' }],
+  })
+  assert.deepEqual(pools['recent-sales'].map((candidate) => candidate.keyword), [
+    'halloween retro carpenter shirt',
+  ])
+  assert.deepEqual(pools.evergreen.map((candidate) => candidate.keyword), [
+    'retro carpenter shirt',
+  ])
+
+  const restoredPools = buildMultiAngleCandidatePools({
+    ...base,
+    measuredRows: [{
+      keyword: 'halloween carpenter shirt',
+      opportunityLabel: 'C',
+      evidenceState: { status: 'verified' },
+      scoreState: { score: 80 },
+      raw: {
+        researchEventId: 'halloween',
+        researchCategoryId: 'shirt',
+      },
+    }],
+  })
+  assert.equal(restoredPools['recent-sales'][0].keyword, 'halloween retro carpenter shirt')
+  assert.equal(restoredPools.evergreen[0].keyword, 'retro carpenter shirt')
+})
+
+test('does not turn a long selling-title fragment into an even longer Marketplace probe', () => {
+  const candidates = deriveMeasuredSeedCandidates({
+    measuredRows: [{
+      keyword: 'logo corporate gifting shirt',
+      opportunityLabel: 'C',
+      evidenceState: { status: 'verified' },
+      scoreState: { score: 82 },
+      raw: {
+        researchEventId: 'halloween',
+        researchCategoryId: 'shirt',
+      },
+    }],
+    modifierCandidates: [{ axisId: 'career', axisTerm: 'medical assistant' }],
+    event: base.event,
+    category: base.category,
+  })
+
+  assert.deepEqual(candidates, [])
+})
+
+test('never sends a long listing title to either Etsy or EverBee validation', () => {
+  const pools = buildMultiAngleCandidatePools({
+    ...base,
+    drilldownCandidates: [{
+      keyword: 'halloween 1978 michael myers shirt horror movie shirt john carpenter shirt',
+      eventId: 'halloween',
+      categoryId: 'shirt',
+      source: 'everbee-title',
+    }, {
+      keyword: 'dentist halloween shirt',
+      eventId: 'halloween',
+      categoryId: 'shirt',
+      source: 'everbee-title',
+    }],
+  })
+
+  assert.deepEqual(pools['recent-sales'].map((candidate) => candidate.keyword), [
+    'dentist halloween shirt',
+  ])
+})
+
+test('does not recombine a C seed whose buyer intent was already judged ambiguous', () => {
+  const candidates = deriveMeasuredSeedCandidates({
+    measuredRows: [{
+      keyword: 'halloween tail shirt',
+      opportunityLabel: 'C',
+      evidenceState: { status: 'verified' },
+      scoreState: { score: 79 },
+      everbeeRow: {
+        score: { validation: { ambiguousIntent: true } },
+      },
+      raw: {
+        researchEventId: 'halloween',
+        researchCategoryId: 'shirt',
+      },
+    }],
+    modifierCandidates: [{ axisId: 'career', axisTerm: 'pharmacist' }],
+    event: base.event,
+    category: base.category,
+  })
+
+  assert.deepEqual(candidates, [])
+})
 
 test('creates separate pools from demand, taxonomy, recent sales and adjacent products', () => {
   const pools = buildMultiAngleCandidatePools({

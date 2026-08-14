@@ -8,6 +8,7 @@ import {
   restorePendingEvidenceAutomation,
   restoreInterruptedMarketplaceInsightPlan,
   shouldAutoResumeEvidenceAutomation,
+  shouldAutoResumeReloadCheckpoint,
 } from '../src/persistent-evidence-automation.js'
 
 test('restores an active evidence batch but never restores a stale page timer', () => {
@@ -118,6 +119,25 @@ test('only auto-resumes a running winning-niche search with a real pending batch
   }), false)
   assert.equal(shouldAutoResumeEvidenceAutomation({
     winningNicheAutomation: { status: 'running' },
+    pendingEvidenceAutomation: normalizePendingEvidenceAutomation(),
+  }), false)
+})
+
+test('auto-resumes a reload checkpoint only for the preserved reload batch', () => {
+  const pending = normalizePendingEvidenceAutomation({
+    active: true,
+    targetKeywords: ['ghost book club'],
+  })
+  assert.equal(shouldAutoResumeReloadCheckpoint({
+    exploration: { status: 'paused', pauseReason: 'reload-required' },
+    pendingEvidenceAutomation: pending,
+  }), true)
+  assert.equal(shouldAutoResumeReloadCheckpoint({
+    exploration: { status: 'paused', pauseReason: 'login-required' },
+    pendingEvidenceAutomation: pending,
+  }), false)
+  assert.equal(shouldAutoResumeReloadCheckpoint({
+    exploration: { status: 'paused', pauseReason: 'reload-required' },
     pendingEvidenceAutomation: normalizePendingEvidenceAutomation(),
   }), false)
 })

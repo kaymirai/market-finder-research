@@ -2,8 +2,32 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  classifyMarketplaceAutomationError,
   runMarketplaceOperationWithRateLimitRetry,
 } from '../src/marketplace-rate-limit-retry.js'
+
+test('keeps one broken keyword from stopping the whole Marketplace Insights queue', () => {
+  assert.equal(
+    classifyMarketplaceAutomationError(new Error('Cannot convert undefined or null to object')),
+    'query',
+  )
+  assert.equal(
+    classifyMarketplaceAutomationError(new Error('Marketplace Insightsの数値を読み取れませんでした')),
+    'query',
+  )
+  assert.equal(
+    classifyMarketplaceAutomationError(new Error('ETSY_MARKETPLACE_RATE_LIMITED: Slow down, buddy.')),
+    'global',
+  )
+  assert.equal(
+    classifyMarketplaceAutomationError(new Error('Chrome拡張との接続が切れました')),
+    'global',
+  )
+  assert.equal(
+    classifyMarketplaceAutomationError(new Error('Etsy login required')),
+    'global',
+  )
+})
 
 test('keeps retrying Etsy rate limits until the same operation succeeds', async () => {
   let attempts = 0

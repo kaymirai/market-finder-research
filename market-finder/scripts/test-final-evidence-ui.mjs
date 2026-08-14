@@ -10,7 +10,9 @@ import {
 import * as multiAngleApi from '../src/multi-angle-exploration.js'
 import * as candidateApi from '../src/multi-angle-candidates.js'
 import {
+  normalizePendingEvidenceAutomation,
   restorePendingEvidenceAutomation,
+  shouldAutoResumeReloadCheckpoint,
 } from '../src/persistent-evidence-automation.js'
 
 const [rawHtml, rawApp, rawCss] = await Promise.all([
@@ -32,11 +34,42 @@ test('provides a single final evidence matrix with filters and bulk verification
   assert.match(app, /async function verifyPendingEvidence\(/)
 })
 
-test('keeps eRank as an optional advanced panel inside the final stage', () => {
+test('bounds the rendered exploration history so restored research stays responsive', () => {
+  assert.match(app, /limitFinalEvidenceRows\(nodes,\s*40\)/)
+  assert.match(app, /historyLimit\.rows\.map/)
+  assert.match(app, /historyLimit\.shown/)
+})
+
+test('opens every restored result set on a lightweight stage before rendering the full table', () => {
+  assert.match(app, /const hasSavedResearchRows = state\.researchRows\.length > 0/)
+  assert.match(app, /const hasSavedAutomationWork =/)
+  assert.match(app, /\(hasSavedResearchRows \|\| restoredResultsAwaitingConfirmation\(\) \|\| hasSavedAutomationWork\)/)
+  assert.match(app, /selectResearchStage\(state\.consoleUi,\s*'conditions'\)/)
+})
+
+test('defers derived research metrics until restored results are explicitly accepted', () => {
+  const consoleMetricsBody = app.match(/function researchConsoleMetrics\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const funnelInputBody = app.match(/function researchFunnelInput\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const initBody = app.match(/function init\(\) \{([\s\S]*?)\n\}\n\ninit\(\)/)?.[1] ?? ''
+
+  assert.match(consoleMetricsBody, /if \(restoredResultsAwaitingConfirmation\(\)\)/)
+  assert.match(funnelInputBody, /if \(restoredResultsAwaitingConfirmation\(\)\)/)
+  assert.match(initBody, /const restoredPreview = restoredResultsAwaitingConfirmation\(\)/)
+  assert.match(initBody, /if \(!restoredPreview\)\s*syncResearchMarketHistory\(\)/)
+  assert.match(initBody, /if \(!restoredPreview && state\.marketplaceInsightPlan\?\.items\?\.length > 0 && erankResultRows\(\)\.length > 0\)/)
+})
+
+test('continues after a query-specific Etsy capture error instead of pausing every angle', () => {
+  assert.match(app, /classifyMarketplaceAutomationError\(error\)/)
+  assert.match(app, /item\.terminalError = true/)
+  assert.match(app, /candidate\.status === 'error' && !candidate\.terminalError/)
+})
+
+test('keeps eRank as an optional sidebar destination inside the final stage', () => {
   const finalStage = html.match(/data-research-panel="results"[\s\S]*?(?=<section class="seo-section)/)?.[0] ?? ''
 
-  assert.match(finalStage, /<details[^>]*class="[^"]*erank-advanced-panel[^"]*"/)
-  assert.match(finalStage, /<summary>eRankで追加確認<\/summary>/)
+  assert.match(finalStage, /data-result-view="erank"/)
+  assert.match(html, /data-result-subview="erank"/)
   assert.match(finalStage, /id="candidateErankBtn"/)
   assert.match(finalStage, /id="erankResultsList"/)
   assert.match(app, /elements\.candidateErankBtn\.addEventListener\('click', simpleStartErankResearch\)/)
@@ -80,6 +113,48 @@ test('continues fifty-row verification batches automatically until stopped or co
   assert.match(app, /wasActive\s*&&\s*!data\.state\?\.active[\s\S]*schedulePendingEvidenceAutomation/)
   assert.match(app, /選抜済みを自動検証/)
   assert.match(app, /自動検証を停止/)
+})
+
+test('returns to final results after a standalone retry finishes', () => {
+  const scheduleBody = app.slice(
+    app.indexOf('function schedulePendingEvidenceAutomation('),
+    app.indexOf('\nfunction ', app.indexOf('function schedulePendingEvidenceAutomation(') + 1),
+  )
+  assert.match(scheduleBody, /setActiveResearchStage\('results'\)/)
+})
+
+test('shows every evaluated keyword as a score-ranked primary result list', () => {
+  const rankingIndex = html.indexOf('id="finalRankingPanel"')
+  assert.ok(rankingIndex >= 0, 'the all-result ranking must exist')
+  assert.match(html, /data-result-view="all-results"/)
+  assert.match(html, /id="finalEvidenceTotal"/)
+  assert.match(html, /全評価結果（スコア順）/)
+  assert.match(app, /finalEvidenceRenderLimit:\s*Number\.MAX_SAFE_INTEGER/)
+  assert.match(app, /\(right\.scoreState\.score \?\? -1\) - \(left\.scoreState\.score \?\? -1\)[\s\S]{0,240}statusOrder/)
+  assert.match(app, /<th>順位<\/th><th>キーワード<\/th><th>総合点<\/th>/)
+  assert.match(app, /elements\.finalEvidenceTotal\.textContent = `全\$\{allRows\.length\}件`/)
+})
+
+test('keeps the manual profit simulator in its optional sidebar destination', () => {
+  const simulator = html.match(/<section class="result-subview" data-result-view="profit"[\s\S]*?<\/section>/)?.[0] ?? ''
+  assert.match(simulator, /利益シミュレーション/)
+  assert.match(simulator, /id="profitStrategyPanel"/)
+  assert.match(html, /data-result-subview="profit"[\s\S]*任意/)
+})
+
+test('splits final results into sidebar-owned single views', () => {
+  for (const view of ['shortlist', 'all-results', 'profit', 'erank', 'exploration']) {
+    assert.match(html, new RegExp(`data-result-view="${view}"`))
+  }
+  assert.doesNotMatch(html, /<details id="researchDetails"/)
+  assert.match(app, /resultSubviewUi:\s*createResultSubviewUi\(\)/)
+  assert.match(app, /function setActiveResultSubview\(/)
+  assert.match(app, /function renderResultSubviewNavigation\(/)
+})
+
+test('opens failures as the failed score-ranked result filter', () => {
+  assert.match(app, /activeView === 'failures'[\s\S]{0,400}state\.finalEvidenceFilter = 'failed'/)
+  assert.match(app, /sidebarFailureCount\.textContent/)
 })
 
 test('continues with the next evidence angle after a completed no-winner verification', () => {
@@ -207,7 +282,7 @@ test('persists multi-angle progress and reconstructs legacy pending targets', ()
   assert.match(app, /winningNicheAutomation:\s*legacyRestoreAutomation/)
 })
 
-test('reload waits through extension connection and explicit resume dispatches once', async () => {
+test('reload resumes the saved checkpoint once after the extension reconnects', () => {
   assert.equal(typeof multiAngleApi.pauseMultiAngleWorkAfterReload, 'function')
   const restored = multiAngleApi.pauseMultiAngleWorkAfterReload({
     exploration: createMultiAngleExplorationState({
@@ -232,63 +307,55 @@ test('reload waits through extension connection and explicit resume dispatches o
   const appState = {
     multiAngleExploration: restored.exploration,
     pendingEvidenceAutomation: restored.pendingEvidenceAutomation,
-    restoredAutomationPending: false,
+    restoredAutomationPending: shouldAutoResumeReloadCheckpoint(restored),
     extensionConnected: true,
     timingOverrideConfirmed: true,
+    marketplaceRetryState: {},
   }
-  let dispatchCount = 0
+  let renderCount = 0
+  let scheduleCount = 0
+  let statusText = ''
   const resumePersistedBody = app.slice(
     app.indexOf('function resumePersistedEvidenceAutomationIfReady()'),
     app.indexOf('\nasync function ', app.indexOf('function resumePersistedEvidenceAutomationIfReady()') + 1),
   )
   const resumePersisted = new Function(
     'state',
-    `${resumePersistedBody}; return resumePersistedEvidenceAutomationIfReady`,
-  )(appState)
-
-  assert.equal(resumePersisted(), false)
-  assert.equal(dispatchCount, 0)
-
-  const resumeBody = app.slice(
-    app.indexOf('async function resumeMultiAngleSearch()'),
-    app.indexOf('\nfunction ', app.indexOf('async function resumeMultiAngleSearch()') + 1),
-  )
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-  const resume = await new AsyncFunction(
-    'state',
     'activeResearchContext',
     'classifyProductionWindow',
-    'confirmExtensionConnection',
-    'resumeMultiAngleExploration',
     'setSimpleStatus',
     'renderAll',
-    'persistMarketFinderState',
-    'schedulePendingEvidenceAutomation',
+    'resumeMultiAngleExploration',
+    'normalizePendingEvidenceAutomation',
+    'multiAngleSearchIsRunning',
     'queueNextMultiAngleBatch',
-    `${resumeBody}; return resumeMultiAngleSearch`,
+    'marketplaceRetryDelay',
+    'schedulePendingEvidenceAutomation',
+    `${resumePersistedBody}; return resumePersistedEvidenceAutomationIfReady`,
   )(
     appState,
-    () => ({
-      event: { id: 'halloween' },
-      category: { id: 'shirt' },
-    }),
+    () => ({ event: { id: 'halloween' } }),
     () => ({ status: 'timely' }),
-    async () => true,
+    (value) => { statusText = value },
+    () => { renderCount += 1 },
     multiAngleApi.resumeMultiAngleExploration,
-    () => {},
-    () => {},
-    () => {},
-    () => {
-      dispatchCount += 1
-    },
-    () => {
-      dispatchCount += 1
-      return true
-    },
+    normalizePendingEvidenceAutomation,
+    () => false,
+    () => false,
+    () => 0,
+    () => { scheduleCount += 1 },
   )
 
-  assert.equal(await resume(), true)
-  assert.equal(dispatchCount, 1)
+  assert.equal(appState.restoredAutomationPending, true)
+  assert.equal(resumePersisted(), true)
+  assert.equal(appState.restoredAutomationPending, false)
+  assert.equal(appState.multiAngleExploration.status, 'running')
+  assert.equal(scheduleCount, 1)
+  assert.equal(renderCount, 1)
+  assert.match(statusText, /1/)
+  assert.match(statusText, /spooky nurse shirt/)
+  assert.equal(resumePersisted(), false)
+  assert.equal(scheduleCount, 1)
 })
 
 test('reload ignores an old Marketplace plan before restoring and resumes the current context once', async () => {
@@ -363,7 +430,7 @@ test('reload ignores an old Marketplace plan before restoring and resumes the cu
     restored.pendingEvidenceAutomation.targetKeywords,
     ['christmas nurse shirt'],
   )
-  assert.equal(restored.pendingEvidenceAutomation.active, false)
+  assert.equal(restored.pendingEvidenceAutomation.active, true)
   assert.equal(restored.pendingEvidenceAutomation.scheduled, false)
 
   const compatiblePending = restorePendingEvidenceAutomation({
@@ -863,10 +930,12 @@ test('checks the extension background before starting selected verification', ()
 
   assert.match(app, /async function confirmExtensionConnection\(/)
   assert.match(app, /requestExtension\('GET_MARKET_STATE', \{\}, 5000\)/)
-  assert.match(
+  assert.doesNotMatch(
     confirmBody,
     /if \(state\.extensionConnected && state\.extensionVersion === REQUIRED_EXTENSION_VERSION\) return true/,
   )
+  assert.match(confirmBody, /const extensionState = response\.state/)
+  assert.match(confirmBody, /state\.extensionState = extensionState/)
   assert.match(app, /if \(!await confirmExtensionConnection\(\)\) return/)
   assert.match(app, /data\.action === 'BRIDGE_UNAVAILABLE'/)
   assert.match(app, /if \(String\(data\.version \?\? ''\) !== REQUIRED_EXTENSION_VERSION\)/)
@@ -888,40 +957,63 @@ test('uses the pure evidence state module instead of a second scoring model', ()
   assert.doesNotMatch(app, /function scoreFinalEvidence/)
 })
 
-test('keeps headers and the first three comparison columns visible on desktop', () => {
-  assert.match(css, /\.final-evidence-table-shell\s*\{[^}]*overflow:\s*auto/s)
-  assert.match(css, /\.final-evidence-table\s+thead\s+th\s*\{[^}]*position:\s*sticky/s)
-  assert.match(css, /\.final-evidence-table\s+\.is-sticky-column\s*\{[^}]*position:\s*sticky/s)
-  assert.match(css, /min-width:\s*3500px/)
+test('fits the score-ranked result summary into seven decision columns', () => {
+  for (const header of ['順位', 'キーワード', '総合点', '状態', 'Etsy需要', 'EverBee販売', '操作']) {
+    assert.match(app, new RegExp(`<th>${header}</th>`))
+  }
+  assert.doesNotMatch(app, /<th>Median Revenue<\/th>/)
+  assert.doesNotMatch(css, /min-width:\s*3500px/)
+  assert.match(css, /\.final-evidence-table\s*\{[^}]*table-layout:\s*fixed/s)
 })
-
-test('shows an explicit keyword decision before the comparison table', () => {
+test('owns the decision and design shortlist in the production result view', () => {
   assert.match(html, /id="finalKeywordDecision"/)
+  assert.match(html, /data-result-view="shortlist"/)
   assert.match(app, /function renderFinalKeywordDecision\(/)
   assert.match(app, /deriveFinalKeywordDecision/)
-  assert.match(app, /まず使うキーワード/)
-  assert.match(app, /勝ち候補を探索中/)
+  assert.match(app, /今回作るキーワード/)
+  assert.match(app, /今回の調査では作るキーワードは0件でした/)
+  assert.match(app, /制作に使うのは検証済みのA\/B候補/)
+  const decisionIndex = html.indexOf('id="finalKeywordDecision"')
+  const shortlistIndex = html.indexOf('id="designShortlistPanel"')
+  const evidenceIndex = html.indexOf('id="finalEvidenceTable"')
+  assert.ok(decisionIndex < shortlistIndex)
+  assert.ok(shortlistIndex < evidenceIndex)
 })
 
-test('provides an always-accessible horizontal scrollbar synchronized with the table', () => {
-  assert.match(html, /id="finalEvidenceScrollProxy"/)
-  assert.match(html, /id="finalEvidenceScrollProxyTrack"/)
-  assert.match(css, /\.final-evidence-scroll-proxy\s*\{[^}]*position:\s*sticky/s)
-  assert.match(css, /\.final-evidence-scroll-proxy\s*\{[^}]*overflow-x:\s*auto/s)
-  assert.match(app, /function syncFinalEvidenceScrollbars\(/)
-  assert.match(app, /finalEvidenceScrollProxy\.scrollLeft/)
-  assert.match(app, /finalEvidenceTable\.scrollLeft/)
+test('renders the final keyword summary as selectable text instead of inactive buttons', () => {
+  assert.match(app, /<div class="final-result-keyword\$\{index === 0 \? ' is-primary' : ''\}">/)
+  assert.doesNotMatch(app, /<button type="button" class="final-result-keyword/)
+  assert.match(css, /\.final-result-keyword\s*\{[^}]*cursor:\s*text;[^}]*user-select:\s*text;/s)
 })
 
-test('shows every designed evidence field in the comparison table', () => {
-  for (const header of ['Trend', 'Etsy Conversion', '関連語', 'Median Revenue', '判定理由']) {
-    assert.match(app, new RegExp(`<th>${header}</th>`))
+test('does not advertise failed rows as resumable unverified work', () => {
+  const revealBody = app.match(/function revealFinalEvidenceStatus\(status\) \{([\s\S]*?)\n\}\n{2,}function renderFinalEvidenceMatrix/)?.[1] ?? ''
+  assert.match(app, /decision\.actionablePendingCount/)
+  assert.match(app, /decision\.failedCount/)
+  assert.match(app, /data-final-decision-action="review-failed"/)
+  assert.match(app, /function revealFinalEvidenceStatus\(/)
+  assert.match(revealBody, /setSimpleStatus\(message\)/)
+  assert.match(revealBody, /window\.requestAnimationFrame/)
+  assert.match(revealBody, /selectResultSubview/)
+  assert.match(revealBody, /selectResearchStage\(state\.consoleUi, 'results'\)/)
+  assert.ok(revealBody.indexOf('setSimpleStatus(message)') < revealBody.indexOf('renderResultsTable()'))
+})
+test('uses the page scrollbar instead of a synchronized table scrollbar', () => {
+  assert.doesNotMatch(html, /id="finalEvidenceScrollProxy"/)
+  assert.doesNotMatch(html, /id="finalEvidenceScrollProxyTrack"/)
+  assert.doesNotMatch(app, /function syncFinalEvidenceScrollbars\(/)
+  assert.doesNotMatch(app, /finalEvidenceScrollProxy\.scrollLeft/)
+  assert.match(css, /\.final-evidence-table-shell\s*\{[^}]*overflow:\s*visible/s)
+})
+test('keeps full evidence in the selected-row detail instead of the summary table', () => {
+  assert.match(app, /function renderFinalEvidenceExpandedMetrics\(/)
+  for (const label of ['eRank Search', 'Etsy Listings', 'Etsy Conversion', '関連語', 'EverBee競合', 'Median Revenue', '判定理由']) {
+    assert.match(app, new RegExp(label))
   }
   assert.match(app, /normalized\.etsyRelatedTerms/)
   assert.match(app, /data\.medianMonthlyRevenue/)
   assert.match(app, /decisionReasons/)
 })
-
 test('does not rebuild the large evidence table when its HTML is unchanged', () => {
   assert.match(app, /renderHtmlIfChanged\(elements\.finalEvidenceTable,\s*tableHtml\)/)
   assert.match(app, /renderHtmlIfChanged\(elements\.resultsList,\s*detailHtml\)/)
@@ -952,13 +1044,14 @@ test('exports verification metadata with both result CSVs', () => {
   assert.match(app, /const unknownMetric = row\.status === 'no-data' \? 'Unknown' : ''/)
 })
 
-test('hands the design step a few themes as series, not a flat keyword list', () => {
+test('hands the design step every A/B theme as grouped series, not a flat keyword list', () => {
   assert.match(html, /id="designShortlistPanel"/)
   assert.match(html, /id="downloadDesignShortlistBtn"/)
   assert.match(html, /id="designShortlistMoreBtn"/)
   assert.match(html, /id="designShortlistResetBtn"/)
-  assert.match(html, /次に作る4テーマ/)
-  assert.match(html, /1テーマ＝1シリーズとして5〜8商品/)
+  assert.match(html, /次に作るテーマ（A\/B全件）/)
+  assert.match(html, /テーマ数・ワード数ともに全件/)
+  assert.match(html, /1シリーズの制作目安は5〜8商品/)
   assert.ok(html.indexOf('id="designShortlistPanel"') > html.indexOf('id="finalKeywordDecision"'))
   assert.match(app, /function renderDesignShortlist\(\)/)
   assert.match(app, /function currentDesignClusterPlan\(\)/)
@@ -971,4 +1064,30 @@ test('hands the design step a few themes as series, not a flat keyword list', ()
   assert.match(app, /row\.evidenceState\.status === 'verified'\)\s*\n\s*\.map\(\(row\) => row\.everbeeRow\)/)
   // The full export must stay available so the shortlist is a view, not a filter on the data.
   assert.match(app, /function exportStep4Csv\(\)\s*\{\s*exportResultRowsCsv\(everbeeResultRows\(\)/)
+})
+
+test('shows the full evidence matrix in its dedicated result subview', () => {
+  assert.doesNotMatch(app, /researchDetails:\s*document\.querySelector\('#researchDetails'\)/)
+  const renderBody = app.match(/function renderResultsTable\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(renderBody, /renderFinalEvidenceMatrix\(allRows\)/)
+  assert.match(renderBody, /renderResultSubviewNavigation\(allRows\)/)
+  assert.ok(renderBody.indexOf('renderFinalEvidenceMatrix(allRows)') < renderBody.indexOf('renderNicheExplorationHistory()'))
+  assert.doesNotMatch(app, /elements\.researchDetails\?\.addEventListener\('toggle'/)
+})
+
+test('the final evidence detail button toggles closed without silently selecting the first row again', () => {
+  const clickBody = app.match(/function handleResultListClick\(event\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const renderBody = app.match(/function renderResultsTable\(\) \{([\s\S]*?)\n\}\nfunction formatCrossNichePercent/)?.[1] ?? ''
+
+  assert.match(clickBody, /state\.selectedResultKey = toggleFinalEvidenceSelection\(/)
+  assert.doesNotMatch(renderBody, /state\.selectedResultKey = selection\.selectedKey/)
+})
+test('reconciles every restored winner state against the current final evidence', () => {
+  const start = app.indexOf('function acceptRestoredResearchResults()')
+  const end = app.indexOf('\nfunction ', start + 1)
+  const body = app.slice(start, end)
+  assert.match(body, /state\.multiAngleExploration = reconcileMultiAngleWinners\(\s*state\.multiAngleExploration,\s*finalEvidenceRows\(\),\s*\)/)
+  assert.doesNotMatch(body, /\['exhausted',\s*'winner-found'\]\.includes\(state\.multiAngleExploration\.status\)/)
+  assert.match(body, /\['running',\s*'paused',\s*'stopped'\]\.includes\(state\.multiAngleExploration\.status\)[\s\S]*resumeMultiAngleSearch\(\)\.catch/)
+  assert.doesNotMatch(body, /state\.pendingEvidenceAutomation\.targetKeywords\.length === 0/)
 })
