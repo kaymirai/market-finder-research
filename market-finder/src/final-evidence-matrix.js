@@ -320,15 +320,18 @@ export function shouldExcludeFinalEvidenceRow(input = {}) {
   )
 }
 
-export function pendingEvidenceBatch(rows = [], stage, limit = 50) {
+export function pendingEvidenceBatch(rows = [], stage, limit = 50, options = {}) {
   const targetStage = normalizedStage(stage)
   if (!targetStage) return []
 
   const seen = new Set()
   const maxBatch = Math.max(1, Math.min(50, Math.floor(Number(limit) || 50)))
+  const allowedStatuses = options.includeFailed === true
+    ? new Set(['pending', 'failed'])
+    : new Set(['pending'])
   return rows.filter((row) => {
     if (!isAutomatableEvidenceRow(row)) return false
-    if (row?.evidenceState?.status !== 'pending') return false
+    if (!allowedStatuses.has(row?.evidenceState?.status)) return false
     if (row.evidenceState.nextStage !== targetStage) return false
     const keyword = String(row.keyword ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ')
     if (!keyword || seen.has(keyword)) return false

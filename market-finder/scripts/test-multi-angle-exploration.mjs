@@ -46,6 +46,35 @@ test('auto-starts deep dive only after complete initial evidence is below target
   assert.equal(shouldAutoStartMultiAngleExploration({ ...base, blocked: true }), false)
 })
 
+test('starts a fresh cycle automatically when every angle is exhausted below target', () => {
+  const shouldContinue = multiAngleApi.shouldAutoStartFreshCycle
+
+  assert.equal(shouldContinue?.({
+    reason: 'all-angles-exhausted',
+    winnerCount: 3,
+    targetWinnerCount: 5,
+    blocked: false,
+  }), true)
+  assert.equal(shouldContinue?.({
+    reason: 'all-angles-exhausted',
+    winnerCount: 5,
+    targetWinnerCount: 5,
+    blocked: false,
+  }), false)
+  assert.equal(shouldContinue?.({
+    reason: 'retry-wait',
+    winnerCount: 3,
+    targetWinnerCount: 5,
+    blocked: false,
+  }), false)
+  assert.equal(shouldContinue?.({
+    reason: 'all-angles-exhausted',
+    winnerCount: 3,
+    targetWinnerCount: 5,
+    blocked: true,
+  }), false)
+})
+
 test('reconciliation ignores historical title-like A/B rows', () => {
   const reconciled = reconcileMultiAngleWinners({ targetWinnerCount: 5 }, [{
     keyword: 'halloween running shirt',

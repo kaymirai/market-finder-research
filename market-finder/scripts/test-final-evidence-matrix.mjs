@@ -217,6 +217,27 @@ test('queues only the requested missing stage, without duplicates, up to fifty r
   assert.equal(batch.some((row) => row.keyword === 'teacher shirt'), false)
 })
 
+test('requeues a failed row only when an explicit recovery requests it', () => {
+  const rows = [{
+    keyword: 'appalled princess donut book lover shirt',
+    queryEligibility: { eligible: true },
+    evidenceState: {
+      status: 'failed',
+      nextStage: 'pending-everbee',
+    },
+  }]
+
+  assert.deepEqual(
+    pendingEvidenceBatch(rows, 'pending-everbee').map((row) => row.keyword),
+    [],
+  )
+  assert.deepEqual(
+    pendingEvidenceBatch(rows, 'pending-everbee', 50, { includeFailed: true })
+      .map((row) => row.keyword),
+    ['appalled princess donut book lover shirt'],
+  )
+})
+
 test('keeps query-ineligible audit rows out of pending dispatch and pending counts', () => {
   const rows = [{
     keyword: 'teacher halloween shirt',

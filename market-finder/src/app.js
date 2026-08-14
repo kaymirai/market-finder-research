@@ -157,7 +157,7 @@ import {
   shouldExcludeFinalEvidenceRow,
   toggleFinalEvidenceSelection,
   verificationStageForRow,
-} from './final-evidence-matrix.js?v=20260812-1'
+} from './final-evidence-matrix.js?v=20260815-1'
 import {
   buildNicheDrilldownGraph,
   mergeNicheDrilldownNodes,
@@ -227,11 +227,12 @@ import {
   restoredMultiAngleTargetKeywords,
   resumeExhaustedMultiAngleExploration,
   resumeMultiAngleExploration,
+  shouldAutoStartFreshCycle,
   shouldAutoStartMultiAngleExploration,
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260814-5'
+} from './multi-angle-exploration.js?v=20260815-1'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -294,6 +295,7 @@ let researchTabLeaseOwned = false
 let researchTabLeaseHeartbeatId = 0
 let autoDeepDiveStartPromise = null
 let autoPendingEvidenceStartPromise = null
+let autoFreshCycleTimerId = null
 
 function readResearchTabLease() {
   try {
@@ -6346,8 +6348,9 @@ function pendingEvidenceRows(rows = finalEvidenceRows(), allowedKeywords = []) {
   const batchCandidates = multiAngleSearchIsRunning()
     ? currentMultiAngleBatchCandidates()
     : []
+  const includeFailed = allowedKeywordSet.size > 0 && multiAngleSearchIsRunning()
   return rows.filter((row) => (
-    row.evidenceState.status === 'pending'
+    (row.evidenceState.status === 'pending' || (includeFailed && row.evidenceState.status === 'failed'))
     && isAutomatableEvidenceRow(row)
     && (allowedKeywordSet.size === 0 || allowedKeywordSet.has(normalizePhrase(row.keyword)))
     && (
@@ -6702,6 +6705,16 @@ function scheduleMultiAngleRetry(delayMs) {
   })
 }
 
+function scheduleAutoFreshMultiAngleCycle(delayMs = 1500) {
+  if (autoFreshCycleTimerId !== null) return true
+  autoFreshCycleTimerId = window.setTimeout(async () => {
+    autoFreshCycleTimerId = null
+    if (state.multiAngleExploration.status !== 'exhausted') return
+    await startNewMultiAngleCycle()
+  }, Math.max(0, Number(delayMs) || 0))
+  return true
+}
+
 function queueNextMultiAngleBatch() {
   if (!multiAngleSearchIsRunning()) return false
   invalidateMultiAngleRetrySchedule()
@@ -6720,6 +6733,14 @@ function queueNextMultiAngleBatch() {
       const delayMs = Math.max(250, (nextRetryAt ?? Date.now()) - Date.now())
       setSimpleStatus('通常候補を確認しました。時間切れ候補は再試行時刻になったら続けます。')
       scheduleMultiAngleRetry(delayMs)
+    } else if (shouldAutoStartFreshCycle({
+      reason: result.reason,
+      winnerCount: deriveFinalKeywordDecision(finalEvidenceRows()).recommendedCount,
+      targetWinnerCount: calculateListingResearchTarget(state.listingResearchTargetSettings).targetWinnerCount,
+      blocked: Boolean(extensionBlockReason()),
+    })) {
+      setSimpleStatus('現在の探索角度をすべて確認しました。A/B候補の目標まで、次の探索サイクルを自動で開始します。')
+      scheduleAutoFreshMultiAngleCycle()
     } else {
       setSimpleStatus(result.reason === 'all-angles-exhausted'
         ? 'すべての探索角度を確認しました。'
@@ -7054,6 +7075,14 @@ async function maybeAutoStartMultiAngleDeepDive(source = '') {
   const globallyBlocked = ['service-unavailable', 'login-required', 'rate-limited'].includes(failureCode)
   const timing = classifyProductionWindow(activeResearchContext().event)
   const timingBlocked = ['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed
+  if (shouldAutoStartFreshCycle({
+    reason: state.multiAngleExploration.status === 'exhausted' ? 'all-angles-exhausted' : '',
+    winnerCount: decision.recommendedCount,
+    targetWinnerCount: target.targetWinnerCount,
+    blocked: Boolean(blockedReason) || globallyBlocked || timingBlocked || activeWork,
+  })) {
+    return scheduleAutoFreshMultiAngleCycle()
+  }
   const shouldStart = shouldAutoStartMultiAngleExploration({
     hasResearchRows: rows.length > 0,
     decisionStatus: decision.status,
@@ -7575,8 +7604,13 @@ async function verifyPendingEvidence(requestedStage = '', requestedKeyword = '',
   }
 
   if (batch.length === 0) {
-    if (!stage) stage = stageOrder.find((item) => pendingEvidenceBatch(rows, item, batchLimit).length > 0) ?? ''
-    batch = pendingEvidenceBatch(rows, stage, batchLimit)
+    const batchOptions = {
+      includeFailed: options.automated === true && allowedKeywordSet.size > 0,
+    }
+    if (!stage) stage = stageOrder.find((item) => (
+      pendingEvidenceBatch(rows, item, batchLimit, batchOptions).length > 0
+    )) ?? ''
+    batch = pendingEvidenceBatch(rows, stage, batchLimit, batchOptions)
   }
 
   if (!stage || batch.length === 0) {

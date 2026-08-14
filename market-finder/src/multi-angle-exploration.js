@@ -891,6 +891,14 @@ export function shouldAutoStartMultiAngleExploration(input = {}) {
   return ['ready', 'none', 'retry'].includes(String(input.decisionStatus ?? ''))
 }
 
+export function shouldAutoStartFreshCycle(input = {}) {
+  const targetWinnerCount = Math.max(1, Number(input.targetWinnerCount) || 5)
+  const winnerCount = Math.max(0, Number(input.winnerCount) || 0)
+  return String(input.reason ?? '') === 'all-angles-exhausted'
+    && winnerCount < targetWinnerCount
+    && input.blocked !== true
+}
+
 export function startMultiAngleExploration(state = {}, context = {}, now = '') {
   const restored = createMultiAngleExplorationState(state)
   const updatedAt = timestamp(now)
