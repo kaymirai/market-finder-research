@@ -2,9 +2,49 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  deriveResearchActionFeedback,
   deriveResearchExperienceUi,
+  researchAutomationIdleReason,
   researchPauseRecovery,
 } from '../src/research-experience-ui.js'
+
+test('shows immediate feedback while a research action is starting', () => {
+  assert.deepEqual(deriveResearchActionFeedback({ actionPending: 'automation' }), {
+    mode: 'starting',
+    buttonAction: 'pending',
+    buttonLabel: '探索を開始しています…',
+    buttonDisabled: true,
+    headline: '開始処理中',
+    detail: 'ブラウザ接続と未調査候補を確認しています。',
+  })
+})
+
+test('keeps a visible stop control while research is active', () => {
+  assert.deepEqual(deriveResearchActionFeedback({ isRunning: true }), {
+    mode: 'running',
+    buttonAction: 'stop-active',
+    buttonLabel: '調査を停止（稼働中）',
+    buttonDisabled: false,
+    headline: '調査中',
+    detail: '調査は動いています。進捗件数が順番に更新されます。',
+  })
+})
+
+test('explains why a resume button is shown after research stops', () => {
+  assert.equal(
+    researchAutomationIdleReason('exhausted'),
+    '現在は停止中です。今回の未調査候補は確認済みです。押すと条件を広げて再探索します。',
+  )
+  assert.equal(
+    researchAutomationIdleReason('stopped'),
+    '現在は停止中です。押すと続きから再開します。',
+  )
+  assert.equal(
+    researchAutomationIdleReason('paused'),
+    '現在は一時停止中です。押すと続きから再開します。',
+  )
+  assert.equal(researchAutomationIdleReason('running'), '')
+})
 
 test('shows setup before research has produced rows', () => {
   const ui = deriveResearchExperienceUi({

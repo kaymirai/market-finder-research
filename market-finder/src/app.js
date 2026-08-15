@@ -115,9 +115,11 @@ import {
   stableRenderSignature,
 } from './research-console-ui.js?v=20260814-1'
 import {
+  deriveResearchActionFeedback,
   deriveResearchExperienceUi,
+  researchAutomationIdleReason,
   researchPauseRecovery,
-} from './research-experience-ui.js?v=20260815-1'
+} from './research-experience-ui.js?v=20260815-3'
 import {
   createResultSubviewUi,
   restoreResultSubviewUiFromPayload,
@@ -301,6 +303,7 @@ let autoPendingEvidenceStartPromise = null
 let autoFreshCycleTimerId = null
 let autoFreshCycleStarting = false
 let preserveAccumulatedEvidenceForNextCycle = false
+let researchExperienceActionPending = ''
 
 function readResearchTabLease() {
   try {
@@ -4534,7 +4537,9 @@ function researchExperienceAction(ui, decision, activeWork) {
         action: 'automation',
         label: pauseRecovery.actionLabel || elements.winningNicheAutomationToggle?.textContent || '目標まで探索を再開',
         disabled: Boolean(blockedReason),
-        reason: pauseRecovery.reason || blockedReason,
+        reason: pauseRecovery.reason
+          || blockedReason
+          || researchAutomationIdleReason(state.multiAngleExploration.status),
       }
     }
     return { action: '', label: '', disabled: true }
@@ -4548,7 +4553,9 @@ function researchExperienceAction(ui, decision, activeWork) {
       action: 'automation',
       label: pauseRecovery.actionLabel || `目標まで探索を再開（A/B あと${remainingWinnerCount}件）`,
       disabled: Boolean(blockedReason),
-      reason: pauseRecovery.reason || blockedReason,
+      reason: pauseRecovery.reason
+        || blockedReason
+        || researchAutomationIdleReason(state.multiAngleExploration.status),
     }
   }
   if (decision.status === 'ready' && remainingWinnerCount > 0) {
@@ -4600,15 +4607,28 @@ function renderResearchExperience() {
     winnerCount: decision.recommendedCount,
   })
   const action = researchExperienceAction(ui, decision, activeWork)
+  const actionFeedback = deriveResearchActionFeedback({
+    actionPending: researchExperienceActionPending,
+    isRunning: activeWork,
+  })
+  const renderedAction = actionFeedback
+    ? {
+        action: actionFeedback.buttonAction,
+        label: actionFeedback.buttonLabel,
+        disabled: actionFeedback.buttonDisabled,
+        reason: actionFeedback.detail,
+      }
+    : action
+  const renderedHeadline = actionFeedback?.headline || ui.headline
 
   document.body.dataset.researchPhase = ui.phase
   if (state.consoleUi.activeStage !== ui.stage) {
     state.consoleUi = selectResearchStage(state.consoleUi, ui.stage)
   }
   elements.researchMissionTarget.textContent = ui.targetLabel
-  elements.researchMissionState.textContent = ui.headline
+  elements.researchMissionState.textContent = renderedHeadline
   elements.researchProgressView.hidden = ui.phase !== 'running'
-  elements.researchProgressHeadline.textContent = ui.headline
+  elements.researchProgressHeadline.textContent = renderedHeadline
   elements.researchProgressDescription.textContent = researchExperienceDescription(ui, decision, headerState)
   elements.researchProgressSteps.innerHTML = deriveResearchStageStates(researchConsoleMetrics()).map((stage) => `
     <span class="is-${escapeHtml(stage.status)}${stage.id === ui.stage ? ' is-current' : ''}">
@@ -4616,12 +4636,19 @@ function renderResearchExperience() {
       <strong>${escapeHtml(stage.message)}</strong>
     </span>
   `).join('')
-  elements.researchExperiencePrimaryAction.hidden = !action.action
-  elements.researchExperiencePrimaryAction.disabled = action.disabled
-  elements.researchExperiencePrimaryAction.dataset.experienceAction = action.action
-  elements.researchExperiencePrimaryAction.textContent = action.label
-  elements.researchMissionActionReason.textContent = action.reason || ''
-  elements.researchMissionActionReason.hidden = !action.reason
+  elements.researchExperiencePrimaryAction.hidden = !renderedAction.action
+  elements.researchExperiencePrimaryAction.disabled = renderedAction.disabled
+  elements.researchExperiencePrimaryAction.dataset.experienceAction = renderedAction.action
+  elements.researchExperiencePrimaryAction.textContent = renderedAction.label
+  elements.researchExperiencePrimaryAction.classList.toggle('is-starting', actionFeedback?.mode === 'starting')
+  elements.researchExperiencePrimaryAction.classList.toggle('is-running', actionFeedback?.mode === 'running')
+  if (actionFeedback?.mode === 'starting') {
+    elements.researchExperiencePrimaryAction.setAttribute('aria-busy', 'true')
+  } else {
+    elements.researchExperiencePrimaryAction.removeAttribute('aria-busy')
+  }
+  elements.researchMissionActionReason.textContent = renderedAction.reason || ''
+  elements.researchMissionActionReason.hidden = !renderedAction.reason
 }
 
 function renderMarketTimingGate() {
@@ -11343,43 +11370,59 @@ function bindEvents() {
   elements.listingResearchTargetSaveBtn?.addEventListener('click', saveListingResearchTargetSettings)
   elements.researchExperiencePrimaryAction?.addEventListener('click', async (event) => {
     const action = event.currentTarget.dataset.experienceAction
-    if (action === 'accept-restored') {
-      acceptRestoredResearchResults()
-      return
+    const showsStartingFeedback = ['automation', 'new-cycle', 'verify-pending'].includes(action)
+    if (showsStartingFeedback) {
+      researchExperienceActionPending = action
+      renderResearchExperience()
     }
-    if (action === 'cross-niche') {
-      applyCrossNicheProposal()
-      return
-    }
-    if (action === 'timing-override') {
-      elements.marketTimingOverrideBtn?.click()
-      return
-    }
-    if (action === 'resume-etsy') {
-      setActiveResearchStage('etsy')
-      elements.marketplaceNextBtn?.click()
-      return
-    }
-    if (action === 'automation' || action === 'new-cycle') {
-      const automationAction = elements.winningNicheAutomationToggle?.dataset.winningNicheAction
-      await handleWinningNicheAutomationAction(automationAction)
-        .catch((error) => setSimpleStatus(friendlyExtensionError(error)))
-      return
-    }
-    if (action === 'verify-pending') {
-      await togglePendingEvidenceAutomation().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
-      return
-    }
-    if (action === 'review-pending') {
-      revealFinalEvidenceStatus('pending')
-      return
-    }
-    if (action === 'review-failed') {
-      revealFinalEvidenceStatus('failed')
-      return
-    }
-    if (action === 'export-design') {
-      exportDesignShortlistCsv()
+    try {
+      if (action === 'accept-restored') {
+        acceptRestoredResearchResults()
+        return
+      }
+      if (action === 'cross-niche') {
+        applyCrossNicheProposal()
+        return
+      }
+      if (action === 'timing-override') {
+        elements.marketTimingOverrideBtn?.click()
+        return
+      }
+      if (action === 'resume-etsy') {
+        setActiveResearchStage('etsy')
+        elements.marketplaceNextBtn?.click()
+        return
+      }
+      if (action === 'automation' || action === 'new-cycle') {
+        const automationAction = elements.winningNicheAutomationToggle?.dataset.winningNicheAction
+        await handleWinningNicheAutomationAction(automationAction)
+          .catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+        return
+      }
+      if (action === 'stop-active') {
+        await stopActiveResearch()
+        return
+      }
+      if (action === 'verify-pending') {
+        await togglePendingEvidenceAutomation().catch((error) => setSimpleStatus(friendlyExtensionError(error)))
+        return
+      }
+      if (action === 'review-pending') {
+        revealFinalEvidenceStatus('pending')
+        return
+      }
+      if (action === 'review-failed') {
+        revealFinalEvidenceStatus('failed')
+        return
+      }
+      if (action === 'export-design') {
+        exportDesignShortlistCsv()
+      }
+    } finally {
+      if (researchExperienceActionPending === action) {
+        researchExperienceActionPending = ''
+        renderAll()
+      }
     }
   })
   elements.winningNicheAutomationToggle?.addEventListener('click', async (event) => {

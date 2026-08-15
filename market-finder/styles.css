@@ -5648,6 +5648,54 @@ button.research-table-row {
   width: 100%;
 }
 
+.research-mission-action > .primary-btn.is-starting,
+.research-mission-action > .primary-btn.is-running {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+.research-mission-action > .primary-btn.is-starting::before,
+.research-mission-action > .primary-btn.is-running::before {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+.research-mission-action > .primary-btn.is-starting {
+  cursor: wait;
+  opacity: 1;
+}
+
+.research-mission-action > .primary-btn.is-starting::before {
+  animation: research-status-pulse 1s ease-in-out infinite;
+}
+
+.research-mission-action > .primary-btn.is-running {
+  border-color: var(--rose);
+  background: var(--rose);
+  color: #fff;
+}
+
+.research-mission-action > .primary-btn.is-running::before {
+  border-radius: 2px;
+}
+
+@keyframes research-status-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.72); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .research-mission-action > .primary-btn.is-starting::before {
+    animation: none;
+  }
+}
+
 .research-mission-action > small {
   max-width: 320px;
   color: #9f1239;

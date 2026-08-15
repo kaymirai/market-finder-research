@@ -24,6 +24,39 @@ export function researchPauseRecovery(value = '') {
   return { actionLabel: '', reason: '' }
 }
 
+export function deriveResearchActionFeedback(input = {}) {
+  if (String(input.actionPending ?? '').trim()) {
+    return {
+      mode: 'starting',
+      buttonAction: 'pending',
+      buttonLabel: '探索を開始しています…',
+      buttonDisabled: true,
+      headline: '開始処理中',
+      detail: 'ブラウザ接続と未調査候補を確認しています。',
+    }
+  }
+  if (input.isRunning) {
+    return {
+      mode: 'running',
+      buttonAction: 'stop-active',
+      buttonLabel: '調査を停止（稼働中）',
+      buttonDisabled: false,
+      headline: '調査中',
+      detail: '調査は動いています。進捗件数が順番に更新されます。',
+    }
+  }
+  return null
+}
+
+export function researchAutomationIdleReason(status = '') {
+  if (status === 'exhausted') {
+    return '現在は停止中です。今回の未調査候補は確認済みです。押すと条件を広げて再探索します。'
+  }
+  if (status === 'stopped') return '現在は停止中です。押すと続きから再開します。'
+  if (status === 'paused') return '現在は一時停止中です。押すと続きから再開します。'
+  return ''
+}
+
 export function deriveResearchExperienceUi(input = {}) {
   const decisionStatus = String(input.decisionStatus ?? 'empty')
   const isRunning = Boolean(input.isRunning) || decisionStatus === 'pending'

@@ -47,8 +47,8 @@ test('explains beside the main action why it cannot run', () => {
   assert.match(html, /id="researchMissionActionReason"/)
   assert.match(app, /researchMissionActionReason: document\.querySelector\('#researchMissionActionReason'\)/)
   assert.match(app, /reason: blockedReason/)
-  assert.match(app, /elements\.researchMissionActionReason\.textContent = action\.reason \|\| ''/)
-  assert.match(app, /elements\.researchMissionActionReason\.hidden = !action\.reason/)
+  assert.match(app, /elements\.researchMissionActionReason\.textContent = renderedAction\.reason \|\| ''/)
+  assert.match(app, /elements\.researchMissionActionReason\.hidden = !renderedAction\.reason/)
 })
 test('shows the pending provider instead of the final screen while research is incomplete', () => {
   assert.match(html, /class="research-progress-copy">\s*<small>現在の工程<\/small>/)
