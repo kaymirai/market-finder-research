@@ -20,6 +20,7 @@ import {
   toggleFinalEvidenceSelection,
   verificationStageForRow,
 } from '../src/final-evidence-matrix.js'
+import * as finalEvidenceApi from '../src/final-evidence-matrix.js'
 
 test('closes an expanded evidence row when its detail button is clicked again', () => {
   assert.equal(toggleFinalEvidenceSelection('paramedic|shirt|halloween', 'paramedic|shirt|halloween'), '')
@@ -191,6 +192,11 @@ test('never presents exploration priority as a final opportunity score', () => {
     score: 71,
     explorationPriority: null,
   })
+})
+
+test('formats an unavailable restored score as pending instead of zero', () => {
+  assert.equal(finalEvidenceApi.formatFinalOpportunityScore?.(null), '採点前')
+  assert.equal(finalEvidenceApi.formatFinalOpportunityScore?.(74), '74点')
 })
 
 test('formats zero, Unknown, and uncollected metrics as different values', () => {

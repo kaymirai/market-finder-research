@@ -156,6 +156,16 @@ test('builds a safe snapshot without detailed Etsy, EverBee, or eRank metrics', 
   assert.doesNotMatch(serialized, /99999|88888|77777|66666/)
 })
 
+test('keeps a missing restored Market Finder score unknown instead of converting it to zero', () => {
+  const snapshot = buildVideoSlideSnapshot({
+    rows: [makeRow('halloween teacher shirt', null, 'B')],
+    context: CONTEXT,
+  })
+
+  assert.equal(snapshot.candidates[0].totalScore, null)
+  assert.doesNotMatch(buildVideoSlideOutputs(snapshot, DEFAULT_VIDEO_SLIDE_PROMPT).fullPrompt, /総合点: 0/)
+})
+
 test('creates keyword-first candidate slides without a final next-actions slide', () => {
   const snapshot = buildVideoSlideSnapshot({
     rows: [makeRow('teacher ghost shirt', 82, 'A')],

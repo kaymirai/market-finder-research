@@ -1471,6 +1471,11 @@ export function classifyMarketplaceBuyerQuery(keyword, options = {}) {
   if (hasDuplicateGarmentProductTerms(normalized)) {
     return result(false, 'duplicate-product', 'Query contains duplicate garment product terms')
   }
+  const sellerAssetTerms = ['mockup', 'mockups', 'svg', 'png', 'template', 'digital download', 'digital file']
+  if (String(options.categoryId ?? '').trim() !== 'digital'
+    && sellerAssetTerms.some((term) => phraseHasTerm(normalized, term))) {
+    return result(false, 'seller-asset-intent', 'Query targets a seller asset instead of the selected physical product')
+  }
   if (blockedRiskTerms.length > 0) return result(false, 'blocked-risk', `Excluded risk term: ${blockedRiskTerms.join(', ')}`)
   if (!keywordMatchesCategoryProduct(normalized, options.categoryId)) {
     return result(false, 'category-mismatch', 'Query does not match the selected category product')

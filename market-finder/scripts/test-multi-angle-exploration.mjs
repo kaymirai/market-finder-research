@@ -921,7 +921,7 @@ test('an automatic fresh cycle keeps accumulated evidence visible toward the win
   assert.deepEqual(prepared.candidateCatalog, candidateCatalog)
 })
 
-test('recovers verified A/B winners from the latest matching archive after an automatic reset', () => {
+test('recovers only buyer-facing winners that match the archived event theme', () => {
   const winners = multiAngleApi.archivedMultiAngleWinners([{
     capturedAt: '2026-08-14T17:00:00.000Z',
     context: { eventId: 'breast-cancer-awareness', categoryId: 'shirt' },
@@ -940,8 +940,19 @@ test('recovers verified A/B winners from the latest matching archive after an au
   }, {
     capturedAt: '2026-08-14T18:00:00.000Z',
     context: { eventId: 'breast-cancer-awareness', categoryId: 'shirt' },
+    eventSnapshot: {
+      id: 'breast-cancer-awareness',
+      searchTerm: 'breast cancer awareness',
+      intents: ['breast cancer awareness shirt', 'pink ribbon', 'support squad', 'survivor gift'],
+    },
     multiAngleExploration: {
-      winnerKeywords: ['comfort colors halloween shirt mockup', 'fall book lover shirt', 'ignored c shirt'],
+      winnerKeywords: [
+        'comfort colors halloween shirt mockup',
+        'fall book lover shirt',
+        'breast cancer awareness month shirt',
+        'pink ribbon support squad shirt',
+        'ignored c shirt',
+      ],
       resultLanes: {
         event: [{
           keyword: 'comfort colors halloween shirt mockup',
@@ -949,6 +960,22 @@ test('recovers verified A/B winners from the latest matching archive after an au
           categoryId: 'shirt',
           opportunityLabel: 'B',
           confidenceLabel: 'High',
+          evidenceState: { status: 'verified' },
+        }, {
+          keyword: 'breast cancer awareness month shirt',
+          eventId: 'breast-cancer-awareness',
+          categoryId: 'shirt',
+          opportunityLabel: 'B',
+          confidenceLabel: 'High',
+          score: 74,
+          evidenceState: { status: 'verified' },
+        }, {
+          keyword: 'pink ribbon support squad shirt',
+          eventId: 'breast-cancer-awareness',
+          categoryId: 'shirt',
+          opportunityLabel: 'A',
+          confidenceLabel: 'High',
+          score: 82,
           evidenceState: { status: 'verified' },
         }, {
           keyword: 'fall book lover shirt',
@@ -985,10 +1012,105 @@ test('recovers verified A/B winners from the latest matching archive after an au
     categoryId: 'shirt',
   })
 
-  assert.deepEqual(winners.map((row) => [row.keyword, row.opportunityLabel, row.archivedCapturedAt]), [
-    ['comfort colors halloween shirt mockup', 'B', '2026-08-14T18:00:00.000Z'],
-    ['fall book lover shirt', 'B', '2026-08-14T18:00:00.000Z'],
+  assert.deepEqual(winners.map((row) => [row.keyword, row.opportunityLabel, row.score]), [
+    ['breast cancer awareness month shirt', 'B', 74],
+    ['pink ribbon support squad shirt', 'A', 82],
   ])
+})
+
+test('persists the verified Market Finder score so a future archive can restore it', () => {
+  const started = startMultiAngleExploration({}, {
+    activeEventId: 'halloween',
+    categoryId: 'shirt',
+    targetWinnerCount: 1,
+  })
+  const recorded = recordMultiAngleBatch(started, [{
+    keyword: 'halloween teacher shirt',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'B',
+    confidenceLabel: 'High',
+    scoreState: { type: 'overall', score: 76 },
+    raw: { everbeeCheckedAt: '2026-08-15T10:00:00.000Z' },
+  }])
+
+  assert.equal(recorded.resultLanes.event[0].score, 76)
+  assert.equal(recorded.resultLanes.event[0].checkedAt, '2026-08-15T10:00:00.000Z')
+})
+
+test('does not count an unrelated demand-neighborhood result toward the active event target', () => {
+  const started = startMultiAngleExploration({}, {
+    activeEventId: 'breast-cancer-awareness',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'breast-cancer-awareness',
+      searchTerm: 'breast cancer awareness',
+    },
+    targetWinnerCount: 2,
+  })
+  const recorded = recordMultiAngleBatch(started, [{
+    keyword: 'fall book lover shirt',
+    categoryId: 'shirt',
+    eventId: 'breast-cancer-awareness',
+    angleId: 'demand-neighborhood',
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'B',
+    scoreState: { type: 'overall', score: 76 },
+  }, {
+    keyword: 'breast cancer awareness month shirt',
+    categoryId: 'shirt',
+    eventId: 'breast-cancer-awareness',
+    angleId: 'demand-neighborhood',
+    evidenceState: { status: 'verified' },
+    opportunityLabel: 'B',
+    scoreState: { type: 'overall', score: 74 },
+  }])
+
+  assert.deepEqual(recorded.winnerKeywords, ['breast cancer awareness month shirt'])
+})
+
+test('removes seller-asset and theme-mismatched winners from a saved fixed-event state', () => {
+  const restored = createMultiAngleExplorationState({
+    status: 'running',
+    activeEventId: 'breast-cancer-awareness',
+    categoryId: 'shirt',
+    eventSnapshot: {
+      id: 'breast-cancer-awareness',
+      searchTerm: 'breast cancer awareness',
+    },
+    winnerKeywords: [
+      'comfort colors halloween shirt mockup',
+      'fall book lover shirt',
+      'breast cancer awareness month shirt',
+    ],
+    resultLanes: {
+      event: [{
+        keyword: 'comfort colors halloween shirt mockup',
+        eventId: 'breast-cancer-awareness',
+        categoryId: 'shirt',
+        angleId: 'demand-neighborhood',
+        opportunityLabel: 'B',
+        evidenceState: { status: 'verified' },
+      }, {
+        keyword: 'fall book lover shirt',
+        eventId: 'breast-cancer-awareness',
+        categoryId: 'shirt',
+        angleId: 'demand-neighborhood',
+        opportunityLabel: 'B',
+        evidenceState: { status: 'verified' },
+      }, {
+        keyword: 'breast cancer awareness month shirt',
+        eventId: 'breast-cancer-awareness',
+        categoryId: 'shirt',
+        angleId: 'demand-neighborhood',
+        opportunityLabel: 'B',
+        evidenceState: { status: 'verified' },
+      }],
+    },
+  })
+
+  assert.deepEqual(restored.winnerKeywords, ['breast cancer awareness month shirt'])
 })
 
 test('starts a reused custom-event id with no live evidence from the archived cycle', () => {

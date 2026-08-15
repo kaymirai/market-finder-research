@@ -2,7 +2,7 @@ import {
   MARKET_EVENTS,
   classifyMarketplaceBuyerQuery,
   normalizePhrase,
-} from '../../shared/market-keyword-engine/index.js?v=20260814-4'
+} from '../../shared/market-keyword-engine/index.js?v=20260815-1'
 import { eventSignalTerms } from './event-market-tracks.js?v=20260730-4'
 import { NICHE_AXIS_ORDER, taxonomyTerms } from './niche-taxonomy.js?v=20260726-1'
 
@@ -70,6 +70,38 @@ function phraseContainsTerm(phrase, term) {
   const normalizedPhrase = ` ${normalizePhrase(phrase)} `
   const normalizedTerm = normalizePhrase(term)
   return Boolean(normalizedTerm) && normalizedPhrase.includes(` ${normalizedTerm} `)
+}
+
+const EVENT_INTENT_NOISE = new Set([
+  'shirt', 'shirts', 'tshirt', 'tshirts', 'tee', 'tees', 'gift', 'gifts', 'for',
+])
+
+function eventIntentSignal(intent) {
+  return normalizePhrase(intent)
+    .split(' ')
+    .filter((token) => !EVENT_INTENT_NOISE.has(token))
+    .join(' ')
+}
+
+export function candidateMatchesActiveEventTheme(candidate = {}, context = {}) {
+  const activeEventId = String(context.eventId ?? context.activeEventId ?? '').trim()
+  if (!activeEventId || activeEventId === 'auto-discovery') return true
+  if (candidate.intentTrack === 'event-specific' || candidate.parentTrack === 'event-specific') return true
+
+  const event = context.eventSnapshot
+    ?? context.event
+    ?? candidate.eventSnapshot
+    ?? candidate.event
+    ?? {}
+  const signals = normalizedList([
+    ...eventSignalTerms({ eventId: activeEventId }),
+    event.searchTerm,
+    event.label,
+    event.displayTerm,
+    ...(event.intents ?? []).map(eventIntentSignal),
+  ])
+  if (signals.length === 0) return true
+  return signals.some((term) => phraseContainsTerm(candidate.keyword, term))
 }
 
 function knownOtherEventSignals(activeEventId) {

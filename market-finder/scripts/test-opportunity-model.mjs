@@ -1272,6 +1272,10 @@ test('accepts only buyer-like Marketplace queries with two to six words', () => 
     'title-like',
   )
   assert.equal(classifyMarketplaceBuyerQuery('halloween teacher mug', options).status, 'category-mismatch')
+  assert.equal(
+    classifyMarketplaceBuyerQuery('comfort colors halloween shirt mockup', options).status,
+    'seller-asset-intent',
+  )
 })
 
 test('keeps ordinary risk terms visible but blocks explicit exclusion terms', () => {

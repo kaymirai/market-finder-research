@@ -63,6 +63,9 @@ function list(value, limit = Number.MAX_SAFE_INTEGER) {
 }
 
 function numericScore(row) {
+  if (row?.scoreState?.score === null
+    || row?.scoreState?.score === undefined
+    || String(row.scoreState.score).trim() === '') return -1
   const score = Number(row?.scoreState?.score)
   return Number.isFinite(score) ? score : -1
 }

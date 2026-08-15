@@ -1,10 +1,11 @@
 import {
+  candidateMatchesActiveEventTheme,
   candidateEvidenceKey,
   EXPLORATION_ANGLE_ORDER,
   isEfficientMarketplaceProbe,
   marketplaceInsightPlanForContext,
   normalizeExplorationCandidate,
-} from './multi-angle-candidates.js?v=20260814-5'
+} from './multi-angle-candidates.js?v=20260815-1'
 import { mergeRowsByKey } from './research-performance.js?v=20260720-1'
 
 const VALID_STATUSES = new Set([
@@ -54,6 +55,12 @@ function normalizedKeywordKey(value) {
 function positiveInteger(value, fallback = 1) {
   const number = Number(value)
   return Number.isFinite(number) && number > 0 ? Math.ceil(number) : fallback
+}
+
+function finiteNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
 }
 
 function normalizedEventSnapshot(value, fallbackId = '') {
@@ -177,6 +184,40 @@ function hydrateCandidate(rawCandidate, state, angleId = '') {
   }
 }
 
+function winnerMatchesActiveContext(candidate = {}, state = {}) {
+  if (candidate.resultLane === 'seasonal-reference') return false
+  if (candidate.resultLane !== 'event'
+    || (candidate.angleId && candidate.angleId !== 'demand-neighborhood')) {
+    return true
+  }
+  if (!String(state.eventSnapshot?.searchTerm ?? '').trim()) return true
+  return candidateMatchesActiveEventTheme(candidate, state)
+}
+
+function restoredWinnerKeywords(saved, resultLanes, context) {
+  const winnerKeywords = uniqueStrings(saved?.winnerKeywords)
+  const rows = [
+    ...(resultLanes.event ?? []),
+    ...(resultLanes.evergreen ?? []),
+  ]
+  if (!String(context.eventSnapshot?.searchTerm ?? '').trim() || rows.length === 0) {
+    return winnerKeywords
+  }
+
+  const rowsByKeyword = new Map(rows.map((row) => [normalizedKeywordKey(row.keyword), row]))
+  return winnerKeywords.filter((keyword) => {
+    const row = rowsByKeyword.get(normalizedKeywordKey(keyword))
+    const grade = String(row?.opportunityLabel ?? '').trim().toUpperCase()
+    if (!row || row.evidenceState?.status !== 'verified' || !['A', 'B'].includes(grade)) {
+      return false
+    }
+    const candidate = hydrateCandidate(row, context, row.angleId)
+    return Boolean(candidate)
+      && isEfficientMarketplaceProbe(candidate)
+      && winnerMatchesActiveContext(candidate, context)
+  })
+}
+
 function withProvenance(provenance, candidate, angleId = '') {
   const evidenceKey = candidateEvidenceKey(candidate)
   const angleIds = uniqueStrings([
@@ -219,6 +260,20 @@ function compactResultLaneCandidate(candidate = {}) {
   }
   const evidenceStatus = String(candidate.evidenceState?.status ?? '').trim()
   if (evidenceStatus) compact.evidenceState = { status: evidenceStatus }
+  const score = finiteNumber(
+    candidate.scoreState?.score
+    ?? candidate.score?.score
+    ?? candidate.score,
+  )
+  if (score !== null) compact.score = score
+  const checkedAt = String(
+    candidate.checkedAt
+    ?? candidate.raw?.everbeeCheckedAt
+    ?? candidate.raw?.etsyCheckedAt
+    ?? candidate.raw?.checkedAt
+    ?? '',
+  ).trim()
+  if (checkedAt) compact.checkedAt = checkedAt
   const event = normalizedEventSnapshot(
     candidate.event ?? candidate.eventSnapshot,
     normalized.eventId,
@@ -291,6 +346,13 @@ export function createMultiAngleExplorationState(saved = {}) {
   const emptyAngles = uniqueStrings(
     Array.isArray(saved?.emptyAngles) ? saved.emptyAngles : saved?.exhaustedAngles,
   ).filter((angleId) => !attemptedAngles.includes(angleId))
+  const resultLanes = normalizedResultLanes(saved?.resultLanes)
+  const targetWinnerCount = positiveInteger(saved?.targetWinnerCount, 1)
+  const winnerKeywords = restoredWinnerKeywords(saved, resultLanes, {
+    activeEventId,
+    categoryId,
+    eventSnapshot,
+  })
   return {
     status,
     activeEventId,
@@ -306,9 +368,9 @@ export function createMultiAngleExplorationState(saved = {}) {
     currentBatchCandidates,
     retryQueue: normalizedRetryQueue(saved?.retryQueue),
     failedEvidenceKeys: uniqueStrings(saved?.failedEvidenceKeys),
-    winnerKeywords: uniqueStrings(saved?.winnerKeywords),
-    targetWinnerCount: positiveInteger(saved?.targetWinnerCount, 1),
-    resultLanes: normalizedResultLanes(saved?.resultLanes),
+    winnerKeywords,
+    targetWinnerCount,
+    resultLanes,
     attemptedAngles,
     completedAngles,
     emptyAngles,
@@ -422,15 +484,36 @@ export function archivedMultiAngleWinners(records = [], context = {}) {
     const winners = new Set(winnerKeywords.map(normalizedKeywordKey).filter(Boolean))
     const lanes = archive.multiAngleExploration.resultLanes ?? {}
     const rows = [
-      ...(Array.isArray(lanes.event) ? lanes.event : []),
-      ...(Array.isArray(lanes.evergreen) ? lanes.evergreen : []),
+      ...(Array.isArray(lanes.event) ? lanes.event : [])
+        .map((row) => ({ ...row, resultLane: row.resultLane || 'event' })),
+      ...(Array.isArray(lanes.evergreen) ? lanes.evergreen : [])
+        .map((row) => ({ ...row, resultLane: row.resultLane || 'evergreen' })),
     ]
     const seen = new Set()
+    const archiveContext = {
+      ...context,
+      eventSnapshot: context.eventSnapshot
+        ?? context.event
+        ?? archive.eventSnapshot
+        ?? archive.context?.eventSnapshot
+        ?? null,
+    }
     const recovered = rows.filter((row) => {
       const keyword = normalizedKeywordKey(row?.keyword)
       const label = String(row?.opportunityLabel ?? '').trim().toUpperCase()
       if (!keyword || seen.has(keyword) || !winners.has(keyword)) return false
       if (!['A', 'B'].includes(label) || row?.evidenceState?.status !== 'verified') return false
+      if (!isEfficientMarketplaceProbe({
+        ...row,
+        keyword,
+        eventId,
+        categoryId,
+      })) return false
+      if (!winnerMatchesActiveContext(row, {
+        activeEventId: eventId,
+        categoryId,
+        eventSnapshot: archiveContext.eventSnapshot,
+      })) return false
       seen.add(keyword)
       return true
     }).map((row) => ({
@@ -1251,7 +1334,8 @@ export function recordMultiAngleBatch(state = {}, rows = [], now = '') {
     ).trim().toUpperCase()
     if (candidate.resultLane !== 'seasonal-reference'
       && row?.evidenceState?.status === 'verified'
-      && ['A', 'B'].includes(grade)) {
+      && ['A', 'B'].includes(grade)
+      && winnerMatchesActiveContext(candidate, current)) {
       winners.push(candidate.keyword)
     }
   }
@@ -1311,6 +1395,10 @@ export function reconcileMultiAngleWinners(state = {}, rows = [], now = '') {
         && resultLane !== 'seasonal-reference'
         && row?.queryEligibility?.eligible !== false
         && ['A', 'B'].includes(grade)
+        && winnerMatchesActiveContext(
+          hydrateCandidate(row, current, row?.angleId ?? current.currentAngleId) ?? {},
+          current,
+        )
     })
     .map((row) => row.keyword))
   const winnerKeywords = uniqueStrings(winners)

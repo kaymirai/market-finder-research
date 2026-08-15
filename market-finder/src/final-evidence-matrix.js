@@ -272,6 +272,11 @@ export function deriveFinalScoreState(input = {}) {
   }
 }
 
+export function formatFinalOpportunityScore(value) {
+  const score = finiteNumber(value)
+  return score === null ? '採点前' : `${Math.round(score)}点`
+}
+
 export function formatEvidenceMetric(value, options = {}) {
   const hasValue = value !== null && value !== undefined && String(value).trim() !== ''
   if (hasValue) {

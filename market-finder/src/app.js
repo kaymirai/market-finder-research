@@ -40,7 +40,7 @@ import {
   learnedBuyerIntentSignals,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260814-4'
+} from '../../shared/market-keyword-engine/index.js?v=20260815-1'
 import {
   acceptRestoredCheckpoint,
   buildMarketplaceCaptureRows,
@@ -133,7 +133,7 @@ import {
   buildVideoSlideSnapshot,
   videoSlideFilename,
   videoSlideSnapshotFingerprint,
-} from './video-slide-prompts.js?v=20260815-4'
+} from './video-slide-prompts.js?v=20260815-5'
 import {
   createVideoSlideUiState,
   formatVideoSlideNarrationForCopy,
@@ -149,6 +149,7 @@ import {
   deriveFinalScoreState,
   finalEvidenceFilterMatches,
   formatEvidenceMetric,
+  formatFinalOpportunityScore,
   hasCollectedEvidence,
   isAutomatableEvidenceRow,
   isEtsyEvidenceChecked,
@@ -160,7 +161,7 @@ import {
   shouldExcludeFinalEvidenceRow,
   toggleFinalEvidenceSelection,
   verificationStageForRow,
-} from './final-evidence-matrix.js?v=20260815-1'
+} from './final-evidence-matrix.js?v=20260815-2'
 import {
   buildNicheDrilldownGraph,
   mergeNicheDrilldownNodes,
@@ -202,7 +203,7 @@ import {
   marketplaceRelatedTermCandidates,
   normalizeArchivedSupplyListings,
   restoreSavedSeasonalReferences,
-} from './multi-angle-candidates.js?v=20260814-5'
+} from './multi-angle-candidates.js?v=20260815-1'
 import {
   archivedMultiAngleWinners,
   backfillMultiAngleResearchSnapshots,
@@ -237,7 +238,7 @@ import {
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260815-8'
+} from './multi-angle-exploration.js?v=20260815-9'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -5528,7 +5529,9 @@ function finalEvidenceRows() {
         opportunityLabel: candidate.opportunityLabel,
         confidenceLabel: candidate.confidenceLabel,
         archivedCapturedAt: candidate.archivedCapturedAt,
+        checkedAt: candidate.checkedAt,
       }
+      const candidateStage = candidate.candidateStage || 'opportunity'
       return {
         keyword: candidate.keyword,
         key: researchRowContextKey(raw),
@@ -5541,11 +5544,17 @@ function finalEvidenceRows() {
           excludedRiskTerms: elements.riskInput.value,
         }),
         evidenceState: { status: 'verified', nextStage: 'done' },
-        scoreState: { type: 'overall', score: null },
+        scoreState: deriveFinalScoreState({
+          candidateStage,
+          score: candidate.score,
+          explorationPriority: candidate.priorityScore,
+        }),
         opportunityLabel: candidate.opportunityLabel,
         confidenceLabel: candidate.confidenceLabel,
-        candidateStage: candidate.candidateStage || 'opportunity',
-        decisionReasons: ['保存済みの検証済みA/B候補'],
+        candidateStage,
+        decisionReasons: [candidate.score === null || candidate.score === undefined
+          ? '保存済みA/B候補（総合点は再確認が必要）'
+          : '保存済みの検証済みA/B候補'],
         erankChecked: true,
         etsyChecked: true,
         everbeeChecked: true,
@@ -5658,7 +5667,7 @@ function renderFinalEvidenceMatrixRow(row, index) {
     ? '<small class="final-evidence-query-exclusion">商品タイトル相当・検索語対象外</small>'
     : ''
   const selected = row.key === state.selectedResultKey
-  const score = Number.isFinite(Number(row.scoreState.score)) ? `${Math.round(Number(row.scoreState.score))}点` : '採点前'
+  const score = formatFinalOpportunityScore(row.scoreState.score)
   return `
     <tr class="final-evidence-row is-${escapeHtml(row.evidenceState.status)}${selected ? ' is-selected' : ''}">
       <td class="final-evidence-rank">${index + 1}</td>
@@ -6677,6 +6686,7 @@ function currentMultiAnglePools() {
     archivedDemandCandidates: archivedDemandNeighborhoodCandidates(learningRecords, {
       eventId: event.id,
       categoryId: category.id,
+      eventSnapshot: event,
       prioritySeeds: measuredRows
         .filter((row) => row.evidenceState.status === 'verified')
         .filter((row) => (
