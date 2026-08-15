@@ -5,6 +5,7 @@ import {
   deriveResearchActionFeedback,
   deriveResearchExperienceUi,
   researchAutomationIdleReason,
+  researchAutomationRecovery,
   researchPauseRecovery,
 } from '../src/research-experience-ui.js'
 
@@ -44,6 +45,21 @@ test('explains why a resume button is shown after research stops', () => {
     '現在は一時停止中です。押すと続きから再開します。',
   )
   assert.equal(researchAutomationIdleReason('running'), '')
+})
+
+test('routes an exhausted search to editable conditions instead of retrying the same empty pool', () => {
+  assert.deepEqual(researchAutomationRecovery('exhausted'), {
+    action: 'adjust-conditions',
+    label: '条件を広げる（新規候補0件）',
+    reason: [
+      'この条件で使える未調査候補は0件です。',
+      '対処法：',
+      '① イベントを「イベントなし」にする',
+      '② 買い手・職業・趣味・ペットを追加する',
+      '③ 商品カテゴリーを変える',
+    ].join('\n'),
+  })
+  assert.equal(researchAutomationRecovery('stopped'), null)
 })
 
 test('shows setup before research has produced rows', () => {

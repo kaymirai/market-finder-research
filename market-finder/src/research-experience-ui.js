@@ -57,6 +57,21 @@ export function researchAutomationIdleReason(status = '') {
   return ''
 }
 
+export function researchAutomationRecovery(status = '') {
+  if (status !== 'exhausted') return null
+  return {
+    action: 'adjust-conditions',
+    label: '条件を広げる（新規候補0件）',
+    reason: [
+      'この条件で使える未調査候補は0件です。',
+      '対処法：',
+      '① イベントを「イベントなし」にする',
+      '② 買い手・職業・趣味・ペットを追加する',
+      '③ 商品カテゴリーを変える',
+    ].join('\n'),
+  }
+}
+
 export function deriveResearchExperienceUi(input = {}) {
   const decisionStatus = String(input.decisionStatus ?? 'empty')
   const isRunning = Boolean(input.isRunning) || decisionStatus === 'pending'

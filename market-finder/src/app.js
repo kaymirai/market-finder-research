@@ -118,8 +118,9 @@ import {
   deriveResearchActionFeedback,
   deriveResearchExperienceUi,
   researchAutomationIdleReason,
+  researchAutomationRecovery,
   researchPauseRecovery,
-} from './research-experience-ui.js?v=20260815-3'
+} from './research-experience-ui.js?v=20260815-4'
 import {
   createResultSubviewUi,
   restoreResultSubviewUiFromPayload,
@@ -4482,6 +4483,9 @@ function researchExperienceAction(ui, decision, activeWork) {
   const targetWinnerCount = calculateListingResearchTarget(state.listingResearchTargetSettings).targetWinnerCount
   const remainingWinnerCount = Math.max(0, targetWinnerCount - decision.recommendedCount)
   const pauseRecovery = researchPauseRecovery(state.multiAngleExploration.pauseReason)
+  const automationRecovery = remainingWinnerCount > 0
+    ? researchAutomationRecovery(state.multiAngleExploration.status)
+    : null
   if (!elements.acceptRestoredResultsBtn?.hidden) {
     const restoredCount = state.finalEvidenceCount || state.researchRows.length
     return {
@@ -4505,6 +4509,12 @@ function researchExperienceAction(ui, decision, activeWork) {
       action: 'automation',
       label: 'この条件で調査を始める',
       disabled: Boolean(elements.winningNicheAutomationToggle?.disabled),
+    }
+  }
+  if (automationRecovery) {
+    return {
+      ...automationRecovery,
+      disabled: false,
     }
   }
   if (ui.phase === 'running') {
@@ -11391,6 +11401,15 @@ function bindEvents() {
       if (action === 'resume-etsy') {
         setActiveResearchStage('etsy')
         elements.marketplaceNextBtn?.click()
+        return
+      }
+      if (action === 'adjust-conditions') {
+        setActiveResearchStage('conditions')
+        setSimpleStatus('条件を1つ以上広げてください。変更後は「この条件で調査を始める」から新しい候補を探します。')
+        window.requestAnimationFrame(() => {
+          elements.eventSelect?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          elements.eventSelect?.focus()
+        })
         return
       }
       if (action === 'automation' || action === 'new-cycle') {

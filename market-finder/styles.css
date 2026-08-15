@@ -5699,9 +5699,10 @@ button.research-table-row {
 .research-mission-action > small {
   max-width: 320px;
   color: #9f1239;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
-  line-height: 1.4;
+  line-height: 1.55;
+  white-space: pre-line;
 }
 
 .research-progress-view {
