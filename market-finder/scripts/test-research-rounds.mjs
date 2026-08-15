@@ -34,6 +34,51 @@ test('creates and restores initial and cross-niche round references', () => {
   assert.deepEqual(createResearchRoundsState(JSON.parse(JSON.stringify(state))), state)
 })
 
+test('preserves a third cross-niche research round', () => {
+  const state = startResearchRound(createResearchRoundsState(), {
+    type: 'cross-niche',
+    depth: 3,
+    candidateKeywords: ['second grade special education teacher shirt'],
+  })
+
+  assert.equal(state.rounds[0].id, 'cross-niche-3')
+  assert.equal(state.rounds[0].depth, 3)
+  assert.equal(state.activeRoundId, 'cross-niche-3')
+})
+
+test('preserves unbounded continuous niche rounds without overwriting earlier batches', () => {
+  let state = startResearchRound(createResearchRoundsState(), {
+    type: 'continuous-niche',
+    depth: 4,
+    candidateKeywords: ['halloween teacher shirt'],
+  })
+  state = startResearchRound(state, {
+    type: 'continuous-niche',
+    depth: 5,
+    candidateKeywords: ['halloween reading shirt'],
+  })
+  const restored = createResearchRoundsState(JSON.parse(JSON.stringify(state)))
+
+  assert.deepEqual(restored.rounds.map(({ id, type, depth }) => ({ id, type, depth })), [
+    { id: 'continuous-niche-4', type: 'continuous-niche', depth: 4 },
+    { id: 'continuous-niche-5', type: 'continuous-niche', depth: 5 },
+  ])
+  assert.equal(restored.activeRoundId, 'continuous-niche-5')
+})
+
+test('preserves the exploration angle for a multi-angle round', () => {
+  const state = startResearchRound(createResearchRoundsState(), {
+    type: 'multi-angle',
+    angleId: 'recent-sales',
+    depth: 1,
+    status: 'pending-everbee',
+    candidateKeywords: ['ghost gardener shirt'],
+  })
+
+  assert.equal(state.rounds[0].angleId, 'recent-sales')
+  assert.equal(createResearchRoundsState(JSON.parse(JSON.stringify(state))).rounds[0].angleId, 'recent-sales')
+})
+
 test('updates one round without replacing earlier round results', () => {
   let state = startResearchRound(createResearchRoundsState(), {
     type: 'initial',

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import * as marketKeywordEngine from '../../shared/market-keyword-engine/index.js'
 import {
   aggregateEverbeeListings,
   buildCrossNicheDrilldown,
@@ -10,20 +11,37 @@ import {
   buildMarketplaceInsightPlan,
   buildKeywordClusterKey,
   buildSeoPlanFromBuckets,
+  BUYER_IDENTITY_LIBRARY,
+  analyzeMarketplaceVocabulary,
+  analyzeModifierUsage,
+  classifyBuyerIdentitySpecificity,
+  classifyBuyerIdentity,
   clusterKeywordCandidates,
+  measuredModifierPhrases,
+  detectRiskTerms,
+  suggestBuyerIdentities,
   classifyBuyerIntentPhrase,
   classifyKeywordBucket,
+  classifyCandidateKeyword,
+  classifyMarketplaceBuyerQuery,
+  deriveBuyerSearchQueriesFromTitle,
   explainEverbeeScore,
   generateBroadEventCandidates,
+  generateBuyerIntentCandidates,
+  generateBuyerIdentityDrilldownCandidates,
   getBroadEventDiscoveryProfile,
   getMarketTiming,
   getMarketplaceInsightFreshness,
   getSourceFreshness,
   generateKeywordCandidates,
   keywordMatchesCategoryProduct,
+  learnedBuyerIntentSignals,
   mergeMarketplaceInsightRelatedMetrics,
   rankMarketplaceInsightRelatedCandidates,
+  newcomerAccess,
   scoreEverbeeResult,
+  recommendProductRoute,
+  selectAutomaticBuyerIdentities,
   selectMarketplaceInsightFollowUpBatch,
   evaluateMarketplaceInsightResearchStop,
   parseBroadMarketListings,
@@ -182,12 +200,17 @@ test('round-trips EverBee product rows through the research CSV parser', () => {
 
 test('round-trips cross-niche lineage through the research CSV parser', () => {
   const rows = parseEverbeeRows([
-    'Keyword,Cross Niche Parent,Cross Niche Depth',
-    'book club cat shirt,cat shirt,1',
+    'Keyword,Niche Root,Cross Niche Parent,Cross Niche Depth,Specificity Axis,Drilldown Sources JSON,Drilldown Verdict,Stop Reason,Parent Comparison JSON',
+    'book club cat shirt,cat shirt,cat shirt,1,hobby,"[""etsy-related""]",watch,,"{""competitionReduction"":0.8}"',
   ].join('\n'))
 
+  assert.equal(rows[0].crossNicheRoot, 'cat shirt')
   assert.equal(rows[0].crossNicheParent, 'cat shirt')
   assert.equal(rows[0].crossNicheDepth, '1')
+  assert.equal(rows[0].specificityAxis, 'hobby')
+  assert.deepEqual(rows[0].crossNicheSources, ['etsy-related'])
+  assert.equal(rows[0].crossNicheVerdict, 'watch')
+  assert.deepEqual(rows[0].crossNicheComparison, { competitionReduction: 0.8 })
 })
 
 test('round-trips event market track metadata through the research CSV parser', () => {
@@ -243,6 +266,21 @@ test('does not use one old bestseller as a cross-niche exploration parent', () =
     productRows: [
       { title: 'Vintage Cat Shirt', monthlySales: 300, listingAgeMonths: 48 },
     ],
+  }], SCORE_OPTIONS)
+
+  assert.equal(parents.length, 0)
+})
+
+test('does not reopen a buyer drilldown branch already stopped by parent-child evidence', () => {
+  const parents = selectCrossNicheParentMarkets([{
+    keyword: 'tiny demand teacher shirt',
+    crossNicheParent: 'teacher shirt',
+    crossNicheDepth: 1,
+    crossNicheVerdict: 'weak-demand',
+    listingsAnalyzed: 12000,
+    sellingListingCount: 4,
+    totalVisibleMonthlySales: 30,
+    medianMonthlySales: 5,
   }], SCORE_OPTIONS)
 
   assert.equal(parents.length, 0)
@@ -343,7 +381,31 @@ test('builds cross-niche candidates from repeated recent selling-title phrases',
   assert.equal(candidate.verdict, 'needs-research')
 })
 
-test('filters title noise and one-off names from cross-niche candidates', () => {
+test('adds evidence-first buyer identity drilldowns to cross-niche research', () => {
+  const drilldown = buildCrossNicheDrilldown([{
+    keyword: 'teacher shirt',
+    listingsAnalyzed: 50000,
+    etsyRelatedTerms: 'art teacher shirt',
+    productRows: [
+      { title: 'Special Education Teacher Shirt', monthlySales: 12, listingAgeMonths: 6 },
+      { title: 'Retro Special Education Teacher Shirt', monthlySales: 8, listingAgeMonths: 8 },
+    ],
+  }], SCORE_OPTIONS)
+
+  const measured = drilldown.candidates.find((row) => row.keyword === 'special education teacher shirt')
+  assert.ok(measured)
+  assert.equal(measured.rootKeyword, 'teacher shirt')
+  assert.equal(measured.specificityAxis, 'specialty')
+  assert.ok(measured.sources.includes('everbee-title'))
+
+  const related = drilldown.candidates.find((row) => row.keyword === 'art teacher shirt')
+  assert.ok(related)
+  assert.equal(related.specificityAxis, 'subject')
+  assert.ok(related.sources.includes('etsy-related'))
+  assert.equal(drilldown.researchCandidates.length <= 8, true)
+})
+
+test('filters title noise and one-off title phrases from cross-niche candidates', () => {
   const drilldown = buildCrossNicheDrilldown([{
     keyword: 'teacher shirt',
     listingsAnalyzed: 50000,
@@ -389,11 +451,11 @@ test('rejects generic gift intent without a specific recipient', () => {
   assert.equal(classifyBuyerIntentPhrase('teacher retirement gift shirt').eligible, true)
 })
 
-test('stops cross-niche expansion at depth two', () => {
+test('stops cross-niche expansion at depth three', () => {
   const drilldown = buildCrossNicheDrilldown([{
     keyword: 'book club cat shirt',
     crossNicheParent: 'cat shirt',
-    crossNicheDepth: 2,
+    crossNicheDepth: 3,
     listingsAnalyzed: 20000,
     productRows: [
       { title: 'Teacher Book Club Cat Shirt', monthlySales: 25, listingAgeMonths: 5 },
@@ -409,6 +471,7 @@ test('returns evergreen timing for auto discovery', () => {
   const result = getMarketTiming({ id: 'auto-discovery', month: 0 }, '2026-07-19T00:00:00Z')
 
   assert.equal(result.label, 'evergreen')
+  assert.equal(result.status, 'evergreen')
   assert.equal(result.weeksUntil, null)
 })
 
@@ -416,6 +479,8 @@ test('labels an event 12 weeks away as prepare', () => {
   const result = getMarketTiming({ id: 'halloween', month: 10 }, '2026-08-08T00:00:00Z')
 
   assert.equal(result.label, 'prepare')
+  assert.equal(result.status, 'early')
+  assert.equal(result.priority, 2)
   assert.ok(result.weeksUntil >= 10 && result.weeksUntil <= 16)
 })
 
@@ -481,6 +546,15 @@ test('builds a balanced Christmas shortlist with seasonal signals and evergreen 
   assert.ok(adjacent.length / rows.length >= 0.4)
 })
 
+test('keeps ornament available as a Christmas motif for shirt research', () => {
+  const classification = classifyCandidateKeyword('ornament shirt', {
+    eventId: 'christmas',
+    categoryId: 'shirt',
+  })
+
+  assert.equal(classification.action, 'candidate')
+})
+
 test('creates a unique 15-query Etsy plan split 5 discovery, 7 validation, 3 reserve', () => {
   const candidates = generateBroadEventCandidates({
     eventId: 'halloween',
@@ -501,12 +575,14 @@ test('creates a unique 15-query Etsy plan split 5 discovery, 7 validation, 3 res
   assert.ok(plan.items.every((item) => item.status === 'planned'))
 })
 
-test('creates 20 Etsy Plus seeds and reserves 40 adaptive follow-up slots', () => {
-  const candidates = generateBroadEventCandidates({
-    eventId: 'halloween',
-    categoryId: 'shirt',
-    limit: 80,
-  })
+test('queues every generated candidate in Etsy Plus before reserving adaptive follow-up slots', () => {
+  const candidates = Array.from({ length: 80 }, (_, index) => ({
+    keyword: `halloween candidate ${index + 1} shirt`,
+    query: `halloween candidate ${index + 1} shirt`,
+    discoveryLane: ['motif', 'moment', 'audience', 'aesthetic', 'adjacent'][index % 5],
+    queryStrategy: 'direct',
+    opportunityIndex: 100 - index,
+  }))
   const plan = buildMarketplaceInsightPlan(candidates, {
     eventId: 'halloween',
     categoryId: 'shirt',
@@ -514,14 +590,15 @@ test('creates 20 Etsy Plus seeds and reserves 40 adaptive follow-up slots', () =
   })
 
   assert.equal(plan.mode, 'plus')
-  assert.equal(plan.quota, 60)
-  assert.equal(plan.seedQuota, 20)
+  assert.equal(plan.quota, 120)
+  assert.equal(plan.seedQuota, 80)
   assert.equal(plan.followUpCapacity, 40)
-  assert.equal(plan.items.length, 20)
-  assert.equal(new Set(plan.items.map((item) => item.query)).size, 20)
-  assert.equal(plan.counts.discovery, 6)
-  assert.equal(plan.counts.validation, 11)
-  assert.equal(plan.counts.reserve, 3)
+  assert.equal(plan.items.length, 80)
+  assert.equal(new Set(plan.items.map((item) => item.query)).size, 80)
+  assert.deepEqual(
+    new Set(plan.items.map((item) => item.query)),
+    new Set(candidates.map((candidate) => candidate.keyword)),
+  )
   assert.equal(plan.counts.followup, 0)
   assert.deepEqual(plan.candidatePool, [])
   assert.equal(plan.followUpBatchSize, 5)
@@ -695,7 +772,7 @@ test('stops adaptive research only after its minimum depth or a depleted pool', 
   }).reason, 'candidate-pool-depleted')
 })
 
-test('releases one five-query follow-up batch after ten completed seeds', () => {
+test('releases one five-query follow-up batch after every direct candidate is completed', () => {
   const candidates = generateBroadEventCandidates({
     eventId: 'halloween',
     categoryId: 'shirt',
@@ -716,7 +793,7 @@ test('releases one five-query follow-up batch after ten completed seeds', () => 
   })
   plan.items = plan.items.map((item, index) => ({
     ...item,
-    status: index < 10 ? 'completed' : 'planned',
+    status: 'completed',
   }))
 
   const advanced = advanceMarketplaceInsightResearch(plan, {
@@ -728,10 +805,10 @@ test('releases one five-query follow-up batch after ten completed seeds', () => 
   assert.equal(advanced.plan.researchRound, 1)
   assert.equal(advanced.plan.releasedFollowUpCount, 5)
   assert.equal(advanced.plan.items.filter((item) => item.stage === 'followup').length, 5)
-  assert.equal(advanced.plan.items[10].stage, 'followup')
+  assert.equal(advanced.plan.items[plan.seedQuota].stage, 'followup')
 })
 
-test('does not release follow-ups before ten seeds or while a batch is unfinished', () => {
+test('does not release follow-ups before every direct candidate or while a batch is unfinished', () => {
   const candidates = generateBroadEventCandidates({ eventId: 'halloween', categoryId: 'shirt', limit: 40 })
   const metrics = Array.from({ length: 10 }, (_, index) => ({
     keyword: `halloween gated niche ${index + 1} shirt`,
@@ -743,13 +820,16 @@ test('does not release follow-ups before ten seeds or while a batch is unfinishe
   const plan = buildMarketplaceInsightPlan(candidates, {
     eventId: 'halloween', categoryId: 'shirt', marketplaceInsightMode: 'plus', relatedKeywordMetrics: metrics,
   })
-  plan.items = plan.items.map((item, index) => ({ ...item, status: index < 9 ? 'completed' : 'planned' }))
+  plan.items = plan.items.map((item, index) => ({
+    ...item,
+    status: index < plan.seedQuota - 1 ? 'completed' : 'planned',
+  }))
 
   const tooEarly = advanceMarketplaceInsightResearch(plan, { eventId: 'halloween', categoryId: 'shirt' })
   assert.equal(tooEarly.addedCount, 0)
-  assert.equal(tooEarly.reason, 'need-more-seeds')
+  assert.equal(tooEarly.reason, 'continue-seeds')
 
-  plan.items = plan.items.map((item, index) => ({ ...item, status: index < 10 ? 'completed' : 'planned' }))
+  plan.items = plan.items.map((item) => ({ ...item, status: 'completed' }))
   const firstBatch = advanceMarketplaceInsightResearch(plan, { eventId: 'halloween', categoryId: 'shirt' })
   const blocked = advanceMarketplaceInsightResearch(firstBatch.plan, { eventId: 'halloween', categoryId: 'shirt' })
   assert.equal(blocked.addedCount, 0)
@@ -805,15 +885,15 @@ test('does not award A to a single hit', () => {
   assert.ok(result.gateReasons.includes('sales-concentration'))
 })
 
-test('awards A only to fresh broad sales evidence', () => {
+test('keeps fresh eRank and broad sales evidence at B until Etsy official evidence is added', () => {
   const result = scoreEverbeeResult(freshRow(), SCORE_OPTIONS)
 
-  assert.equal(result.opportunityLabel, 'A')
+  assert.equal(result.opportunityLabel, 'B')
   assert.equal(result.confidenceLabel, 'High')
   assert.equal(result.candidateStage, 'opportunity')
 })
 
-test('allows fresh official Etsy demand and supply to replace eRank for A', () => {
+test('keeps fresh Etsy official and EverBee evidence at B when eRank demand is unavailable', () => {
   const result = scoreEverbeeResult(freshRow({
     erankSearchVolume: '',
     erankClicks: '',
@@ -825,9 +905,77 @@ test('allows fresh official Etsy demand and supply to replace eRank for A', () =
     etsyCheckedAt: '2026-07-15T00:00:00Z',
   }), SCORE_OPTIONS)
 
-  assert.equal(result.opportunityLabel, 'A')
+  assert.equal(result.opportunityLabel, 'B')
   assert.equal(result.confidenceLabel, 'High')
   assert.equal(result.validation.hasEtsyMarketplaceData, true)
+})
+
+test('scores an exact Etsy zero together with EverBee median sales and eRank demand', () => {
+  const moderate = scoreEverbeeResult(freshRow({
+    keyword: 'halloween nurse shirt',
+    etsySearches30d: 0,
+    etsyListings: 0,
+    etsyCheckedAt: '2026-07-15T00:00:00Z',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+  const strong = scoreEverbeeResult(freshRow({
+    keyword: 'halloween nurse shirt',
+    listingsAnalyzed: 500,
+    erankSearchVolume: 1500,
+    erankClicks: 500,
+    medianMonthlySales: 12,
+    etsySearches30d: 0,
+    etsyListings: 0,
+    etsyCheckedAt: '2026-07-15T00:00:00Z',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+
+  assert.equal(moderate.opportunityLabel, 'B')
+  assert.equal(strong.opportunityLabel, 'A')
+  assert.ok(strong.score > moderate.score)
+  assert.equal(moderate.parts.etsyOfficialDemandScore, 0)
+  assert.equal(moderate.parts.everbeeMedianSalesScore, 6)
+  assert.equal(moderate.parts.erankDemandScore, 8)
+  assert.equal(moderate.parts.coreDemandSalesScore, 14)
+  assert.equal(strong.parts.coreDemandSalesScore, 20)
+  assert.equal(moderate.gateReasons.includes('etsy-zero-demand'), false)
+  assert.equal(moderate.validation.etsyZeroDemandSignal, true)
+  assert.match(moderate.exclusionReasons.join(' '), /Etsy公式需要 0点/)
+})
+
+test('explains the three-part score used for the A and B decision', () => {
+  const score = scoreEverbeeResult(freshRow({
+    keyword: 'halloween nurse shirt',
+    etsySearches30d: 0,
+    etsyListings: 0,
+    etsyCheckedAt: '2026-07-15T00:00:00Z',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+  const evidence = explainEverbeeScore(score)
+  const formula = evidence.rows.find((row) => row.key === 'coreDemandSalesScore')
+
+  assert.equal(formula?.metric, 'A/B判定ポイント')
+  assert.equal(formula?.value, 'Etsy公式 0点 + EverBee中央値 6点 + eRank需要 8点 = 14/30点')
+  assert.match(formula?.detail ?? '', /A 18点以上 \/ B 8点以上/)
+})
+
+test('excludes an unrecognized one-word modifier from A and B until its meaning is verified', () => {
+  const result = scoreEverbeeResult(freshRow({
+    keyword: 'halloween tail shirt',
+    etsySearches30d: '',
+    etsyListings: '',
+    etsyCheckedAt: '',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+
+  assert.equal(result.opportunityLabel, 'C')
+  assert.ok(result.gateReasons.includes('ambiguous-intent'))
+  assert.equal(result.validation.ambiguousIntent, true)
+})
+
+test('keeps a recognized one-word occupation eligible for A or B', () => {
+  const result = scoreEverbeeResult(freshRow({
+    keyword: 'halloween nurse shirt',
+  }), { ...SCORE_OPTIONS, eventId: 'halloween' })
+
+  assert.ok(['A', 'B'].includes(result.opportunityLabel))
+  assert.equal(result.validation.ambiguousIntent, false)
 })
 
 test('does not combine demand and supply passes from different sources', () => {
@@ -845,7 +993,7 @@ test('does not combine demand and supply passes from different sources', () => {
   assert.notEqual(result.validation.demandSupplySource, 'mixed')
 })
 
-test('explains fresh eRank evidence when Etsy official data is stale', () => {
+test('keeps fresh eRank and EverBee evidence at B when Etsy official data is stale', () => {
   const result = scoreEverbeeResult(freshRow({
     etsySearches30d: 500,
     etsyListings: 3000,
@@ -853,9 +1001,9 @@ test('explains fresh eRank evidence when Etsy official data is stale', () => {
   }), SCORE_OPTIONS)
   const evidence = explainEverbeeScore(result)
 
-  assert.equal(result.opportunityLabel, 'A')
+  assert.equal(result.opportunityLabel, 'B')
   assert.equal(result.validation.demandSupplySource, 'erank')
-  assert.equal(evidence.rows[0].metric, 'eRank需要')
+  assert.equal(evidence.rows.find((row) => row.key === 'demand')?.metric, 'eRank需要')
 })
 
 test('awards B to a fresh moderate Etsy niche with two selling listings', () => {
@@ -921,7 +1069,10 @@ test('penalizes conflicting Etsy and eRank demand bands without hiding a B test'
   assert.equal(conflicting.opportunityLabel, 'B')
   assert.equal(conflicting.validation.demandSourceConflict, true)
   assert.equal(conflicting.parts.sourceConsistencyScore, -5)
-  assert.equal(conflicting.score, etsyOnly.score - 5)
+  assert.equal(
+    conflicting.score,
+    etsyOnly.score + conflicting.parts.erankDemandScore + conflicting.parts.sourceConsistencyScore,
+  )
   assert.match(conflicting.exclusionReasons.join(' '), /需要の強さが不一致/)
 })
 
@@ -1102,6 +1253,167 @@ test('recognizes category product aliases before productizing trend seeds', () =
   assert.equal(keywordMatchesCategoryProduct('cozy crewneck', 'shirt'), false)
 })
 
+test('recognizes singular and plural ornament product aliases', () => {
+  assert.equal(keywordMatchesCategoryProduct('family christmas ornament', 'ornament'), true)
+  assert.equal(keywordMatchesCategoryProduct('memorial ornaments', 'ornament'), true)
+  assert.equal(keywordMatchesCategoryProduct('family christmas ornament', 'shirt'), false)
+})
+
+test('accepts only buyer-like Marketplace queries with two to six words', () => {
+  const options = { eventId: 'halloween', categoryId: 'shirt' }
+  assert.equal(classifyMarketplaceBuyerQuery('teacher shirt', options).eligible, true)
+  assert.equal(
+    classifyMarketplaceBuyerQuery('retro biology teacher halloween gift shirt', options).eligible,
+    true,
+  )
+  assert.equal(classifyMarketplaceBuyerQuery('shirt', options).status, 'too-short')
+  assert.equal(
+    classifyMarketplaceBuyerQuery('retro biology teacher halloween gift for school shirt', options).status,
+    'title-like',
+  )
+  assert.equal(classifyMarketplaceBuyerQuery('halloween teacher mug', options).status, 'category-mismatch')
+})
+
+test('keeps ordinary risk terms visible but blocks explicit exclusion terms', () => {
+  const review = classifyMarketplaceBuyerQuery('disney halloween shirt', {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+  })
+  const blocked = classifyMarketplaceBuyerQuery('star wars shirt', {
+    eventId: 'halloween',
+    categoryId: 'shirt',
+    excludedRiskTerms: ['star wars'],
+  })
+
+  assert.equal(review.eligible, true)
+  assert.ok(review.riskTerms.length > 0)
+  assert.equal(blocked.eligible, false)
+  assert.equal(blocked.status, 'blocked-risk')
+})
+
+test('rejects repeated query phrases and duplicate garment product terms at the shared gate', () => {
+  const options = { eventId: 'halloween', categoryId: 'shirt' }
+  const repeatedWord = classifyMarketplaceBuyerQuery('teacher shirt shirt', options)
+  const repeatedPhrase = classifyMarketplaceBuyerQuery('teacher shirt teacher shirt', options)
+  const duplicateProduct = classifyMarketplaceBuyerQuery('teacher shirt tee', options)
+
+  assert.equal(repeatedWord.eligible, false)
+  assert.equal(repeatedWord.status, 'repeated-phrase')
+  assert.match(repeatedWord.reason, /repeat/i)
+  assert.equal(repeatedPhrase.status, 'repeated-phrase')
+  assert.equal(duplicateProduct.eligible, false)
+  assert.equal(duplicateProduct.status, 'duplicate-product')
+  assert.match(duplicateProduct.reason, /product/i)
+})
+
+test('derives category-matched buyer queries from a long listing title', () => {
+  const queries = deriveBuyerSearchQueriesFromTitle(
+    'breast cancer awareness bat shirt retro science illustration goth nature lover biology halloween teacher gift',
+    { eventId: 'halloween', categoryId: 'shirt', limit: 8 },
+  )
+
+  assert.ok(queries.length > 0)
+  assert.ok(queries.every((query) => query.split(' ').length >= 2 && query.split(' ').length <= 6))
+  assert.ok(queries.every((query) => keywordMatchesCategoryProduct(query, 'shirt')))
+  assert.equal(queries.includes('breast cancer awareness bat shirt retro science illustration goth nature lover biology halloween teacher gift'), false)
+  assert.ok(queries.some((query) => /biology|teacher|science/.test(query)))
+})
+
+test('productizes a short Trend seed before applying the buyer-query gate', () => {
+  assert.deepEqual(
+    deriveBuyerSearchQueriesFromTitle('biology teacher', {
+      eventId: 'halloween',
+      categoryId: 'shirt',
+      limit: 8,
+    }),
+    ['biology teacher shirt', 'halloween biology teacher shirt'],
+  )
+})
+
+test('recommends personalization only with fresh Etsy and two selling EverBee proofs', () => {
+  const row = freshRow({
+    keyword: 'family christmas ornament',
+    etsyRelatedTerms: ['personalized family christmas ornament'],
+    etsyCheckedAt: '2026-07-17T00:00:00Z',
+    productRows: [
+      { title: 'Custom Name Family Ornament', monthlySales: 8 },
+      { title: 'Personalized Family Christmas Ornament', monthlySales: 3 },
+    ],
+  })
+  const options = { categoryId: 'ornament', now: '2026-07-19T00:00:00Z' }
+  const score = scoreEverbeeResult(row, options)
+  const recommendation = marketKeywordEngine.recommendPersonalization?.(row, score, options)
+
+  assert.deepEqual(recommendation, {
+    decision: 'recommend',
+    label: '名入れ方針: 推奨',
+    summary: 'Etsy関連語 1件 / EverBee販売商品 2件。通常版より名入れ版を優先してテスト。',
+    etsyEvidenceCount: 1,
+    everbeeEvidenceCount: 2,
+  })
+})
+
+test('keeps incomplete, stale, or inferred-only personalization evidence out of recommend', () => {
+  const options = { categoryId: 'ornament', now: '2026-07-19T00:00:00Z' }
+  const rows = [
+    {
+      expected: 'verify',
+      row: freshRow({
+        keyword: 'family christmas ornament',
+        etsyRelatedTerms: ['custom family ornament'],
+        etsyCheckedAt: '2026-07-17T00:00:00Z',
+      }),
+    },
+    {
+      expected: 'verify',
+      row: freshRow({
+        keyword: 'family christmas ornament',
+        productRows: [{ title: 'Custom Name Family Ornament', monthlySales: 5 }],
+      }),
+    },
+    {
+      expected: 'not-recommended',
+      row: freshRow({ keyword: 'personalized family ornament' }),
+    },
+    {
+      expected: 'not-recommended',
+      row: freshRow({
+        keyword: 'family christmas ornament',
+        etsyRelatedTerms: ['personalized family ornament'],
+        etsyCheckedAt: '2026-04-01T00:00:00Z',
+        everbeeCheckedAt: '2026-04-01T00:00:00Z',
+        productRows: [
+          { title: 'Custom Name Family Ornament', monthlySales: 8 },
+          { title: 'Personalized Family Christmas Ornament', monthlySales: 3 },
+        ],
+      }),
+    },
+  ]
+
+  for (const { row, expected } of rows) {
+    const score = scoreEverbeeResult(row, options)
+    const recommendation = marketKeywordEngine.recommendPersonalization?.(row, score, options)
+    assert.equal(recommendation?.decision, expected)
+  }
+})
+
+test('marks a risk-blocked ornament as outside personalization evaluation', () => {
+  const row = freshRow({ keyword: 'disney family ornament' })
+  const options = { categoryId: 'ornament', customRiskTerms: 'disney', now: '2026-07-19T00:00:00Z' }
+  const score = scoreEverbeeResult(row, options)
+  const recommendation = marketKeywordEngine.recommendPersonalization?.(row, score, options)
+
+  assert.equal(recommendation?.decision, 'blocked')
+})
+
+test('routes an ornament result to Ornament', () => {
+  const row = freshRow({ keyword: 'family christmas ornament' })
+  const options = { categoryId: 'ornament', now: '2026-07-19T00:00:00Z' }
+  const score = scoreEverbeeResult(row, options)
+
+  assert.equal(recommendProductRoute(row, score, options).primary.id, 'ornament')
+})
+
 test('does not combine conflicting recipient roles without a matching intent', () => {
   const rows = generateKeywordCandidates({
     eventId: 'auto-discovery',
@@ -1138,4 +1450,596 @@ test('builds no more than 13 valid tags and omits year-only tags', () => {
   assert.ok(plan.tags.length <= 13)
   assert.equal(plan.tags.every((tag) => tag.length <= 20), true)
   assert.equal(plan.tags.some((tag) => /^\d{4}$/.test(tag)), false)
+})
+
+test('builds keywords from who the buyer is, not from an event name', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'school librarian\ntrail crew volunteer',
+    categoryId: 'shirt',
+  })
+  const keywords = rows.map((row) => row.keyword)
+
+  assert.ok(rows.length > 0)
+  // The identity has to survive into the phrase, or the axis added nothing.
+  assert.ok(keywords.some((keyword) => keyword.includes('school librarian')))
+  assert.ok(keywords.some((keyword) => keyword.includes('trail crew volunteer')))
+  assert.ok(keywords.every((keyword) => keyword.includes('shirt')))
+  // Life transition, personalization and style axes each reach the output.
+  assert.ok(keywords.some((keyword) => keyword.startsWith('retirement ')))
+  assert.ok(keywords.some((keyword) => keyword.startsWith('personalized ')))
+  assert.ok(keywords.some((keyword) => keyword.startsWith('retro ')))
+  rows.forEach((row) => {
+    assert.equal(row.queryStrategy, 'buyer-intent')
+    assert.equal(row.categoryId, 'shirt')
+  })
+})
+
+test('takes the niche vocabulary from the user and folds in their own actions', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'handbell choir member',
+    categoryId: 'shirt',
+    actions: ['bell ringing', 'sunday practice'],
+  })
+  const keywords = rows.map((row) => row.keyword)
+
+  assert.ok(keywords.some((keyword) => keyword.includes('bell ringing')))
+  assert.ok(keywords.some((keyword) => keyword.includes('sunday practice')))
+})
+
+test('supplies the identity vocabulary so the operator never starts from a blank field', () => {
+  const suggestions = suggestBuyerIdentities({ limit: 12 })
+  assert.equal(suggestions.length, 12)
+
+  // A single press has to span different worlds. Twelve nurse specialties would be a
+  // worse answer than four occupations, a family role and a hobby, because the operator
+  // picks by what they understand, not by what scores highest.
+  assert.ok(new Set(suggestions.map((item) => item.groupId)).size >= 6)
+  assert.ok(new Set(suggestions.map((item) => item.axis)).size >= 3)
+  suggestions.forEach((item) => {
+    assert.equal(item.phrase, item.phrase.trim().toLowerCase())
+    assert.ok(item.groupLabel.length > 0)
+  })
+
+  // Every suggestion must survive the generator it feeds, or the chip is a dead end.
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: suggestions.map((item) => item.phrase).join('\n'),
+    categoryId: 'shirt',
+  })
+  assert.ok(rows.length > 0)
+  assert.equal(rows.every((row) => row.status === 'ready'), true)
+})
+
+test('automatically selects buyer identities from current-market evidence', () => {
+  const analysis = analyzeMarketplaceVocabulary([
+    {
+      runId: 'halloween-1',
+      capturedAt: '2026-07-20T00:00:00Z',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+      identitySeeds: ['nicu nurse'],
+      demandKeywords: [
+        { keyword: 'nicu nurse halloween shirt', etsySearches30d: 140 },
+      ],
+      supplyListings: [
+        { title: 'NICU Nurse Halloween Shirt', monthlySales: 12 },
+        { title: 'Retro NICU Nurse Halloween Shirt', monthlySales: 8 },
+      ],
+    },
+    {
+      runId: 'christmas-1',
+      capturedAt: '2026-07-21T00:00:00Z',
+      categoryId: 'shirt',
+      eventId: 'christmas',
+      identitySeeds: ['book club member'],
+      demandKeywords: [
+        { keyword: 'book club member christmas shirt', etsySearches30d: 4000 },
+      ],
+      supplyListings: [
+        { title: 'Book Club Member Christmas Shirt', monthlySales: 80 },
+        { title: 'Book Club Member Holiday Shirt', monthlySales: 60 },
+      ],
+    },
+    {
+      runId: 'halloween-stale',
+      capturedAt: '2026-01-01T00:00:00Z',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+      identitySeeds: ['school librarian'],
+      demandKeywords: [
+        { keyword: 'school librarian halloween shirt', etsySearches30d: 9000 },
+      ],
+    },
+  ], {
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    now: '2026-07-26T00:00:00Z',
+  })
+
+  const selected = selectAutomaticBuyerIdentities(analysis, { limit: 3 })
+  assert.deepEqual(selected.map((item) => item.phrase), ['nicu nurse'])
+  assert.equal(selected[0].source, 'learned')
+})
+
+test('classifies broad buyer markets separately from specific buyer niches', () => {
+  assert.deepEqual(
+    classifyBuyerIdentitySpecificity('teacher'),
+    { level: 'parent', rootIdentity: 'teacher', axis: '', axes: [] },
+  )
+  assert.deepEqual(
+    classifyBuyerIdentitySpecificity('special education teacher'),
+    { level: 'leaf', rootIdentity: 'teacher', axis: 'specialty', axes: ['specialty'] },
+  )
+  assert.deepEqual(
+    classifyBuyerIdentitySpecificity('cat mom'),
+    { level: 'parent', rootIdentity: 'cat mom', axis: '', axes: [] },
+  )
+  assert.deepEqual(
+    classifyBuyerIdentitySpecificity('maine coon mom'),
+    { level: 'leaf', rootIdentity: 'cat mom', axis: 'breed', axes: ['breed'] },
+  )
+})
+
+test('generates measured buyer drilldowns before safe dictionary fallbacks', () => {
+  const candidates = generateBuyerIdentityDrilldownCandidates({
+    parentKeyword: 'halloween teacher shirt',
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    depth: 1,
+    etsyRelatedTerms: [
+      'halloween art teacher shirt',
+      'halloween disney teacher shirt',
+    ],
+    productRows: [
+      { title: 'Special Education Teacher Halloween Shirt', monthlySales: 12, listingAgeMonths: 6 },
+      { title: 'Retro Special Education Teacher Halloween Shirt', monthlySales: 8, listingAgeMonths: 9 },
+    ],
+    savedPhrases: ['second grade teacher'],
+    customRiskTerms: 'disney',
+    limit: 8,
+  })
+
+  assert.ok(candidates.length > 0)
+  assert.equal(candidates[0].sources.includes('everbee-title'), true)
+  assert.ok(candidates.some((candidate) => candidate.keyword === 'halloween art teacher shirt'))
+  assert.ok(candidates.some((candidate) => candidate.keyword === 'halloween second grade teacher shirt'))
+  assert.equal(candidates.some((candidate) => candidate.keyword.includes('disney')), false)
+  assert.equal(candidates.every((candidate) => candidate.parentKeyword === 'halloween teacher shirt'), true)
+  assert.equal(candidates.every((candidate) => candidate.rootKeyword === 'halloween teacher shirt'), true)
+  assert.equal(candidates.every((candidate) => candidate.depth === 1), true)
+})
+
+test('adds a different specificity axis on the next buyer drilldown depth', () => {
+  const candidates = generateBuyerIdentityDrilldownCandidates({
+    parentKeyword: 'special education teacher shirt',
+    rootKeyword: 'teacher shirt',
+    categoryId: 'shirt',
+    depth: 2,
+    limit: 8,
+  })
+
+  assert.ok(candidates.some((candidate) => candidate.keyword === 'special education second grade teacher shirt'))
+  assert.equal(candidates.some((candidate) => candidate.keyword.includes('art special education teacher')), false)
+  assert.equal(candidates.every((candidate) => candidate.depth === 2), true)
+  assert.equal(candidates.every((candidate) => candidate.rootKeyword === 'teacher shirt'), true)
+})
+
+test('falls back to safe starter identities when there is no measured buyer history', () => {
+  const selected = selectAutomaticBuyerIdentities({ rows: [] }, { limit: 3 })
+
+  assert.equal(selected.length, 3)
+  assert.equal(selected.every((item) => item.source === 'starter'), true)
+  assert.equal(selected.every((item) => detectRiskTerms(item.phrase, []).length === 0), true)
+})
+
+test('rotates and excludes so pressing for more never repeats what is already chosen', () => {
+  const first = suggestBuyerIdentities({ limit: 12 })
+  const second = suggestBuyerIdentities({ limit: 12, offset: 1 })
+  const firstPhrases = first.map((item) => item.phrase)
+  assert.notDeepEqual(firstPhrases, second.map((item) => item.phrase))
+
+  const afterPicking = suggestBuyerIdentities({ limit: 12, exclude: firstPhrases.join('\n') })
+  assert.equal(afterPicking.some((item) => firstPhrases.includes(item.phrase)), false)
+
+  const occupationsOnly = suggestBuyerIdentities({ limit: 8, axis: 'occupation' })
+  assert.equal(occupationsOnly.every((item) => item.axis === 'occupation'), true)
+})
+
+test('keeps the suggested vocabulary specific enough to be worth entering', () => {
+  const phrases = BUYER_IDENTITY_LIBRARY.flatMap((group) => group.phrases)
+  assert.ok(phrases.length >= 200)
+  assert.equal(new Set(phrases).size, phrases.length, 'a phrase must not appear in two groups')
+
+  // Head terms every seller already targets are the reason this lane stopped working.
+  // The catalog exists to carry the qualifier, so the bare terms must not be in it.
+  for (const bare of ['nurse', 'teacher', 'mom', 'dad', 'runner', 'gift']) {
+    assert.equal(phrases.includes(bare), false, `${bare} is too broad to suggest`)
+  }
+  assert.equal(phrases.every((phrase) => phrase === phrase.trim().toLowerCase()), true)
+  // A suggestion carrying someone else's trademark would be a defect we shipped, not a
+  // risk the operator chose to take.
+  assert.equal(phrases.every((phrase) => detectRiskTerms(phrase, []).length === 0), true)
+})
+
+test('counts modifiers from collected evidence instead of trusting the built-in list', () => {
+  const analysis = analyzeModifierUsage({
+    demandKeywords: [
+      { keyword: 'halloween nurse shirt', etsySearches30d: 1300 },
+      { keyword: 'nicu nurse halloween shirt', etsySearches30d: 97 },
+      { keyword: 'halloween teacher shirt personalized', etsySearches30d: 7 },
+    ],
+    supplyListings: [
+      { title: 'Personalized Halloween Nurse Sweatshirt', monthlySales: 5 },
+      { title: 'Retro Ghost Reading Books Sweatshirt', monthlySales: 14 },
+      { title: 'NICU Nurse Halloween Sweatshirt', monthlySales: 4 },
+    ],
+  }, { categoryId: 'shirt', eventId: 'halloween' })
+
+  const byModifier = new Map(analysis.rows.map((row) => [row.modifier, row]))
+  // The product and the event are the core, not modifiers.
+  assert.equal(byModifier.has('shirt'), false)
+  assert.equal(byModifier.has('halloween'), false)
+
+  // "personalized" is exactly the word the built-in list asserts, so it has to be countable
+  // rather than filtered out as a generic word before the count happens.
+  assert.equal(byModifier.get('personalized').demandKeywords, 1)
+  assert.equal(byModifier.get('personalized').supplyListings, 1)
+  // A word neither side used must be absent, not present with a zero.
+  assert.equal(byModifier.has('gift'), false)
+  assert.equal(byModifier.has('from'), false)
+
+  // Demand without supply is the opportunity the table exists to expose.
+  assert.equal(byModifier.get('teacher').demandOnly, true)
+  assert.ok(byModifier.get('teacher').gap > 0)
+  assert.equal(byModifier.get('nicu').demandOnly, false)
+})
+
+test('learns people reasons scenes and modifiers without mixing their roles', () => {
+  const analysis = analyzeMarketplaceVocabulary([
+    {
+      version: 2,
+      runId: 'halloween-nicu-1',
+      capturedAt: '2026-07-20T00:00:00Z',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+      identitySeeds: ['nicu nurse'],
+      demandKeywords: [
+        { keyword: 'funny nicu nurse halloween shirt', etsySearches30d: 320 },
+        { keyword: 'nicu nurse appreciation shirt', etsySearches30d: 140 },
+      ],
+      supplyListings: [
+        { title: 'Personalized NICU Nurse Halloween Shirt', monthlySales: 12 },
+      ],
+    },
+  ], {
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    identitySeeds: 'nicu nurse',
+    now: '2026-07-26T00:00:00Z',
+  })
+
+  const signals = new Map(analysis.rows.map((row) => [`${row.signalType}:${row.phrase}`, row]))
+  assert.equal(signals.get('person:nicu nurse').demandKeywords, 2)
+  assert.equal(signals.get('reason:appreciation').demandKeywords, 1)
+  assert.equal(signals.get('scene:halloween').demandKeywords, 1)
+  assert.equal(signals.get('modifier:funny').demandKeywords, 1)
+  assert.equal(signals.get('modifier:personalized').supplyListings, 1)
+})
+
+test('assigns an observed phrase to one buyer role', () => {
+  const analysis = analyzeMarketplaceVocabulary([{
+    runId: 'graduation-1',
+    capturedAt: '2026-07-20T00:00:00Z',
+    categoryId: 'shirt',
+    eventId: 'graduation',
+    identitySeeds: ['grandma'],
+    demandKeywords: [{ keyword: 'grandma graduation shirt', etsySearches30d: 90 }],
+    supplyListings: [],
+  }], {
+    categoryId: 'shirt',
+    eventId: 'graduation',
+    identitySeeds: 'grandma',
+    now: '2026-07-26T00:00:00Z',
+  })
+
+  const graduationRoles = analysis.rows
+    .filter((row) => row.phrase === 'graduation')
+    .map((row) => row.signalType)
+  assert.deepEqual(graduationRoles, ['reason'])
+})
+
+test('treats a known hobby audience as a person signal instead of a modifier', () => {
+  const analysis = analyzeMarketplaceVocabulary([{
+    runId: 'book-club-1',
+    capturedAt: '2026-07-20T00:00:00Z',
+    categoryId: 'shirt',
+    eventId: 'auto-discovery',
+    identitySeeds: [],
+    demandKeywords: [{ keyword: 'book club cat shirt', etsySearches30d: 180 }],
+    supplyListings: [],
+  }], {
+    categoryId: 'shirt',
+    eventId: 'auto-discovery',
+    now: '2026-07-26T00:00:00Z',
+  })
+
+  assert.ok(analysis.rows.some((row) => row.signalType === 'person' && row.phrase === 'book club'))
+  assert.equal(analysis.rows.some((row) => row.signalType === 'modifier' && row.phrase === 'book club'), false)
+})
+
+test('prefers vocabulary from the current market over a larger unrelated event', () => {
+  const analysis = analyzeMarketplaceVocabulary([
+    {
+      version: 2,
+      runId: 'halloween-1',
+      capturedAt: '2026-07-20T00:00:00Z',
+      categoryId: 'shirt',
+      eventId: 'halloween',
+      identitySeeds: ['nicu nurse'],
+      demandKeywords: [{ keyword: 'spooky nicu nurse shirt', etsySearches30d: 80 }],
+      supplyListings: [],
+    },
+    {
+      version: 2,
+      runId: 'christmas-1',
+      capturedAt: '2026-07-20T00:00:00Z',
+      categoryId: 'shirt',
+      eventId: 'christmas',
+      identitySeeds: ['dog mom'],
+      demandKeywords: [{ keyword: 'retro dog mom christmas shirt', etsySearches30d: 9000 }],
+      supplyListings: [],
+    },
+  ], {
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    identitySeeds: 'nicu nurse',
+    now: '2026-07-26T00:00:00Z',
+  })
+
+  const learned = learnedBuyerIntentSignals(analysis, { limit: 1 })
+  assert.equal(learned[0].phrase, 'spooky')
+  assert.equal(learned[0].signalType, 'modifier')
+  assert.equal(learned[0].contextLevel, 'identity')
+})
+
+test('ranks a custom-event archive as event context only when its fixed snapshot matches', () => {
+  const alphaSnapshot = {
+    id: 'custom-event',
+    label: 'Alpha Launch',
+    searchTerm: 'alpha launch',
+    displayTerm: 'Alpha Launch',
+  }
+  const record = {
+    version: 3,
+    runId: 'custom-alpha-1',
+    capturedAt: '2026-07-20T00:00:00Z',
+    categoryId: 'shirt',
+    eventId: 'custom-event',
+    context: { eventSnapshot: alphaSnapshot },
+    demandKeywords: [{ keyword: 'retro teacher shirt', etsySearches30d: 80 }],
+    supplyListings: [],
+  }
+  const analyze = (eventSnapshot) => analyzeMarketplaceVocabulary([record], {
+    categoryId: 'shirt',
+    eventId: 'custom-event',
+    eventSnapshot,
+    now: '2026-07-26T00:00:00Z',
+  }).rows.find((row) => row.signalType === 'modifier' && row.phrase === 'retro')
+
+  const matching = analyze(alphaSnapshot)
+  const different = analyze({
+    id: 'custom-event',
+    label: 'Beta Launch',
+    searchTerm: 'beta launch',
+    displayTerm: 'Beta Launch',
+  })
+
+  assert.equal(matching.contextLevel, 'event')
+  assert.equal(matching.bestContextRank, 3)
+  assert.equal(different.contextLevel, 'category')
+  assert.equal(different.bestContextRank, 2)
+
+  const ordinary = analyzeMarketplaceVocabulary([{
+    ...record,
+    eventId: 'halloween',
+    context: {},
+  }], {
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    now: '2026-07-26T00:00:00Z',
+  }).rows.find((row) => row.signalType === 'modifier' && row.phrase === 'retro')
+  assert.equal(ordinary.contextLevel, 'event')
+  assert.equal(ordinary.bestContextRank, 3)
+})
+
+test('keeps repeat observations across dates but deduplicates one saved run', () => {
+  const base = {
+    version: 2,
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    identitySeeds: ['nicu nurse'],
+    demandKeywords: [{ keyword: 'spooky nicu nurse shirt', etsySearches30d: 80 }],
+    supplyListings: [],
+  }
+  const analysis = analyzeMarketplaceVocabulary([
+    { ...base, runId: 'run-1', capturedAt: '2026-07-20T00:00:00Z' },
+    { ...base, runId: 'run-1', capturedAt: '2026-07-20T00:00:00Z' },
+    { ...base, runId: 'run-2', capturedAt: '2026-07-25T00:00:00Z' },
+  ], {
+    categoryId: 'shirt',
+    eventId: 'halloween',
+    identitySeeds: 'nicu nurse',
+    now: '2026-07-26T00:00:00Z',
+  })
+
+  const spooky = analysis.rows.find((row) => row.signalType === 'modifier' && row.phrase === 'spooky')
+  assert.equal(spooky.demandKeywords, 2)
+  assert.equal(spooky.observationRuns, 2)
+})
+
+test('applies learned vocabulary with grammar for each signal type', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'nicu nurse',
+    categoryId: 'shirt',
+    perIdentity: 40,
+    learnedSignals: [
+      { signalType: 'reason', phrase: 'appreciation' },
+      { signalType: 'scene', phrase: 'halloween' },
+      { signalType: 'modifier', phrase: 'spooky' },
+    ],
+  })
+  const byKeyword = new Map(rows.map((row) => [row.keyword, row]))
+
+  assert.equal(byKeyword.get('nicu nurse appreciation shirt').modifierEvidence, 'learned-reason')
+  assert.equal(byKeyword.get('halloween nicu nurse shirt').modifierEvidence, 'learned-scene')
+  assert.equal(byKeyword.get('spooky nicu nurse shirt').modifierEvidence, 'learned-modifier')
+})
+
+test('never promotes a measured modifier that carries someone else s trademark', () => {
+  const analysis = analyzeModifierUsage({
+    demandKeywords: [
+      { keyword: 'summerween shirt', etsySearches30d: 5700 },
+      { keyword: 'spooky season shirt', etsySearches30d: 2300 },
+    ],
+    supplyListings: [],
+  }, { categoryId: 'shirt', eventId: 'halloween' })
+
+  // Volume is precisely why a seller would reach for it, so the risk gate runs after the
+  // measurement rather than being assumed away by it.
+  assert.equal(analysis.rows[0].modifier, 'summerween')
+  assert.equal(measuredModifierPhrases(analysis).includes('summerween'), false)
+  assert.ok(measuredModifierPhrases(analysis).includes('spooky'))
+})
+
+test('marks whether a candidate rests on measured or assumed vocabulary', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'nicu nurse',
+    categoryId: 'shirt',
+    perIdentity: 40,
+    measuredModifiers: ['spooky', 'book lover'],
+  })
+  const byKeyword = new Map(rows.map((row) => [row.keyword, row]))
+
+  assert.equal(byKeyword.get('spooky nicu nurse shirt').modifierEvidence, 'measured')
+  assert.equal(byKeyword.get('book lover nicu nurse shirt').modifierEvidence, 'measured')
+  assert.equal(byKeyword.get('retro nicu nurse shirt').modifierEvidence, 'assumed')
+  assert.equal(byKeyword.get('nicu nurse shirt').modifierEvidence, 'identity')
+
+  // With no evidence yet the generator still works, and says so on every row.
+  const noEvidence = generateBuyerIntentCandidates({ identitySeeds: 'nicu nurse', categoryId: 'shirt' })
+  assert.equal(noEvidence.some((row) => row.modifierEvidence === 'measured'), false)
+  assert.ok(noEvidence.every((row) => ['assumed', 'identity', 'operator'].includes(row.modifierEvidence)))
+})
+
+test('names the giver, because on Etsy the buyer is often not the wearer', () => {
+  const nurse = generateBuyerIntentCandidates({ identitySeeds: 'nicu nurse', categoryId: 'shirt', perIdentity: 40 })
+  const nurseKeywords = nurse.map((row) => row.keyword)
+  // A colleague buying for a nurse types something the nurse would never type.
+  assert.ok(nurseKeywords.includes('nicu nurse shirt from coworkers'))
+  assert.ok(nurseKeywords.includes('nicu nurse shirt from patients'))
+  assert.ok(nurseKeywords.includes('nicu nurse appreciation shirt'))
+
+  const teacher = generateBuyerIntentCandidates({ identitySeeds: 'kindergarten teacher', categoryId: 'shirt', perIdentity: 40 })
+  assert.ok(teacher.map((row) => row.keyword).includes('kindergarten teacher shirt from students'))
+
+  const mom = generateBuyerIntentCandidates({ identitySeeds: 'dog mom', categoryId: 'shirt', perIdentity: 40 })
+  const momKeywords = mom.map((row) => row.keyword)
+  assert.ok(momKeywords.includes('dog mom shirt from daughter'))
+  assert.ok(momKeywords.includes('dog mom shirt from the kids'))
+})
+
+test('keeps gift phrasing grammatical for the kind of identity it is attached to', () => {
+  assert.equal(classifyBuyerIdentity('nicu nurse').kind, 'occupation')
+  assert.equal(classifyBuyerIdentity('dog mom').kind, 'identity')
+  assert.equal(classifyBuyerIdentity('crocheter').kind, 'hobby')
+  // Not in the catalog, so shape has to carry it.
+  assert.equal(classifyBuyerIdentity('handbell choir member').kind, 'hobby')
+  assert.equal(classifyBuyerIdentity('my grandma').kind, 'identity')
+
+  const nurse = generateBuyerIntentCandidates({ identitySeeds: 'nicu nurse', categoryId: 'shirt', perIdentity: 40 })
+    .map((row) => row.keyword)
+  const mom = generateBuyerIntentCandidates({ identitySeeds: 'dog mom', categoryId: 'shirt', perIdentity: 40 })
+    .map((row) => row.keyword)
+
+  // "for my dog mom" is how people search; "for my nicu nurse" is not.
+  assert.ok(mom.includes('for my dog mom shirt'))
+  assert.equal(nurse.includes('for my nicu nurse shirt'), false)
+  // "nurse appreciation" is a real occasion; "dog mom appreciation" is not.
+  assert.equal(mom.some((keyword) => keyword.includes('appreciation')), false)
+  // A colleague giver makes no sense for a hobby, and a club does for an occupation.
+  const crocheter = generateBuyerIntentCandidates({ identitySeeds: 'crocheter', categoryId: 'shirt', perIdentity: 40 })
+    .map((keyword) => keyword.keyword)
+  assert.ok(crocheter.includes('crocheter shirt from the club'))
+  assert.equal(crocheter.includes('crocheter shirt from coworkers'), false)
+})
+
+test('marks the personalization price lever and the gift intent on every candidate', () => {
+  const rows = generateBuyerIntentCandidates({ identitySeeds: 'nicu nurse', categoryId: 'shirt', perIdentity: 40 })
+  const byKeyword = new Map(rows.map((row) => [row.keyword, row]))
+
+  assert.equal(byKeyword.get('personalized nicu nurse shirt').personalizable, true)
+  assert.equal(byKeyword.get('custom name nicu nurse shirt').personalizable, true)
+  assert.equal(byKeyword.get('retro nicu nurse shirt').personalizable, false)
+
+  assert.equal(byKeyword.get('gift for nicu nurse shirt').giftIntent, true)
+  assert.equal(byKeyword.get('nicu nurse shirt from patients').giftIntent, true)
+  assert.equal(byKeyword.get('retro nicu nurse shirt').giftIntent, false)
+
+  // Personalization is a price lever, so it must not be a rarity in the output.
+  assert.ok(rows.filter((row) => row.personalizable).length >= 4)
+  assert.ok(rows.filter((row) => row.giftIntent).length >= 4)
+})
+
+test('applies the same risk and structure gates as the event generator', () => {
+  const rows = generateBuyerIntentCandidates({
+    identitySeeds: 'lord of the rings fan\nschool librarian',
+    categoryId: 'shirt',
+  })
+
+  // An IP identity must not come back as ready to research.
+  const ipRows = rows.filter((row) => row.keyword.includes('lord of the rings'))
+  assert.ok(ipRows.every((row) => row.status === 'review' && row.riskTerms.length > 0))
+  assert.ok(rows.some((row) => row.keyword.includes('school librarian') && row.status === 'ready'))
+})
+
+test('returns nothing when no identity is given rather than inventing one', () => {
+  assert.deepEqual(generateBuyerIntentCandidates({ categoryId: 'shirt' }), [])
+  assert.deepEqual(generateBuyerIntentCandidates({ identitySeeds: '   ', categoryId: 'shirt' }), [])
+})
+
+test('reports whether a new shop can compete with the reviews already on the page', () => {
+  const easy = newcomerAccess({
+    productRows: [
+      { monthlySales: 10, reviews: 12 },
+      { monthlySales: 8, reviews: 40 },
+      { monthlySales: 5, reviews: 30 },
+    ],
+  })
+  assert.equal(easy.hasReviewData, true)
+  assert.equal(easy.medianSellerReviews, 30)
+  assert.equal(easy.lowReviewSellerCount, 3)
+  assert.equal(easy.lowReviewSellerShare, 1)
+
+  const hard = newcomerAccess({
+    productRows: [
+      { monthlySales: 10, reviews: 900 },
+      { monthlySales: 8, reviews: 480 },
+      { monthlySales: 5, reviews: 12 },
+    ],
+  })
+  assert.equal(hard.medianSellerReviews, 480)
+  assert.equal(hard.lowReviewSellerCount, 1)
+
+  // Listings that are not selling say nothing about how hard the top of the page is.
+  const sellingOnly = newcomerAccess({
+    productRows: [
+      { monthlySales: 0, reviews: 1 },
+      { monthlySales: 6, reviews: 300 },
+    ],
+  })
+  assert.equal(sellingOnly.medianSellerReviews, 300)
+
+  // Review data is optional: a capture without it must not invent a verdict.
+  const missing = newcomerAccess({ productRows: [{ monthlySales: 6 }] })
+  assert.equal(missing.hasReviewData, false)
+  assert.equal(missing.medianSellerReviews, null)
 })

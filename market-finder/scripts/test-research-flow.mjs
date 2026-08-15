@@ -2,11 +2,37 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildEtsyCandidatesFromPool,
   buildEtsyCandidatesFromErank,
   extensionResultsImportMode,
+  everbeeHandoffState,
+  initialResearchRoundKeywords,
   marketplaceCompletedKeywords,
   shouldDiscardMarketplacePlan,
 } from '../src/research-flow.js'
+
+test('allows the EverBee action to accept completed Etsy results after reload', () => {
+  assert.deepEqual(everbeeHandoffState({
+    busy: false,
+    restoredAwaiting: true,
+    remainingEtsyCount: 0,
+    officialKeywordCount: 28,
+    erankResultCount: 0,
+  }), {
+    disabled: false,
+    acceptRestoredOnStart: true,
+  })
+})
+
+test('keeps every generated candidate in the initial review round', () => {
+  const candidates = Array.from({ length: 80 }, (_, index) => ({
+    keyword: `candidate ${index + 1}`,
+    status: index === 79 ? 'review' : 'ready',
+  }))
+
+  assert.equal(initialResearchRoundKeywords(candidates).length, 80)
+  assert.equal(initialResearchRoundKeywords(candidates).at(-1), 'candidate 80')
+})
 
 test('builds Etsy candidates only from usable eRank results', () => {
   const rows = [
@@ -277,6 +303,24 @@ test('does not send rejected or risky hold candidates to Etsy official verificat
   assert.deepEqual(buildEtsyCandidatesFromErank(rows, []), [])
 })
 
+test('does not send rank-number artifacts to Etsy official verification', () => {
+  const candidates = [
+    { keyword: '1 4 nicu nurse shirt', status: 'ready' },
+    { keyword: '4th grade teacher shirt', status: 'ready' },
+    { keyword: '2026 halloween shirt', status: 'ready' },
+    { keyword: 'nicu nurse halloween shirt', status: 'ready' },
+  ]
+
+  assert.deepEqual(
+    buildEtsyCandidatesFromPool(candidates).map((candidate) => candidate.keyword),
+    [
+      '2026 halloween shirt',
+      '4th grade teacher shirt',
+      'nicu nurse halloween shirt',
+    ],
+  )
+})
+
 test('does not reuse final sales-stage freshness exclusions for Etsy verification candidates', () => {
   const rows = [{
     keyword: 'cat meme shirt',
@@ -307,11 +351,11 @@ test('restores completed extension results only when the page has no local resul
   assert.equal(extensionResultsImportMode(completed, [], true), 'current')
 })
 
-test('imports active extension results as the current research run', () => {
+test('defers active extension results until the batch completes', () => {
   assert.equal(extensionResultsImportMode({
     active: true,
     results: [{ keyword: 'ghost shirt' }],
-  }, [], false), 'current')
+  }, [], false), 'ignore')
   assert.equal(extensionResultsImportMode({ active: false, results: [] }, [], false), 'ignore')
 })
 

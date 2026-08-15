@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  RESEARCH_STAGE_IDS,
   bindResearchStageTabs,
   createRenderSignatureTracker,
   createResearchConsoleUi,
@@ -31,6 +32,10 @@ class FakeButton {
     this.attributes.set(name, value)
   }
 
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null
+  }
+
   closest(selector) {
     return selector === '[data-research-stage]' ? this : null
   }
@@ -56,13 +61,17 @@ class FakeTabs {
 }
 
 function createResearchConsoleDom() {
-  const stages = ['conditions', 'candidates', 'erank', 'etsy', 'results']
+  const stages = ['conditions', 'candidates', 'etsy', 'everbee', 'results']
   return {
     consoleElement: { dataset: {} },
     tabContainer: new FakeTabs(stages),
     panels: stages.map((stage) => ({ dataset: { researchPanel: stage }, hidden: false })),
   }
 }
+
+test('normal flow exposes Etsy then EverBee and never makes eRank a required stage', () => {
+  assert.deepEqual(RESEARCH_STAGE_IDS, ['conditions', 'candidates', 'etsy', 'everbee', 'results'])
+})
 
 test('restores only known stage and queue values', () => {
   assert.deepEqual(createResearchConsoleUi({ activeStage: 'etsy', queueFilter: 'failed' }), {
@@ -71,11 +80,12 @@ test('restores only known stage and queue values', () => {
     selectedKeyword: '',
   })
   assert.equal(createResearchConsoleUi({ activeStage: 'unknown' }).activeStage, 'conditions')
+  assert.equal(createResearchConsoleUi({ activeStage: 'erank' }).activeStage, 'results')
   assert.equal(createResearchConsoleUi({ queueFilter: 'unknown' }).queueFilter, 'all')
 })
 
 test('ignores an invalid research stage selection', () => {
-  const initial = createResearchConsoleUi({ activeStage: 'erank', queueFilter: 'pending' })
+  const initial = createResearchConsoleUi({ activeStage: 'everbee', queueFilter: 'pending' })
   assert.deepEqual(selectResearchStage(initial, 'unknown'), initial)
 })
 
@@ -86,9 +96,9 @@ test('ignores an invalid queue filter selection', () => {
 
 test('selects stage and queue filter without mutating input', () => {
   const initial = createResearchConsoleUi()
-  const selected = selectResearchQueueFilter(selectResearchStage(initial, 'erank'), 'completed')
+  const selected = selectResearchQueueFilter(selectResearchStage(initial, 'everbee'), 'completed')
   assert.equal(initial.activeStage, 'conditions')
-  assert.deepEqual(selected, { activeStage: 'erank', queueFilter: 'completed', selectedKeyword: '' })
+  assert.deepEqual(selected, { activeStage: 'everbee', queueFilter: 'completed', selectedKeyword: '' })
 })
 
 test('filters queue rows by normalized status', () => {
@@ -218,6 +228,35 @@ test('uses the Etsy automation as the active global header service', () => {
   assert.equal(header.canStop, true)
 })
 
+test('enables global Stop only for running multi-angle work and exposes paused work as idle', () => {
+  for (const status of ['running']) {
+    const header = deriveResearchHeaderState({
+      connected: true,
+      multiAngleStatus: status,
+    })
+    assert.equal(header.canStop, true, `${status} exploration must be stoppable`)
+    assert.equal(header.stopKind, 'multi-angle')
+    assert.match(header.stopReason, /探索|調査/)
+  }
+
+  const paused = deriveResearchHeaderState({
+    connected: true,
+    multiAngleStatus: 'paused',
+  })
+  assert.equal(paused.canStop, false)
+  assert.equal(paused.stopKind, '')
+  assert.equal(paused.activity, '一時停止中')
+
+  for (const status of ['idle', 'stopped', 'winner-found', 'exhausted']) {
+    const header = deriveResearchHeaderState({
+      connected: true,
+      multiAngleStatus: status,
+    })
+    assert.equal(header.canStop, false, `${status} exploration must not show Stop`)
+    assert.equal(header.stopKind, '')
+  }
+})
+
 test('clicking a research stage tab shows only its panel', () => {
   const dom = createResearchConsoleDom()
   const stages = deriveResearchStageStates()
@@ -238,7 +277,19 @@ test('clicking a research stage tab shows only its panel', () => {
   assert.equal(ui.activeStage, 'etsy')
   assert.equal(dom.consoleElement.dataset.activeStage, 'etsy')
   assert.equal(dom.tabContainer.buttons.find((button) => button.dataset.researchStage === 'etsy').attributes.get('aria-selected'), 'true')
-  assert.deepEqual(dom.panels.map((panel) => panel.hidden), [true, true, true, false, true])
+  assert.deepEqual(dom.panels.map((panel) => panel.hidden), [true, true, false, true, true])
+})
+
+test('ignores a locked research stage tab', () => {
+  const dom = createResearchConsoleDom()
+  const selected = []
+  const locked = dom.tabContainer.buttons.find((button) => button.dataset.researchStage === 'results')
+  locked.setAttribute('aria-disabled', 'true')
+
+  bindResearchStageTabs(dom.tabContainer, (stageId) => selected.push(stageId))
+  dom.tabContainer.click('results')
+
+  assert.deepEqual(selected, [])
 })
 
 test('content updates cannot reveal a non-active research panel', () => {
@@ -294,9 +345,38 @@ test('derives progress, review, complete, and available states', () => {
     activeService: 'etsy',
   })
   assert.equal(stages.find((item) => item.id === 'conditions').status, 'complete')
-  assert.equal(stages.find((item) => item.id === 'erank').status, 'review')
+  assert.equal(stages.find((item) => item.id === 'everbee').status, 'locked')
   assert.equal(stages.find((item) => item.id === 'etsy').status, 'progress')
   assert.equal(stages.find((item) => item.id === 'results').status, 'locked')
+})
+
+test('uses one candidate denominator across candidate and Etsy progress labels', () => {
+  const stages = deriveResearchStageStates({
+    candidateCount: 80,
+    readyCandidateCount: 79,
+    etsyEligibleCount: 79,
+    etsyCompletedCount: 20,
+    etsyPendingCount: 59,
+  })
+
+  const candidates = stages.find((item) => item.id === 'candidates')
+  const etsy = stages.find((item) => item.id === 'etsy')
+  assert.equal(candidates.message, '80件生成・79件がEtsy確認対象')
+  assert.equal(candidates.shortMessage, '79/80件 Etsy対象')
+  assert.equal(etsy.message, '20/79件確認済み・残り59件')
+  assert.equal(etsy.shortMessage, '20/79件 済')
+  assert.equal(etsy.status, 'review')
+})
+
+test('makes EverBee available after Etsy is checked without requiring eRank evidence', () => {
+  const stages = deriveResearchStageStates({
+    readyCandidateCount: 20,
+    etsyCompletedCount: 20,
+    everbeeResultCount: 0,
+  })
+
+  assert.equal(stages.find((item) => item.id === 'everbee').status, 'available')
+  assert.equal(stages.find((item) => item.id === 'results').status, 'available')
 })
 
 test('shows every final evidence row in the results stage count', () => {

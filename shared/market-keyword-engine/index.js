@@ -1,3 +1,5 @@
+import { classifyProductionWindow } from './market-timing.js'
+
 const DEFAULT_EVENT_YEAR = 2026
 
 const TARGET_GROUPS = {
@@ -790,6 +792,7 @@ export const PRODUCT_CATEGORIES = [
   { id: 'shirt', label: 'Shirt', searchTerm: 'shirt', tags: ['shirt', 'graphic tee', 'gift shirt'] },
   { id: 'sweatshirt', label: 'Sweatshirt', searchTerm: 'sweatshirt', tags: ['sweatshirt', 'cozy gift', 'crewneck'] },
   { id: 'mug', label: 'Mug', searchTerm: 'mug', tags: ['mug', 'coffee gift', 'cup'] },
+  { id: 'ornament', label: 'Ornament', searchTerm: 'ornament', tags: ['ornament', 'christmas ornament', 'holiday decor'] },
   { id: 'wall-art', label: 'Wall Art', searchTerm: 'wall art', tags: ['wall art', 'art print', 'poster'] },
   { id: 'tote', label: 'Tote Bag', searchTerm: 'tote bag', tags: ['tote bag', 'canvas tote', 'gift tote'] },
   { id: 'sticker', label: 'Sticker', searchTerm: 'sticker', tags: ['sticker', 'laptop sticker', 'planner sticker'] },
@@ -834,6 +837,7 @@ export const DEFAULT_RISK_TERMS = [
   'minecraft',
   'roblox',
   'fortnite',
+  'resident evil',
   'barbie',
   'bluey',
   'snoopy',
@@ -970,6 +974,7 @@ const PRODUCT_FAMILY_TERMS = {
   shirt: ['shirt', 'shirts', 'tshirt', 'tshirts', 'tee', 'tees', 'graphic tee'],
   sweatshirt: ['sweatshirt', 'sweatshirts', 'hoodie', 'hoodies', 'crewneck', 'crewnecks'],
   mug: ['mug', 'mugs', 'cup', 'cups', 'coffee mug'],
+  ornament: ['ornament', 'ornaments', 'christmas ornament', 'christmas ornaments'],
   tote: ['tote bag', 'tote', 'canvas tote', 'bag'],
   sticker: ['sticker', 'stickers', 'planner sticker', 'laptop sticker'],
   'wall-art': ['wall art', 'poster', 'posters', 'art print', 'prints', 'printable', 'nursery art'],
@@ -984,10 +989,13 @@ const CATEGORY_PRODUCT_FAMILY = {
   shirt: 'shirt',
   sweatshirt: 'sweatshirt',
   mug: 'mug',
+  ornament: 'ornament',
   'wall-art': 'wall-art',
   tote: 'tote',
   sticker: 'sticker',
 }
+
+const PRODUCT_FAMILIES_WITH_MOTIF_USAGE = new Set(['ornament'])
 
 const BROAD_OCCASION_WORDS = new Set([
   'wedding',
@@ -1099,8 +1107,14 @@ const FIELD_ALIASES = {
   topSalesShare: ['top sales share', 'top listing sales share'],
   medianListingAgeMonths: ['median listing age months', 'median listing age'],
   productRows: ['everbee product rows json', 'product rows json', 'everbee product rows'],
+  crossNicheRoot: ['niche root', 'cross niche root', 'root keyword'],
   crossNicheParent: ['cross niche parent', 'cross-niche parent', 'parent keyword'],
   crossNicheDepth: ['cross niche depth', 'cross-niche depth', 'drilldown depth'],
+  specificityAxis: ['specificity axis', 'drilldown axis', 'niche axis'],
+  crossNicheSources: ['drilldown sources json', 'cross niche sources json', 'drilldown sources'],
+  crossNicheVerdict: ['drilldown verdict', 'cross niche verdict'],
+  crossNicheStopReason: ['stop reason', 'drilldown stop reason', 'cross niche stop reason'],
+  crossNicheComparison: ['parent comparison json', 'cross niche comparison json', 'drilldown comparison json'],
   intentTrack: ['market track', 'intent track', 'event market track'],
   researchEventId: ['research event', 'research event id', 'event id'],
   researchCategoryId: ['research category', 'research category id', 'category id'],
@@ -1165,21 +1179,6 @@ export function normalizePhrase(value) {
     .replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-}
-
-const EVENT_DAY_BY_ID = {
-  'new-years-day': 1,
-  'valentines-day': 14,
-  'st-patricks-day': 17,
-  'earth-day': 22,
-  'national-pet-day': 11,
-  'fathers-day': 21,
-  'canada-day': 1,
-  'independence-day': 4,
-  halloween: 31,
-  'veterans-day': 11,
-  christmas: 25,
-  'new-years-eve': 31,
 }
 
 const CLUSTER_IGNORED_TOKENS = new Set([
@@ -1260,24 +1259,27 @@ export function getMarketplaceInsightFreshness(capturedAt, now = new Date()) {
   }
 }
 
+export {
+  buildTimelySeasonalSuggestions,
+  classifyProductionWindow,
+  nextEventPeakDate,
+  resolveEventPeakDate,
+} from './market-timing.js'
+
 export function getMarketTiming(event = {}, now = new Date()) {
-  const nowDate = parseDate(now)
-  const month = Number(event.month)
-  if (!nowDate || event.id === 'auto-discovery' || !Number.isInteger(month) || month < 1 || month > 12) {
-    return { label: 'evergreen', weeksUntil: null, priority: 2 }
+  const timing = classifyProductionWindow(event, now)
+  const label = {
+    evergreen: 'evergreen',
+    timely: 'launch',
+    early: 'prepare',
+    late: 'late',
+  }[timing.status]
+  return {
+    ...timing,
+    label,
+    weeksUntil: timing.daysUntil === null ? null : Math.round(timing.daysUntil / 7),
+    priority: timing.status === 'timely' ? 5 : timing.status === 'early' ? 2 : 1,
   }
-
-  const day = EVENT_DAY_BY_ID[event.id] ?? 15
-  let eventDate = new Date(Date.UTC(nowDate.getUTCFullYear(), month - 1, day))
-  if (eventDate.getTime() < nowDate.getTime()) {
-    eventDate = new Date(Date.UTC(nowDate.getUTCFullYear() + 1, month - 1, day))
-  }
-  const weeksUntil = Math.max(0, Math.round((eventDate.getTime() - nowDate.getTime()) / (7 * 86400000)))
-
-  if (weeksUntil >= 10 && weeksUntil <= 16) return { label: 'prepare', weeksUntil, priority: 4 }
-  if (weeksUntil >= 4 && weeksUntil < 10) return { label: 'launch', weeksUntil, priority: 5 }
-  if (weeksUntil < 4) return { label: 'late', weeksUntil, priority: 1 }
-  return { label: 'next-cycle', weeksUntil, priority: 2 }
 }
 
 export function buildKeywordClusterKey(keyword, options = {}) {
@@ -1443,6 +1445,45 @@ export function keywordMatchesCategoryProduct(keyword, categoryId) {
   return keywordProductFamilies(keyword).includes(CATEGORY_PRODUCT_FAMILY[category.id])
 }
 
+export function classifyMarketplaceBuyerQuery(keyword, options = {}) {
+  const normalized = normalizePhrase(keyword)
+  const words = phraseTokens(normalized)
+  const classification = classifyCandidateKeyword(normalized, options)
+  const riskTerms = detectRiskTerms(normalized, [])
+  const excludedRiskTerms = splitSeedText(options.excludedRiskTerms)
+  const blockedRiskTerms = excludedRiskTerms.filter((term) => phraseHasTerm(normalized, term))
+
+  const result = (eligible, status, reason) => ({
+    eligible,
+    status,
+    reason,
+    normalized,
+    wordCount: words.length,
+    riskTerms,
+    classification,
+  })
+
+  if (words.length < 2) return result(false, 'too-short', 'Buyer queries need at least two words')
+  if (words.length > 6) return result(false, 'title-like', 'Listing-title-like query is too long')
+  if (hasRepeatedAdjacentPhrase(normalized)) {
+    return result(false, 'repeated-phrase', 'Query contains a repeated adjacent word or phrase')
+  }
+  if (hasDuplicateGarmentProductTerms(normalized)) {
+    return result(false, 'duplicate-product', 'Query contains duplicate garment product terms')
+  }
+  if (blockedRiskTerms.length > 0) return result(false, 'blocked-risk', `Excluded risk term: ${blockedRiskTerms.join(', ')}`)
+  if (!keywordMatchesCategoryProduct(normalized, options.categoryId)) {
+    return result(false, 'category-mismatch', 'Query does not match the selected category product')
+  }
+  if (classification.action !== 'candidate') {
+    return result(false, 'candidate-rejected', classification.reason)
+  }
+  if ((classification.specificTokens ?? []).length === 0) {
+    return result(false, 'too-broad', 'No buyer, recipient, occasion, or meaningful motif signal')
+  }
+  return result(true, 'eligible', 'Buyer-like query is eligible')
+}
+
 function isYearishToken(token) {
   return /^(?:20\d{2}|\d{2})$/.test(token)
 }
@@ -1593,7 +1634,9 @@ export function classifyCandidateKeyword(keyword, options = {}) {
   const expectedFamily = CATEGORY_PRODUCT_FAMILY[category.id]
   const families = keywordProductFamilies(normalized)
   const mismatchedFamilies = expectedFamily
-    ? families.filter((family) => family !== expectedFamily)
+    ? families.filter((family) => (
+      family !== expectedFamily && !PRODUCT_FAMILIES_WITH_MOTIF_USAGE.has(family)
+    ))
     : []
   if (mismatchedFamilies.length > 0) {
     return {
@@ -1799,6 +1842,1059 @@ export function generateKeywordCandidates(options = {}) {
         wordCount: countWords(keyword),
         riskTerms,
         status: riskTerms.length > 0 ? 'review' : 'ready',
+      }
+    })
+    .sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, 'en'))
+    .slice(0, limit)
+}
+
+// Four of the eight axes are combination patterns the engine can apply to anything, but
+// Identity, Occupation, Hobby and Emotion-context are vocabulary: they only work when the
+// phrase is the one the group actually uses for itself. Requiring the operator to supply
+// that vocabulary from memory made the widest lane the hardest to enter, so the specific
+// terms live here. Specificity is the whole value — "nurse" is contested by every seller,
+// "dialysis nurse" is contested by almost none.
+export const BUYER_IDENTITY_LIBRARY = Object.freeze([
+  Object.freeze({
+    id: 'occupation-health',
+    axis: 'occupation',
+    label: '医療・ケア職',
+    note: '職種名を自分の呼び名として使う習慣が強く、同僚間の贈り物も多い領域です。',
+    phrases: Object.freeze([
+      'nicu nurse', 'er nurse', 'icu nurse', 'oncology nurse', 'dialysis nurse',
+      'labor and delivery nurse', 'travel nurse', 'school nurse', 'hospice nurse',
+      'psychiatric nurse', 'nurse practitioner', 'charge nurse', 'cna', 'phlebotomist',
+      'respiratory therapist', 'radiology tech', 'ultrasound tech', 'surgical tech',
+      'paramedic', 'emt', 'medical assistant', 'pharmacy tech', 'dental hygienist',
+      'dental assistant', 'sonographer', 'lab tech', 'caregiver',
+    ]),
+  }),
+  Object.freeze({
+    id: 'occupation-education',
+    axis: 'occupation',
+    label: '教育・学校',
+    note: '学年や担当科目まで下げるほど競合が薄くなります。学校スタッフも同じ市場です。',
+    phrases: Object.freeze([
+      'kindergarten teacher', 'preschool teacher', 'first grade teacher', 'second grade teacher',
+      'special education teacher', 'art teacher', 'music teacher', 'science teacher',
+      'math teacher', 'history teacher', 'esl teacher', 'reading interventionist',
+      'paraprofessional', 'substitute teacher', 'school counselor', 'school librarian',
+      'school psychologist', 'principal', 'school secretary', 'lunch lady',
+      'school bus driver', 'school custodian', 'daycare teacher', 'preschool director',
+    ]),
+  }),
+  Object.freeze({
+    id: 'occupation-therapy',
+    axis: 'occupation',
+    label: 'セラピー・福祉',
+    note: '有資格職で人数が多く、資格名がそのまま検索語になります。',
+    phrases: Object.freeze([
+      'speech therapist', 'occupational therapist', 'physical therapist',
+      'aba therapist', 'behavior technician', 'social worker', 'case manager',
+      'child life specialist', 'music therapist', 'recreation therapist',
+      'early interventionist', 'sign language interpreter',
+    ]),
+  }),
+  Object.freeze({
+    id: 'occupation-trades',
+    axis: 'occupation',
+    label: '現場・技能職',
+    note: '職人の自負が強く、家族からの贈り物需要があります。デザインは道具や現場の言い回しが効きます。',
+    phrases: Object.freeze([
+      'electrician', 'welder', 'plumber', 'hvac tech', 'lineman', 'diesel mechanic',
+      'truck driver', 'heavy equipment operator', 'crane operator', 'construction worker',
+      'firefighter', 'dispatcher', 'mail carrier', 'sanitation worker', 'farmer',
+      'rancher', 'beekeeper', 'arborist', 'surveyor', 'machinist', 'carpenter',
+    ]),
+  }),
+  Object.freeze({
+    id: 'occupation-service',
+    axis: 'occupation',
+    label: 'サービス・専門職',
+    note: '繁忙期（確定申告、繁忙シーズン）と結び付けると季節需要が乗ります。',
+    phrases: Object.freeze([
+      'hairstylist', 'nail tech', 'esthetician', 'massage therapist', 'lash tech',
+      'barista', 'baker', 'pastry chef', 'line cook', 'bartender', 'server',
+      'flight attendant', 'real estate agent', 'loan officer', 'accountant',
+      'tax preparer', 'insurance agent', 'photographer', 'wedding planner',
+      'veterinarian', 'vet tech', 'dog groomer', 'dog trainer', 'librarian',
+    ]),
+  }),
+  Object.freeze({
+    id: 'identity-family',
+    axis: 'identity',
+    label: '家族・立場',
+    note: '呼び名そのものが検索語です。mimi / nana / gigi のような愛称は別々の市場として存在します。',
+    phrases: Object.freeze([
+      'dog mom', 'cat mom', 'dog dad', 'cat dad', 'boy mom', 'girl mom', 'girl dad',
+      'boy dad', 'new mom', 'first time mom', 'twin mom', 'bonus dad', 'bonus mom',
+      'stepdad', 'foster mom', 'adoptive mom', 'homeschool mom', 'single mom',
+      'soccer mom', 'dance mom', 'baseball mom', 'football mom', 'swim mom',
+      'big brother', 'big sister', 'godmother', 'auntie', 'uncle',
+      'grandma', 'mimi', 'nana', 'gigi', 'mawmaw', 'oma', 'yaya', 'abuela',
+      'papa', 'pawpaw', 'grandpa', 'great grandma',
+    ]),
+  }),
+  Object.freeze({
+    id: 'identity-advocacy',
+    axis: 'identity',
+    label: '支え合い・当事者',
+    note: '当事者と家族の連帯を表す市場です。医療的な断定や治療をうたう表現は避け、応援の言葉に留めます。',
+    phrases: Object.freeze([
+      'autism mom', 'autism dad', 'nicu mom', 'nicu dad', 'preemie mom',
+      'heart mom', 'dementia caregiver', 'special needs mom', 'type 1 diabetes mom',
+      'foster parent', 'adoptive dad', 'breast cancer survivor', 'ostomy warrior',
+    ]),
+  }),
+  Object.freeze({
+    id: 'hobby-outdoor',
+    axis: 'hobby',
+    label: '屋外・アウトドア',
+    note: '道具名と行動が語彙になります。季節性が強く、シーズン前に仕込みます。',
+    phrases: Object.freeze([
+      'trail runner', 'marathon runner', 'ultra runner', 'triathlete', 'cyclist',
+      'mountain biker', 'gravel cyclist', 'rock climber', 'boulderer', 'backpacker',
+      'thru hiker', 'kayaker', 'paddleboarder', 'surfer', 'snowboarder', 'skier',
+      'camper', 'rv traveler', 'van lifer', 'overlander', 'angler', 'fly fisherman',
+      'bass fisherman', 'deer hunter', 'duck hunter', 'birder', 'geocacher',
+      'disc golfer', 'pickleball player', 'horse rider', 'sailor',
+    ]),
+  }),
+  Object.freeze({
+    id: 'hobby-craft',
+    axis: 'hobby',
+    label: 'ものづくり・手芸',
+    note: '手芸系は内輪の言い回しが濃く、当たると同じ層が繰り返し買います。',
+    phrases: Object.freeze([
+      'crocheter', 'knitter', 'quilter', 'cross stitcher', 'embroiderer', 'sewist',
+      'weaver', 'spinner', 'potter', 'woodworker', 'blacksmith', 'leather worker',
+      'candle maker', 'soap maker', 'resin artist', 'calligrapher', 'scrapbooker',
+      'model builder', 'miniature painter', 'bookbinder', 'stained glass artist',
+    ]),
+  }),
+  Object.freeze({
+    id: 'hobby-home',
+    axis: 'hobby',
+    label: '暮らし・室内',
+    note: '在宅時間の趣味は年間を通じて需要が安定します。',
+    phrases: Object.freeze([
+      'sourdough baker', 'home baker', 'canner', 'home barista', 'tea drinker',
+      'plant lady', 'houseplant collector', 'orchid grower', 'succulent collector',
+      'gardener', 'vegetable gardener', 'chicken keeper', 'aquarium keeper',
+      'book lover', 'romance reader', 'audiobook listener', 'puzzle lover',
+      'board gamer', 'crossword solver', 'thrifter', 'coin collector', 'record collector',
+      'yoga teacher', 'pilates instructor', 'powerlifter', 'run club member', 'masters swimmer',
+    ]),
+  }),
+])
+
+// Emotion-context is the eighth axis. It is not who the buyer is but the state they are in,
+// and on Etsy it surfaces as a small set of joiners the group already says out loud.
+export const BUYER_CONTEXT_PHRASES = Object.freeze([
+  'squad', 'crew', 'club', 'era', 'life', 'mode', 'off duty', 'in training',
+  'appreciation', 'strong', 'vibes', 'fueled by coffee', 'and coffee', 'burnout',
+])
+
+function identityLibraryGroups(axis = '') {
+  const wanted = normalizePhrase(axis)
+  if (!wanted) return BUYER_IDENTITY_LIBRARY
+  return BUYER_IDENTITY_LIBRARY.filter((group) => group.axis === wanted || group.id === wanted)
+}
+
+// Suggestions rotate round-robin across groups rather than walking one group to exhaustion,
+// so a single press shows medical, family and hobby options together. Picking a niche the
+// operator understands matters more than picking the highest-scoring one, and that judgement
+// is only possible when the choices on screen are from different worlds.
+export function suggestBuyerIdentities(options = {}) {
+  const groups = identityLibraryGroups(options.axis)
+  if (groups.length === 0) return []
+  const limit = Math.max(1, Math.min(Number(options.limit) || 12, 60))
+  const offset = Math.max(0, Math.trunc(Number(options.offset) || 0))
+  const excluded = new Set(splitSeedText(options.exclude).map((value) => normalizePhrase(value)).filter(Boolean))
+
+  const pools = groups.map((group) => ({
+    group,
+    phrases: group.phrases.filter((phrase) => !excluded.has(normalizePhrase(phrase))),
+  })).filter((pool) => pool.phrases.length > 0)
+  if (pools.length === 0) return []
+
+  const suggestions = []
+  const seen = new Set()
+  let round = 0
+  while (suggestions.length < limit && round < 200) {
+    let addedThisRound = 0
+    for (const pool of pools) {
+      if (suggestions.length >= limit) break
+      const phrase = pool.phrases[(offset + round) % pool.phrases.length]
+      const key = normalizePhrase(phrase)
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      suggestions.push({
+        phrase: key,
+        axis: pool.group.axis,
+        groupId: pool.group.id,
+        groupLabel: pool.group.label,
+        note: pool.group.note,
+      })
+      addedThisRound += 1
+    }
+    if (addedThisRound === 0) break
+    round += 1
+  }
+
+  return suggestions
+}
+
+export function selectAutomaticBuyerIdentities(analysis = {}, options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit) || 3, 6))
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const excluded = new Set(splitSeedText(options.exclude).map(normalizePhrase).filter(Boolean))
+  const rows = Array.isArray(analysis?.rows) ? analysis.rows : []
+  const eligible = rows
+    .filter((row) => row.signalType === 'person')
+    .filter((row) => row.freshnessLabel !== 'stale')
+    .filter((row) => row.demandKeywords >= 1 || row.supplyListings >= 2)
+    .filter((row) => !excluded.has(normalizePhrase(row.phrase)))
+    .filter((row) => detectRiskTerms(row.phrase, customRiskTerms).length === 0)
+  const bestContextRank = eligible.reduce((best, row) => Math.max(best, row.bestContextRank), 0)
+  const learned = eligible
+    .filter((row) => row.bestContextRank === bestContextRank)
+    .sort((left, right) => (
+      right.bestContextRank - left.bestContextRank
+      || right.observationRuns - left.observationRuns
+      || right.opportunityGap - left.opportunityGap
+      || right.weightedDemandSearches - left.weightedDemandSearches
+    ))
+    .slice(0, limit)
+    .map((row) => ({
+      phrase: row.phrase,
+      source: 'learned',
+      contextLevel: row.contextLevel,
+      observationRuns: row.observationRuns,
+      demandKeywords: row.demandKeywords,
+      supplyListings: row.supplyListings,
+    }))
+
+  if (learned.length > 0) return learned
+
+  return suggestBuyerIdentities({
+    limit,
+    offset: options.offset,
+    exclude: options.exclude,
+  }).map((item) => ({
+    ...item,
+    source: 'starter',
+  }))
+}
+
+export const BUYER_IDENTITY_DRILLDOWN_LIBRARY = Object.freeze({
+  teacher: Object.freeze({
+    grade: Object.freeze([
+      'kindergarten teacher', 'preschool teacher', 'first grade teacher',
+      'second grade teacher', 'third grade teacher', 'elementary teacher',
+    ]),
+    subject: Object.freeze([
+      'art teacher', 'music teacher', 'science teacher', 'math teacher',
+      'history teacher', 'esl teacher',
+    ]),
+    specialty: Object.freeze([
+      'special education teacher', 'reading intervention teacher',
+      'substitute teacher', 'daycare teacher',
+    ]),
+  }),
+  nurse: Object.freeze({
+    specialty: Object.freeze([
+      'nicu nurse', 'labor and delivery nurse', 'pediatric nurse',
+      'er nurse', 'icu nurse', 'school nurse', 'hospice nurse',
+    ]),
+    credential: Object.freeze([
+      'registered nurse', 'nurse practitioner', 'travel nurse',
+    ]),
+  }),
+  'cat mom': Object.freeze({
+    breed: Object.freeze([
+      'maine coon mom', 'siamese cat mom', 'ragdoll cat mom',
+      'tabby cat mom', 'persian cat mom', 'sphynx cat mom',
+    ]),
+    appearance: Object.freeze([
+      'black cat mom', 'orange cat mom', 'calico cat mom', 'tuxedo cat mom',
+    ]),
+    background: Object.freeze([
+      'rescue cat mom', 'foster cat mom',
+    ]),
+  }),
+  'dog mom': Object.freeze({
+    breed: Object.freeze([
+      'golden retriever mom', 'dachshund mom', 'german shepherd mom',
+      'french bulldog mom', 'labrador mom', 'corgi mom', 'poodle mom',
+    ]),
+    background: Object.freeze([
+      'rescue dog mom', 'foster dog mom',
+    ]),
+  }),
+  'book club': Object.freeze({
+    genre: Object.freeze([
+      'romantasy book club', 'romance book club', 'mystery book club',
+      'fantasy book club', 'horror book club',
+    ]),
+    format: Object.freeze([
+      'audiobook book club', 'silent book club',
+    ]),
+  }),
+  grandma: Object.freeze({
+    transition: Object.freeze([
+      'first time grandma', 'new grandma', 'great grandma',
+    ]),
+    activity: Object.freeze([
+      'baseball grandma', 'softball grandma', 'dance grandma', 'soccer grandma',
+    ]),
+  }),
+  grandpa: Object.freeze({
+    transition: Object.freeze([
+      'first time grandpa', 'new grandpa', 'great grandpa',
+    ]),
+    activity: Object.freeze([
+      'baseball grandpa', 'softball grandpa', 'golf grandpa', 'fishing grandpa',
+    ]),
+  }),
+  runner: Object.freeze({
+    distance: Object.freeze([
+      'marathon runner', 'half marathon runner', 'ultra runner', '5k runner',
+    ]),
+    group: Object.freeze([
+      'run club member', 'trail runner',
+    ]),
+  }),
+})
+
+function drilldownQualifier(detailPhrase, rootIdentity) {
+  const rootTokens = new Set(phraseTokens(rootIdentity))
+  return phraseTokens(detailPhrase).filter((token) => !rootTokens.has(token))
+}
+
+function detailMatchesIdentity(value, rootIdentity, detailPhrase) {
+  if (phraseAppears(value, detailPhrase)) return true
+  if (!phraseAppears(value, rootIdentity)) return false
+  const tokens = new Set(phraseTokens(value))
+  const qualifiers = drilldownQualifier(detailPhrase, rootIdentity)
+  return qualifiers.length > 0 && qualifiers.every((token) => tokens.has(token))
+}
+
+function buyerDrilldownRoot(value) {
+  const normalized = normalizePhrase(value)
+  const roots = Object.keys(BUYER_IDENTITY_DRILLDOWN_LIBRARY)
+    .sort((left, right) => right.length - left.length)
+  for (const rootIdentity of roots) {
+    const axes = BUYER_IDENTITY_DRILLDOWN_LIBRARY[rootIdentity]
+    const hasKnownDetail = Object.values(axes)
+      .flat()
+      .some((detail) => phraseAppears(normalized, detail))
+    if (hasKnownDetail || phraseAppears(normalized, rootIdentity)) return rootIdentity
+  }
+  return ''
+}
+
+export function classifyBuyerIdentitySpecificity(identity) {
+  const normalized = normalizePhrase(identity)
+  const rootIdentity = buyerDrilldownRoot(normalized)
+  if (!rootIdentity) {
+    return {
+      level: countWords(normalized) >= 2 ? 'leaf' : 'unknown',
+      rootIdentity: normalized,
+      axis: '',
+      axes: [],
+    }
+  }
+  const axes = Object.entries(BUYER_IDENTITY_DRILLDOWN_LIBRARY[rootIdentity])
+    .filter(([, details]) => details.some((detail) => detailMatchesIdentity(normalized, rootIdentity, detail)))
+    .map(([axis]) => axis)
+  return {
+    level: axes.length > 0 ? 'leaf' : 'parent',
+    rootIdentity,
+    axis: axes[0] ?? '',
+    axes,
+  }
+}
+
+function buildBuyerDrilldownKeyword(parentKeyword, rootIdentity, detailPhrase) {
+  const parent = normalizePhrase(parentKeyword)
+  if (phraseAppears(parent, rootIdentity)) {
+    return normalizePhrase(parent.replace(new RegExp(`\\b${escapeRegExp(rootIdentity)}\\b`), detailPhrase))
+  }
+  const qualifiers = drilldownQualifier(detailPhrase, rootIdentity).join(' ')
+  return normalizePhrase(`${qualifiers} ${parent}`)
+}
+
+export function generateBuyerIdentityDrilldownCandidates(options = {}) {
+  const parentKeyword = normalizePhrase(options.parentKeyword)
+  const rootKeyword = normalizePhrase(options.rootKeyword) || parentKeyword
+  const depth = Math.max(1, Math.min(3, Math.floor(Number(options.depth) || 1)))
+  const limit = Math.max(1, Math.min(20, Math.floor(Number(options.limit) || 8)))
+  const specificity = classifyBuyerIdentitySpecificity(parentKeyword)
+  const library = BUYER_IDENTITY_DRILLDOWN_LIBRARY[specificity.rootIdentity]
+  if (!parentKeyword || !library) return []
+
+  const etsyRelatedTerms = splitSeedText(options.etsyRelatedTerms)
+  const savedPhrases = splitSeedText(options.savedPhrases)
+  const productRows = Array.isArray(options.productRows) ? options.productRows : []
+  const candidates = []
+
+  for (const [specificityAxis, details] of Object.entries(library)) {
+    if (specificity.axes.includes(specificityAxis)) continue
+    for (const detailPhrase of details) {
+      const sources = []
+      let listingCount = 0
+      let recentListingCount = 0
+      let totalMonthlySales = 0
+
+      if (etsyRelatedTerms.some((term) => detailMatchesIdentity(term, specificity.rootIdentity, detailPhrase))) {
+        sources.push('etsy-related')
+      }
+      if (savedPhrases.some((term) => detailMatchesIdentity(term, specificity.rootIdentity, detailPhrase))) {
+        sources.push('saved-observation')
+      }
+      for (const product of productRows) {
+        const title = normalizePhrase(product?.title ?? product?.keyword)
+        if (!detailMatchesIdentity(title, specificity.rootIdentity, detailPhrase)) continue
+        listingCount += 1
+        totalMonthlySales += Math.max(0, parseNumber(product?.monthlySales ?? product?.sales) ?? 0)
+        const age = parseNumber(product?.listingAgeMonths)
+        if (age !== null && age <= 12) recentListingCount += 1
+      }
+      if (listingCount > 0) sources.push('everbee-title')
+      if (sources.length === 0) sources.push('buyer-detail-library')
+
+      const keyword = buildBuyerDrilldownKeyword(parentKeyword, specificity.rootIdentity, detailPhrase)
+      if (!isCrossNicheCandidateSafe(keyword, parentKeyword, getCategory(options.categoryId), options)) continue
+      const sourcePoints = sources.includes('everbee-title')
+        ? 50
+        : sources.includes('etsy-related')
+          ? 42
+          : sources.includes('saved-observation')
+            ? 34
+            : 10
+      const evidencePoints = Math.min(18, listingCount * 5)
+        + Math.min(12, recentListingCount * 6)
+        + Math.min(20, Math.round(Math.log10(totalMonthlySales + 1) * 10))
+      candidates.push({
+        keyword,
+        parentKeyword,
+        rootKeyword,
+        rootIdentity: specificity.rootIdentity,
+        depth,
+        specificityAxis,
+        modifier: drilldownQualifier(detailPhrase, specificity.rootIdentity).join(' '),
+        sources: unique(sources),
+        listingCount,
+        recentListingCount,
+        totalMonthlySales,
+        verdict: 'needs-research',
+        priorityScore: Math.max(0, Math.min(100, sourcePoints + evidencePoints)),
+        detailOrder: candidates.length,
+      })
+    }
+  }
+
+  return candidates
+    .sort((left, right) => right.priorityScore - left.priorityScore
+      || right.recentListingCount - left.recentListingCount
+      || right.listingCount - left.listingCount
+      || left.detailOrder - right.detailOrder
+      || left.keyword.localeCompare(right.keyword, 'en'))
+    .slice(0, limit)
+    .map(({ detailOrder, ...candidate }) => candidate)
+}
+
+// The eight-axis formula describes a person in a situation rather than a topic. Event
+// templates produce the same head terms every competitor's tool produces; naming who the
+// buyer is and what they are doing produces phrases only someone inside that world writes.
+// The relationship axis is deliberately empty: gift and giver phrasing now depends on what
+// kind of identity it is attached to, so it is built by BUYER_GIVER_PHRASES rather than
+// applied blindly here. The key stays so a caller can still force extra phrasings.
+export const BUYER_INTENT_AXES = Object.freeze({
+  transition: ['retirement', 'first year', 'first season', 'new', 'graduation', 'promotion', 'anniversary'],
+  relationship: [],
+  personalization: ['personalized', 'custom name', 'with name'],
+  style: ['retro', 'vintage', 'minimalist', 'typographic', 'hand drawn'],
+})
+
+// Etsy is a gift-first marketplace: the person searching is frequently not the person who
+// will wear the result. A wearer types their own identity; a giver types their relationship
+// to the wearer, and arrives already holding a reason to buy today. Those are different
+// phrases, and only naming the giver produces the second kind.
+export const BUYER_GIVER_PHRASES = Object.freeze({
+  'occupation-health': ['from the team', 'from coworkers', 'from patients'],
+  'occupation-education': ['from students', 'from the class', 'from parents'],
+  'occupation-therapy': ['from the team', 'from families'],
+  occupation: ['from the team', 'from coworkers'],
+  identity: ['from daughter', 'from son', 'from the kids', 'from the grandkids'],
+  hobby: ['from the club', 'from the crew'],
+})
+
+// Phrasing is not interchangeable across kinds. "for my grandma" is how people search and
+// "for my nicu nurse" is not; "nurse appreciation" is a real occasion and "dog mom
+// appreciation" is not. Applying every pattern to every identity spends the candidate
+// budget on phrases nobody types.
+const BUYER_GIFT_SUFFIXES = Object.freeze({
+  occupation: ['appreciation'],
+  identity: [],
+  hobby: [],
+})
+
+// A bare "-er" ending splits evenly between work and pastime (welder, birder), so words that
+// mark someone as doing a thing by choice are checked before the occupation shapes.
+const IDENTITY_KIND_PATTERNS = Object.freeze([
+  [/\b(mom|mum|mama|dad|papa|mother|father|grandma|grandpa|granny|nana|mimi|gigi|oma|yaya|abuela|mawmaw|pawpaw|aunt|auntie|uncle|sister|brother|godmother|godfather|parent|wife|husband|fiance|fiancee|bride|groom|daughter|son)\b/, 'identity'],
+  [/\b(member|volunteer|lover|enthusiast|collector|hobbyist|player|rider|keeper|goer|obsessed|addict|club|squad)\b/, 'hobby'],
+  [/\b(nurse|teacher|therapist|worker|driver|tech|technician|assistant|doctor|officer|agent|chef|baker|barista|stylist|engineer|manager|counselor|librarian|principal|paramedic|emt|farmer|rancher|welder|electrician|plumber|machinist|carpenter|veterinarian|pharmacist|dentist|midwife|firefighter|dispatcher|interpreter|surveyor|arborist|specialist|practitioner|hygienist|esthetician|sonographer|phlebotomist|paraprofessional|cna)\b/, 'occupation'],
+  [/(?:ist|ian|or)$/, 'occupation'],
+])
+
+// The catalog already records which world a phrase came from, so a chosen suggestion carries
+// its kind for free. Typed identities fall back to shape, which is imperfect but only ever
+// costs a phrasing variant, never correctness of the identity itself.
+export function classifyBuyerIdentity(identity) {
+  const phrase = normalizePhrase(identity)
+  if (!phrase) return { kind: 'hobby', groupId: '' }
+
+  for (const group of BUYER_IDENTITY_LIBRARY) {
+    if (group.phrases.some((value) => normalizePhrase(value) === phrase)) {
+      return { kind: group.axis, groupId: group.id }
+    }
+  }
+  for (const [pattern, kind] of IDENTITY_KIND_PATTERNS) {
+    if (pattern.test(phrase)) return { kind, groupId: '' }
+  }
+  return { kind: 'hobby', groupId: '' }
+}
+
+function buyerGiverPhrases(kind, groupId, options = {}) {
+  const overrides = options.giverAxes ?? {}
+  const table = { ...BUYER_GIVER_PHRASES, ...overrides }
+  return table[groupId] ?? table[kind] ?? []
+}
+
+function buyerIntentPhrases(identity, product, options = {}) {
+  const axes = { ...BUYER_INTENT_AXES, ...(options.axes ?? {}) }
+  const actions = (options.actions ?? []).map(normalizePhrase).filter(Boolean)
+  const measured = unique((options.measuredModifiers ?? []).map(normalizePhrase).filter(Boolean))
+  const learned = (Array.isArray(options.learnedSignals) ? options.learnedSignals : [])
+    .map((signal) => ({
+      signalType: normalizePhrase(signal?.signalType),
+      phrase: normalizePhrase(signal?.phrase),
+    }))
+    .filter((signal) => signal.phrase && ['reason', 'scene', 'modifier'].includes(signal.signalType))
+  const { kind, groupId } = classifyBuyerIdentity(identity)
+  const phrases = [{ phrase: `${identity} ${product}`, evidence: 'identity' }]
+  const add = (phrase, evidence) => phrases.push({ phrase, evidence })
+
+  for (const action of actions) {
+    add(`${identity} ${action} ${product}`, 'operator')
+  }
+  for (const signal of learned) {
+    if (signal.signalType === 'reason') {
+      if (signal.phrase === 'gift') add(`gift for ${identity} ${product}`, 'learned-reason')
+      else add(`${identity} ${signal.phrase} ${product}`, 'learned-reason')
+    } else {
+      add(`${signal.phrase} ${identity} ${product}`, `learned-${signal.signalType}`)
+    }
+  }
+  // Modifiers counted in this market lead the list. They cost the same lookup as a guess
+  // and are the only ones already known to appear in what buyers type or sellers sell.
+  for (const modifier of measured) {
+    add(`${modifier} ${identity} ${product}`, 'measured')
+    add(`${identity} ${modifier} ${product}`, 'measured')
+  }
+  // Personalization is the reason a buyer chose Etsy over a general marketplace and it is
+  // the lever that lets the same design carry a higher price, so it leads the assumed
+  // vocabulary even when the local evidence has not reached it yet.
+  for (const personalization of axes.personalization ?? []) {
+    add(`${personalization} ${identity} ${product}`, 'assumed')
+  }
+  for (const suffix of BUYER_GIFT_SUFFIXES[kind] ?? []) {
+    add(`${identity} ${suffix} ${product}`, 'assumed')
+    for (const personalization of axes.personalization ?? []) {
+      add(`${personalization} ${identity} ${suffix} ${product}`, 'assumed')
+    }
+  }
+  add(`gift for ${identity} ${product}`, 'assumed')
+  if (kind === 'identity') add(`for my ${identity} ${product}`, 'assumed')
+  for (const giver of buyerGiverPhrases(kind, groupId, options)) {
+    add(`${identity} ${product} ${giver}`, 'assumed')
+  }
+  for (const transition of axes.transition ?? []) {
+    add(`${transition} ${identity} ${product}`, 'assumed')
+  }
+  for (const relationship of axes.relationship ?? []) {
+    add(`${relationship} ${identity} ${product}`, 'assumed')
+  }
+  for (const style of axes.style ?? []) {
+    add(`${style} ${identity} ${product}`, 'assumed')
+  }
+
+  return phrases
+}
+
+// Every modifier list in this file started as somebody's guess about how Americans shop.
+// Guesses are testable: the app already collects what Etsy reports people search and what
+// EverBee reports is actually selling, so the words can be counted instead of assumed. A
+// modifier absent from both sides is not a subtle opportunity, it is a phrase nobody types.
+const MODIFIER_MIN_TOKEN_LENGTH = 2
+
+// GENERIC_WORDS cannot be reused here. It contains gift, personalized, custom, vintage and
+// from precisely because those words carry no niche on their own — but they are the words
+// this measurement exists to settle, so removing them would answer the question by
+// assumption. Only the product itself and bare grammar are stripped.
+const MODIFIER_STOP_WORDS = new Set([
+  'shirt', 'shirts', 'tee', 'tees', 'tshirt', 'tshirts', 't-shirt', 'top', 'tops',
+  'sweatshirt', 'sweatshirts', 'crewneck', 'hoodie', 'hoodies', 'mug', 'mugs',
+  'tote', 'bag', 'bags', 'poster', 'sticker', 'stickers',
+  'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'by', 'is', 'it',
+  'unisex', 'women', 'womens', 'men', 'mens', 'kids', 'adult', 'youth', 'ladies',
+  'graphic', 'apparel', 'clothing', 'size', 'sizes', 'color', 'colors',
+])
+
+function modifierCoreTokens(options = {}) {
+  const category = getCategory(options.categoryId)
+  const event = getEvent(options)
+  return new Set([
+    ...MODIFIER_STOP_WORDS,
+    ...phraseTokens(category.searchTerm),
+    ...(category.tags ?? []).flatMap(phraseTokens),
+    ...phraseTokens(event.searchTerm),
+    ...splitSeedText(options.identitySeeds).flatMap(phraseTokens),
+    ...splitSeedText(options.excludeTokens).flatMap(phraseTokens),
+  ])
+}
+
+function modifierNgrams(value, coreTokens) {
+  const tokens = phraseTokens(value).filter((token) => !isYearishToken(token))
+  const grams = new Set()
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const single = tokens[index]
+    if (single.length >= MODIFIER_MIN_TOKEN_LENGTH && !coreTokens.has(single)) grams.add(single)
+    if (index < tokens.length - 1) {
+      const pair = `${tokens[index]} ${tokens[index + 1]}`
+      // A pair is only interesting when it says something neither word says alone.
+      if (!coreTokens.has(tokens[index]) && !coreTokens.has(tokens[index + 1])) grams.add(pair)
+    }
+  }
+
+  return [...grams]
+}
+
+const MARKETPLACE_REASON_PHRASES = Object.freeze([
+  'gift', 'appreciation', 'birthday', 'retirement', 'graduation', 'anniversary',
+  'memorial', 'thank you', 'new baby', 'pregnancy announcement',
+])
+
+const MARKETPLACE_SCENE_PHRASES = Object.freeze([
+  ...MARKET_EVENTS.map((event) => normalizePhrase(event.searchTerm)).filter(Boolean),
+  'family reunion', 'game day', 'vacation', 'classroom', 'work', 'school',
+  'party', 'holiday', 'season',
+])
+
+function phraseContains(value, term) {
+  const normalizedValue = ` ${normalizePhrase(value)} `
+  const normalizedTerm = normalizePhrase(term)
+  return Boolean(normalizedTerm) && normalizedValue.includes(` ${normalizedTerm} `)
+}
+
+function uniqueContainedPhrases(value, phrases = []) {
+  const sorted = unique(phrases.map(normalizePhrase).filter(Boolean))
+    .sort((left, right) => right.length - left.length)
+  return sorted.filter((phrase, index) => (
+    phraseContains(value, phrase)
+    && !sorted.slice(0, index).some((longer) => longer.includes(phrase) && phraseContains(value, longer))
+  ))
+}
+
+function marketplaceEventSnapshot(record = {}) {
+  return record.eventSnapshot ?? record.context?.eventSnapshot
+}
+
+function marketplaceEventSnapshotKey(snapshot = {}) {
+  return [
+    String(snapshot?.id ?? '').trim(),
+    normalizePhrase(snapshot?.searchTerm),
+    normalizePhrase(snapshot?.label),
+    normalizePhrase(snapshot?.displayTerm),
+  ].join('|')
+}
+
+function matchingCustomEventSnapshots(record = {}, options = {}) {
+  const recordKey = marketplaceEventSnapshotKey(marketplaceEventSnapshot(record))
+  return recordKey !== '|||'
+    && recordKey === marketplaceEventSnapshotKey(options.eventSnapshot)
+}
+
+function marketplaceContext(record = {}, options = {}) {
+  const recordIdentities = splitSeedText(record.identitySeeds)
+  const targetIdentities = splitSeedText(options.identitySeeds)
+  const identityMatch = recordIdentities.some((identity) => targetIdentities.includes(identity))
+  if (identityMatch) return { level: 'identity', rank: 4 }
+  if (
+    record.eventId
+    && record.eventId === options.eventId
+    && (
+      record.eventId !== 'custom-event'
+      || matchingCustomEventSnapshots(record, options)
+    )
+  ) return { level: 'event', rank: 3 }
+  if (record.categoryId && record.categoryId === options.categoryId) return { level: 'category', rank: 2 }
+  return { level: 'global', rank: 1 }
+}
+
+function marketplaceFreshness(capturedAt, nowValue) {
+  const captured = Date.parse(String(capturedAt ?? ''))
+  const now = Date.parse(String(nowValue ?? new Date().toISOString()))
+  if (!Number.isFinite(captured) || !Number.isFinite(now)) {
+    return { label: 'unknown', weight: 0.5, days: null }
+  }
+  const days = Math.max(0, Math.floor((now - captured) / 86400000))
+  if (days <= 45) return { label: 'fresh', weight: 1, days }
+  if (days <= 90) return { label: 'aging', weight: 0.6, days }
+  return { label: 'stale', weight: 0.2, days }
+}
+
+function marketplaceSignals(value, record = {}) {
+  const phrase = normalizePhrase(value)
+  if (!phrase) return []
+
+  const category = getCategory(record.categoryId)
+  const recordEvent = getEvent(record)
+  const identityPhrases = uniqueContainedPhrases(phrase, [
+    ...splitSeedText(record.identitySeeds),
+    ...BUYER_IDENTITY_LIBRARY.flatMap((group) => group.phrases),
+    ...BUYER_INTENT_VOCABULARY.Identity,
+    ...BUYER_INTENT_VOCABULARY.Occupation,
+    ...BUYER_INTENT_VOCABULARY['Hobby/action'],
+    ...BUYER_INTENT_VOCABULARY['Relationship/recipient'],
+  ])
+  const reasons = uniqueContainedPhrases(phrase, MARKETPLACE_REASON_PHRASES)
+  const scenes = uniqueContainedPhrases(phrase, [
+    recordEvent.searchTerm,
+    ...MARKETPLACE_SCENE_PHRASES,
+  ]).filter((scene) => !reasons.includes(scene))
+  const coreTokens = new Set([
+    ...MODIFIER_STOP_WORDS,
+    ...phraseTokens(category.searchTerm),
+    ...identityPhrases.flatMap(phraseTokens),
+    ...reasons.flatMap(phraseTokens),
+    ...scenes.flatMap(phraseTokens),
+  ])
+  const modifiers = modifierNgrams(phrase, coreTokens)
+
+  return unique([
+    ...identityPhrases.map((signal) => `person:${signal}`),
+    ...reasons.map((signal) => `reason:${signal}`),
+    ...scenes.map((signal) => `scene:${signal}`),
+    ...modifiers.map((signal) => `modifier:${signal}`),
+  ]).map((entry) => {
+    const separator = entry.indexOf(':')
+    return {
+      signalType: entry.slice(0, separator),
+      phrase: entry.slice(separator + 1),
+    }
+  })
+}
+
+// Archives are observations, not one global bag of words. A Halloween modifier should lead
+// another Halloween run before a larger Christmas observation, while category-wide evidence
+// remains available as a fallback. Only duplicate snapshots from the same run are removed;
+// seeing the same phrase again on another date is evidence of repeat demand.
+export function analyzeMarketplaceVocabulary(records = [], options = {}) {
+  const input = Array.isArray(records) ? records : [records]
+  const stats = new Map()
+  const seenObservations = new Set()
+
+  const entryFor = (signal) => {
+    const key = `${signal.signalType}:${signal.phrase}`
+    if (!stats.has(key)) {
+      stats.set(key, {
+        ...signal,
+        demandKeywords: 0,
+        demandSearches: 0,
+        supplyListings: 0,
+        supplySales: 0,
+        weightedDemandSearches: 0,
+        weightedSupplySales: 0,
+        bestContextRank: 0,
+        contextLevel: 'global',
+        latestCapturedAt: '',
+        freshnessLabel: 'unknown',
+        observationRunIds: new Set(),
+        marketContexts: new Set(),
+      })
+    }
+    return stats.get(key)
+  }
+
+  input.forEach((record, recordIndex) => {
+    if (!record || typeof record !== 'object') return
+    const context = marketplaceContext(record, options)
+    const freshness = marketplaceFreshness(record.capturedAt, options.now)
+    const runId = normalizePhrase(record.runId)
+      || String(record.capturedAt ?? '').trim()
+      || `legacy-${recordIndex}`
+    const contextKey = [
+      record.categoryId ?? '',
+      record.eventId ?? '',
+      ...splitSeedText(record.identitySeeds),
+    ].join('|')
+    const weight = context.rank * freshness.weight
+
+    const applyRows = (rows, source) => {
+      const list = Array.isArray(rows) ? rows : []
+      for (const row of list) {
+        const value = normalizePhrase(source === 'demand'
+          ? (row?.keyword ?? row?.query ?? row)
+          : (row?.title ?? row?.label ?? row))
+        if (!value) continue
+        const amount = Math.max(0, parseNumber(source === 'demand'
+          ? (row?.etsySearches30d ?? row?.searches)
+          : (row?.monthlySales ?? row?.sales)) ?? 0)
+        const observationKey = `${runId}|${source}|${value}|${amount}`
+        if (seenObservations.has(observationKey)) continue
+        seenObservations.add(observationKey)
+
+        for (const signal of marketplaceSignals(value, record)) {
+          const entry = entryFor(signal)
+          if (source === 'demand') {
+            entry.demandKeywords += 1
+            entry.demandSearches += amount
+            entry.weightedDemandSearches += amount * weight
+          } else {
+            entry.supplyListings += 1
+            entry.supplySales += amount
+            entry.weightedSupplySales += amount * weight
+          }
+          entry.observationRunIds.add(runId)
+          entry.marketContexts.add(contextKey)
+          if (context.rank > entry.bestContextRank) {
+            entry.bestContextRank = context.rank
+            entry.contextLevel = context.level
+          }
+          if (!entry.latestCapturedAt || String(record.capturedAt ?? '') > entry.latestCapturedAt) {
+            entry.latestCapturedAt = String(record.capturedAt ?? '')
+            entry.freshnessLabel = freshness.label
+          }
+        }
+      }
+    }
+
+    applyRows(record.demandKeywords, 'demand')
+    applyRows(record.supplyListings, 'supply')
+  })
+
+  const rows = [...stats.values()].map((entry) => {
+    const demandStrength = Math.log10(1 + entry.weightedDemandSearches)
+    const supplyStrength = Math.log10(1 + entry.weightedSupplySales)
+    return {
+      ...entry,
+      observationRuns: entry.observationRunIds.size,
+      marketCount: entry.marketContexts.size,
+      opportunityGap: Math.round((demandStrength - supplyStrength) * 10) / 10,
+      observationRunIds: undefined,
+      marketContexts: undefined,
+    }
+  }).sort((left, right) => (
+    right.bestContextRank - left.bestContextRank
+    || right.observationRuns - left.observationRuns
+    || right.opportunityGap - left.opportunityGap
+    || right.weightedDemandSearches - left.weightedDemandSearches
+    || left.phrase.localeCompare(right.phrase, 'en')
+  ))
+
+  return {
+    rows,
+    totals: {
+      records: input.filter((record) => record && typeof record === 'object').length,
+      demandKeywords: input.reduce((sum, record) => sum + (Array.isArray(record?.demandKeywords) ? record.demandKeywords.length : 0), 0),
+      supplyListings: input.reduce((sum, record) => sum + (Array.isArray(record?.supplyListings) ? record.supplyListings.length : 0), 0),
+    },
+  }
+}
+
+export function learnedBuyerIntentSignals(analysis = {}, options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit) || 12, 60))
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const rows = Array.isArray(analysis.rows) ? analysis.rows : []
+
+  return rows
+    .filter((row) => row.signalType !== 'person')
+    .filter((row) => row.freshnessLabel !== 'stale')
+    .filter((row) => row.demandKeywords >= 1 || row.supplyListings >= 2)
+    .filter((row) => detectRiskTerms(row.phrase, customRiskTerms).length === 0)
+    .sort((left, right) => (
+      right.bestContextRank - left.bestContextRank
+      || right.observationRuns - left.observationRuns
+      || right.opportunityGap - left.opportunityGap
+      || right.weightedDemandSearches - left.weightedDemandSearches
+    ))
+    .slice(0, limit)
+    .map((row) => ({
+      signalType: row.signalType,
+      phrase: row.phrase,
+      contextLevel: row.contextLevel,
+      observationRuns: row.observationRuns,
+      demandKeywords: row.demandKeywords,
+      demandSearches: row.demandSearches,
+      supplyListings: row.supplyListings,
+      supplySales: row.supplySales,
+    }))
+}
+
+// Demand and supply are counted separately on purpose. A word both sides use is a market
+// already served; a word buyers type and sellers have not adopted is the one worth having.
+export function analyzeModifierUsage(evidence = {}, options = {}) {
+  const coreTokens = modifierCoreTokens(options)
+  const stats = new Map()
+  const entryFor = (gram) => {
+    if (!stats.has(gram)) {
+      stats.set(gram, {
+        modifier: gram,
+        demandKeywords: 0,
+        demandSearches: 0,
+        supplyListings: 0,
+        supplySales: 0,
+      })
+    }
+    return stats.get(gram)
+  }
+
+  const demandRows = Array.isArray(evidence.demandKeywords) ? evidence.demandKeywords : []
+  const supplyRows = Array.isArray(evidence.supplyListings) ? evidence.supplyListings : []
+  let totalDemandSearches = 0
+  let totalSupplySales = 0
+
+  for (const row of demandRows) {
+    const keyword = normalizePhrase(row?.keyword ?? row?.query ?? row)
+    if (!keyword) continue
+    const searches = Math.max(0, parseNumber(row?.etsySearches30d ?? row?.searches) ?? 0)
+    totalDemandSearches += searches
+    for (const gram of modifierNgrams(keyword, coreTokens)) {
+      const entry = entryFor(gram)
+      entry.demandKeywords += 1
+      entry.demandSearches += searches
+    }
+  }
+
+  for (const row of supplyRows) {
+    const title = normalizePhrase(row?.title ?? row?.label ?? row)
+    if (!title) continue
+    const sales = Math.max(0, parseNumber(row?.monthlySales ?? row?.sales) ?? 0)
+    totalSupplySales += sales
+    for (const gram of modifierNgrams(title, coreTokens)) {
+      const entry = entryFor(gram)
+      entry.supplyListings += 1
+      entry.supplySales += sales
+    }
+  }
+
+  const rows = [...stats.values()].map((entry) => {
+    const demandShare = totalDemandSearches > 0 ? (entry.demandSearches / totalDemandSearches) * 100 : 0
+    const supplyShare = totalSupplySales > 0 ? (entry.supplySales / totalSupplySales) * 100 : 0
+    return {
+      ...entry,
+      demandShare: Math.round(demandShare * 10) / 10,
+      supplyShare: Math.round(supplyShare * 10) / 10,
+      // Positive means buyers ask for it more than sellers say it.
+      gap: Math.round((demandShare - supplyShare) * 10) / 10,
+      observed: entry.demandKeywords > 0 || entry.supplyListings > 0,
+      demandOnly: entry.demandKeywords > 0 && entry.supplyListings === 0,
+    }
+  })
+
+  return {
+    rows: rows.sort((left, right) => (
+      right.demandSearches - left.demandSearches
+      || right.supplySales - left.supplySales
+      || left.modifier.localeCompare(right.modifier, 'en')
+    )),
+    totals: {
+      demandKeywords: demandRows.length,
+      demandSearches: totalDemandSearches,
+      supplyListings: supplyRows.length,
+      supplySales: totalSupplySales,
+    },
+  }
+}
+
+// Turns the measurement into the vocabulary the generator uses. Anything the evidence has
+// never seen is dropped rather than ranked last, because carrying an unobserved phrase into
+// the candidate list spends a real eRank lookup on a guess.
+export function measuredModifierPhrases(analysis = {}, options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit) || 12, 60))
+  const minKeywords = Math.max(1, Number(options.minDemandKeywords) || 1)
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const rows = Array.isArray(analysis.rows) ? analysis.rows : []
+
+  return rows
+    .filter((row) => row.demandKeywords >= minKeywords || row.supplyListings >= 2)
+    // Measured does not mean safe. The highest-gap modifier in a Halloween run was a
+    // trademarked coinage, and volume is exactly why a seller would reach for it.
+    .filter((row) => detectRiskTerms(row.modifier, customRiskTerms).length === 0)
+    .sort((left, right) => right.gap - left.gap || right.demandSearches - left.demandSearches)
+    .slice(0, limit)
+    .map((row) => row.modifier)
+}
+
+const PERSONALIZATION_PATTERN = /\b(personalized|personalised|custom|custom name|with name|monogram|monogrammed|name)\b/
+const GIFT_INTENT_PATTERN = /\b(gift|gifts|appreciation|from daughter|from son|from the kids|from the grandkids|from the team|from coworkers|from students|from patients|from parents|from families|from the class|from the club|from the crew|for my|thank you)\b/
+
+// Identity comes from the user because only they know how that group names itself. The
+// engine supplies the combination patterns, not the vocabulary of the niche.
+export function generateBuyerIntentCandidates(options = {}) {
+  const category = getCategory(options.categoryId)
+  const product = normalizePhrase(category.searchTerm)
+  const identities = splitSeedText(options.identitySeeds)
+    .map((value) => normalizePhrase(value))
+    .filter(Boolean)
+  if (identities.length === 0) return []
+
+  const customRiskTerms = splitSeedText(options.customRiskTerms)
+  const perIdentity = Math.max(1, Math.min(Number(options.perIdentity) || 25, 60))
+  const limit = Math.max(1, Math.min(Number(options.limit) || 200, 400))
+
+  const evidenceByKeyword = new Map()
+  const keywords = unique(
+    identities.flatMap((identity) => buyerIntentPhrases(identity, product, options)
+      .slice(0, perIdentity))
+      .map((entry) => {
+        const keyword = normalizePhrase(entry.phrase)
+        if (keyword && !evidenceByKeyword.has(keyword)) evidenceByKeyword.set(keyword, entry.evidence)
+        return keyword
+      })
+      .filter((keyword) => countWords(keyword) >= 2)
+      .filter((keyword) => !hasRepeatedAdjacentPhrase(keyword))
+      .filter((keyword) => !hasDuplicateGarmentProductTerms(keyword))
+      .filter((keyword) => !hasConflictingRecipientRoles(keyword))
+      .filter((keyword) => classifyCandidateKeyword(keyword, options).action === 'candidate')
+  )
+
+  return keywords
+    .map((keyword) => {
+      const riskTerms = detectRiskTerms(keyword, customRiskTerms)
+      const identity = identities.find((value) => keyword.includes(value)) ?? ''
+      return {
+        keyword,
+        modifierEvidence: evidenceByKeyword.get(keyword) ?? 'assumed',
+        eventId: '',
+        eventLabel: '買い手意図',
+        categoryId: category.id,
+        categoryLabel: category.label,
+        score: scoreCandidateKeyword(keyword, customRiskTerms),
+        wordCount: countWords(keyword),
+        riskTerms,
+        status: riskTerms.length > 0 ? 'review' : 'ready',
+        discoveryLane: 'audience',
+        queryStrategy: 'buyer-intent',
+        buyerIntentIdentity: identity,
+        buyerIntentKind: classifyBuyerIdentity(identity).kind,
+        personalizable: PERSONALIZATION_PATTERN.test(keyword),
+        giftIntent: GIFT_INTENT_PATTERN.test(keyword),
       }
     })
     .sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, 'en'))
@@ -2167,8 +3263,8 @@ export function advanceMarketplaceInsightResearch(plan = {}, options = {}) {
   }
 
   if (activeFollowUps.length > 0) return { plan: nextPlan, addedCount: 0, reason: 'batch-in-progress' }
-  if (completedSeedCount < 10) return { plan: nextPlan, addedCount: 0, reason: 'need-more-seeds' }
-  if (followUpItems.length > 0 && completedSeedCount < (Number(plan.seedQuota) || 20)) {
+  const requiredSeedCount = Math.max(1, Number(plan.seedQuota) || 20)
+  if (completedSeedCount < requiredSeedCount) {
     return { plan: nextPlan, addedCount: 0, reason: 'continue-seeds' }
   }
 
@@ -2245,16 +3341,17 @@ export function buildMarketplaceInsightPlan(candidates = [], options = {}) {
   const event = getEvent(options)
   const category = getCategory(options.categoryId)
   const mode = options.marketplaceInsightMode === 'plus' ? 'plus' : 'free'
-  const config = mode === 'plus'
-    ? { quota: 60, seedQuota: 20, discovery: 6, validation: 11, reserve: 3 }
-    : { quota: 15, seedQuota: 15, discovery: 5, validation: 7, reserve: 3 }
   const baselineQuery = normalizePhrase(`${event.searchTerm} ${category.searchTerm}`)
-  const pool = candidates
+  const normalizedPool = candidates
     .map((candidate) => ({
       ...candidate,
       query: normalizePhrase(candidate.query ?? candidate.keyword),
     }))
     .filter((candidate) => candidate.query)
+  const pool = [...new Map(normalizedPool.map((candidate) => [candidate.query, candidate])).values()]
+  const config = mode === 'plus'
+    ? { quota: pool.length + 40, seedQuota: pool.length, discovery: 5, validation: pool.length, reserve: 0 }
+    : { quota: 15, seedQuota: 15, discovery: 5, validation: 7, reserve: 3 }
   const selected = []
   const used = new Set()
 
@@ -2284,7 +3381,9 @@ export function buildMarketplaceInsightPlan(candidates = [], options = {}) {
     return true
   }
 
-  addItem({ query: baselineQuery }, 'discovery', 'イベント全体の需要と供給を基準値として確認')
+  if (mode === 'free') {
+    addItem({ query: baselineQuery }, 'discovery', 'イベント全体の需要と供給を基準値として確認')
+  }
   const discoveryLanes = mode === 'plus'
     ? ['motif', 'moment', 'audience', 'aesthetic', 'adjacent']
     : ['motif', 'moment', 'audience', 'adjacent']
@@ -2311,7 +3410,7 @@ export function buildMarketplaceInsightPlan(candidates = [], options = {}) {
   if (mode === 'plus') {
     for (const candidate of pool) {
       if (selected.length >= config.seedQuota) break
-      addItem(candidate, 'reserve', 'Plus初期調査を各レーンへ広げる追加候補')
+      addItem(candidate, 'validation', '生成候補をEtsy公式で全件確認')
     }
 
   }
@@ -2612,6 +3711,50 @@ export function extractNicheHintsFromListings(listings = [], limit = 20, options
     .slice(0, limit)
 }
 
+export function deriveBuyerSearchQueriesFromTitle(title, options = {}) {
+  const normalized = normalizePhrase(title)
+  const direct = classifyMarketplaceBuyerQuery(normalized, options)
+  if (direct.eligible) return [direct.normalized]
+
+  const event = getEvent(options)
+  const category = getCategory(options.categoryId)
+  const eventTerm = normalizePhrase(event.searchTerm)
+  const productTerm = normalizePhrase(category.searchTerm)
+  const limit = Math.max(1, Math.min(12, Number(options.limit) || 8))
+  const seen = new Set()
+  const queries = []
+  const pushEligible = (rawQuery) => {
+    const eligibility = classifyMarketplaceBuyerQuery(rawQuery, options)
+    if (!eligibility.eligible || seen.has(eligibility.normalized)) return false
+    seen.add(eligibility.normalized)
+    queries.push(eligibility.normalized)
+    return queries.length >= limit
+  }
+
+  if (direct.wordCount <= 6) {
+    if (pushEligible(`${normalized} ${productTerm}`)) return queries
+    pushEligible(`${eventTerm} ${normalized} ${productTerm}`)
+    return queries
+  }
+  if (direct.status !== 'title-like') return []
+
+  const hints = extractNicheHintsFromListings([{ title: normalized }], 40, {
+    stopWords: [eventTerm, productTerm, ...(category.tags ?? [])],
+    blockedPhrases: splitSeedText(options.excludedRiskTerms),
+  })
+  for (const hint of hints) {
+    const hintWords = phraseTokens(hint.keyword)
+    if (hintWords.length < 1 || hintWords.length > 3) continue
+    for (const rawQuery of [
+      `${eventTerm} ${hint.keyword} ${productTerm}`,
+      `${hint.keyword} ${productTerm}`,
+    ]) {
+      if (pushEligible(rawQuery)) return queries
+    }
+  }
+  return queries
+}
+
 function roundedCrossNicheMetric(value) {
   if (!Number.isFinite(value)) return null
   return Math.round(value * 1000) / 1000
@@ -2624,6 +3767,41 @@ function medianNumber(values = []) {
   return sorted.length % 2 === 0
     ? (sorted[middle - 1] + sorted[middle]) / 2
     : sorted[middle]
+}
+
+export const LOW_REVIEW_THRESHOLD = 50
+
+// A new shop competes against the reviews already on the page, not against the search
+// volume. Where the sellers on top carry hundreds of reviews, demand does not help.
+export function newcomerAccess(row = {}) {
+  const productRows = Array.isArray(row.productRows) ? row.productRows : []
+  const selling = productRows
+    .map((product) => ({
+      monthlySales: parseNumber(product?.monthlySales ?? product?.sales) ?? 0,
+      reviews: parseNumber(product?.reviews),
+    }))
+    .filter((product) => product.monthlySales > 0)
+  const reviewCounts = selling
+    .map((product) => product.reviews)
+    .filter((value) => value !== null)
+
+  if (reviewCounts.length === 0) {
+    return {
+      medianSellerReviews: null,
+      lowReviewSellerCount: null,
+      lowReviewSellerShare: null,
+      hasReviewData: false,
+    }
+  }
+
+  const lowReviewSellerCount = reviewCounts.filter((value) => value < LOW_REVIEW_THRESHOLD).length
+
+  return {
+    medianSellerReviews: medianNumber(reviewCounts),
+    lowReviewSellerCount,
+    lowReviewSellerShare: Math.round((lowReviewSellerCount / reviewCounts.length) * 100) / 100,
+    hasReviewData: true,
+  }
 }
 
 function crossNicheSalesEvidence(row = {}) {
@@ -2702,7 +3880,7 @@ function crossNicheDepth(row = {}) {
 }
 
 export function selectCrossNicheParentMarkets(rows = [], options = {}) {
-  const maxDepth = Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 2, 3))
+  const maxDepth = Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 3, 3))
   const maxParents = Math.max(1, Math.min(Number(options.crossNicheParentLimit) || 3, 10))
   const customRiskTerms = splitSeedText(options.customRiskTerms)
 
@@ -2712,8 +3890,10 @@ export function selectCrossNicheParentMarkets(rows = [], options = {}) {
       const depth = crossNicheDepth(row)
       const competition = crossNicheCompetitionEvidence(row, options)
       const sales = crossNicheSalesEvidence(row)
+      const previousVerdict = String(row?.crossNicheVerdict ?? row?.crossNicheComparison?.verdict ?? '')
       const safe = keyword
         && depth < maxDepth
+        && !previousVerdict.startsWith('weak-')
         && classifyCandidateKeyword(keyword, options).action !== 'reject'
         && detectRiskTerms(`${keyword} ${row?.notes ?? ''}`, customRiskTerms).length === 0
       const broadSales = sales.hasProductRows
@@ -2978,13 +4158,28 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
     const productSet = new Set(productTokens)
     const parentCoreTokens = phraseTokens(parent.keyword).filter((token) => !productSet.has(token))
 
-    const addCandidate = ({ keyword, modifier, source, hint = null, row = null }) => {
+    const addCandidate = ({
+      keyword,
+      modifier,
+      source,
+      hint = null,
+      row = null,
+      rootKeyword = '',
+      rootIdentity = '',
+      specificityAxis = '',
+      priorityScore = 0,
+    }) => {
       const normalized = normalizePhrase(keyword)
       if (!isCrossNicheCandidateSafe(normalized, parent.keyword, category, options)) return
       const buyerIntent = classifyBuyerIntentPhrase(normalized)
       const existing = candidateMap.get(normalized) ?? {
         keyword: normalized,
         parentKeyword: parent.keyword,
+        rootKeyword: normalizePhrase(rootKeyword)
+          || normalizePhrase(parent.row?.crossNicheRoot)
+          || parent.keyword,
+        rootIdentity: normalizePhrase(rootIdentity),
+        specificityAxis: normalizePhrase(specificityAxis),
         modifier: normalizePhrase(modifier),
         depth: parent.depth + 1,
         sources: [],
@@ -2996,6 +4191,9 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
         priorityScore: 0,
         ...buyerIntent,
       }
+      if (!existing.rootIdentity && rootIdentity) existing.rootIdentity = normalizePhrase(rootIdentity)
+      if (!existing.specificityAxis && specificityAxis) existing.specificityAxis = normalizePhrase(specificityAxis)
+      existing.priorityScore = Math.max(existing.priorityScore, Number(priorityScore) || 0)
       existing.sources = unique([...existing.sources, source])
       existing.listingCount = Math.max(existing.listingCount, Number(hint?.listingCount) || 0)
       existing.recentListingCount = Math.max(existing.recentListingCount, Number(hint?.recentListingCount) || 0)
@@ -3009,6 +4207,32 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
     }
 
     const productRows = Array.isArray(parent.row.productRows) ? parent.row.productRows : []
+    const buyerDrilldowns = generateBuyerIdentityDrilldownCandidates({
+      parentKeyword: parent.keyword,
+      rootKeyword: parent.row?.crossNicheRoot || parent.keyword,
+      categoryId: category.id,
+      eventId: options.eventId,
+      depth: parent.depth + 1,
+      etsyRelatedTerms: parent.row.etsyRelatedTerms,
+      productRows,
+      savedPhrases: options.savedBuyerPhrases,
+      customRiskTerms: options.customRiskTerms,
+      limit: perParentLimit,
+    })
+    for (const candidate of buyerDrilldowns) {
+      for (const source of candidate.sources) {
+        addCandidate({
+          ...candidate,
+          source,
+          hint: {
+            listingCount: candidate.listingCount,
+            recentListingCount: candidate.recentListingCount,
+            count: candidate.totalMonthlySales,
+          },
+        })
+      }
+    }
+
     const hints = extractNicheHintsFromListings(productRows, 30, {
       stopWords: [parent.keyword, ...productTokens],
     })
@@ -3048,6 +4272,8 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
         candidate.sources.includes('etsy-related')
         || candidate.sources.includes('measured-child')
         || candidate.listingCount >= 2
+        || candidate.sources.includes('buyer-detail-library')
+        || candidate.sources.includes('saved-observation')
       ))
       .map((candidate) => {
         const verdictPoints = candidate.verdict === 'promising'
@@ -3067,7 +4293,10 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
           + Math.min(12, candidate.recentListingCount * 4)
         return {
           ...candidate,
-          priorityScore: Math.max(0, Math.min(100, Math.round(20 + verdictPoints + sourcePoints + evidencePoints))),
+          priorityScore: Math.max(
+            candidate.priorityScore,
+            Math.max(0, Math.min(100, Math.round(20 + verdictPoints + sourcePoints + evidencePoints))),
+          ),
         }
       })
       .sort((left, right) => right.priorityScore - left.priorityScore
@@ -3093,8 +4322,8 @@ export function buildCrossNicheDrilldown(rows = [], options = {}) {
     candidates,
     researchCandidates: candidates
       .filter((candidate) => !candidate.verdict.startsWith('weak-'))
-      .slice(0, Math.max(1, Math.min(Number(options.crossNicheResearchLimit) || 12, 30))),
-    maxDepth: Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 2, 3)),
+      .slice(0, Math.max(1, Math.min(Number(options.crossNicheResearchLimit) || 8, 30))),
+    maxDepth: Math.max(1, Math.min(Number(options.crossNicheMaxDepth) || 3, 3)),
   }
 }
 
@@ -3175,6 +4404,33 @@ function demandSignalBand(searches, clicks = null) {
   if (searches === null && clicks === null) return null
   if ((searches ?? 0) >= 100 || (clicks ?? 0) >= 30) return 2
   if ((searches ?? 0) >= 50 || (clicks ?? 0) >= 15) return 1
+  return 0
+}
+
+function etsyOfficialDemandPoints(searches) {
+  if (searches === null || searches <= 0) return 0
+  if (searches >= 1000) return 10
+  if (searches >= 300) return 8
+  if (searches >= 100) return 6
+  if (searches >= 50) return 4
+  return 2
+}
+
+function everbeeMedianSalesPoints(medianMonthlySales) {
+  if (medianMonthlySales === null || medianMonthlySales <= 0) return 0
+  if (medianMonthlySales >= 10) return 10
+  if (medianMonthlySales >= 5) return 8
+  if (medianMonthlySales >= 3) return 6
+  if (medianMonthlySales >= 1) return 4
+  return 2
+}
+
+function erankDemandPoints(searches, clicks) {
+  if ((searches ?? 0) >= 1000 || (clicks ?? 0) >= 300) return 10
+  if ((searches ?? 0) >= 300 || (clicks ?? 0) >= 100) return 8
+  if ((searches ?? 0) >= 100 || (clicks ?? 0) >= 30) return 6
+  if ((searches ?? 0) >= 50 || (clicks ?? 0) >= 15) return 4
+  if ((searches ?? 0) > 0 || (clicks ?? 0) > 0) return 2
   return 0
 }
 
@@ -3330,6 +4586,13 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   const everbeePositive = (sellingListingCount ?? 0) > 0 || (topMonthlySales ?? 0) > 0 || (topRevenue ?? 0) > 0
   const erankPositive = (erankSearchVolume ?? 0) > 0 || (erankClicks ?? 0) > 0 || (erankCtr ?? 0) > 0
   const etsyMarketplacePositive = (etsySearches30d ?? 0) > 0
+  const etsyZeroDemandSignal = etsySearches30d === 0
+  const buyerIntent = classifyBuyerIntentPhrase(keyword)
+  const hasNamedBuyerIntent = buyerIntent.buyerIntentAxes
+    .some((axis) => axis !== 'Style/product')
+  const ambiguousIntent = candidateClass.specificTokens.length === 1
+    && !hasNamedBuyerIntent
+    && !etsyMarketplacePositive
   const erankDemandPass = (erankSearchVolume !== null && erankSearchVolume >= 100)
     || (erankClicks !== null && erankClicks >= 30)
   const etsyDemandPass = etsySearches30d !== null && etsySearches30d >= 100
@@ -3410,6 +4673,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
   if (confidenceLabel !== 'High') gateReasons.push('confidence')
   if (['empty', 'saturated'].includes(everbeeCompetition.band)) gateReasons.push('everbee-competition')
   if (competitionUnverified) gateReasons.push('competition-unverified')
+  if (ambiguousIntent) gateReasons.push('ambiguous-intent')
   if (!safetyPass) gateReasons.push('safety')
 
   const demandScore = demandPass
@@ -3435,11 +4699,23 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       : 0
   const confidenceScore = confidenceLabel === 'High' ? 5 : confidenceLabel === 'Medium' ? 3 : 0
   const sourceConsistencyScore = demandSourceConflict ? -5 : 0
-  const rawScore = demandScore + supplyScore + everbeeCompetitionScore + salesBreadthScore + medianSalesScore + concentrationScore + freshnessScore + confidenceScore + sourceConsistencyScore
+  const etsyOfficialDemandScore = etsyMarketplaceFreshness.eligibleForRanking
+    ? etsyOfficialDemandPoints(etsySearches30d)
+    : 0
+  const everbeeMedianSalesScore = everbeeFreshness.eligibleForRanking
+    ? everbeeMedianSalesPoints(medianMonthlySales)
+    : 0
+  const erankDemandScore = erankFreshness.eligibleForRanking
+    ? erankDemandPoints(erankSearchVolume, erankClicks)
+    : 0
+  const coreDemandSalesScore = etsyOfficialDemandScore + everbeeMedianSalesScore + erankDemandScore
+  const rawScore = coreDemandSalesScore + supplyScore + everbeeCompetitionScore + salesBreadthScore + concentrationScore + freshnessScore + confidenceScore + sourceConsistencyScore
   const scoreCap = competitionUnverified ? Math.min(39, everbeeCompetition.scoreCap) : everbeeCompetition.scoreCap
   const score = safetyPass ? Math.max(0, Math.min(scoreCap, rawScore)) : 0
 
-  const passesAGates = gateReasons.length === 0 && everbeeCompetition.supportsA
+  const passesAGates = gateReasons.length === 0
+    && everbeeCompetition.supportsA
+    && coreDemandSalesScore >= 18
   const passesErankBGates = hasErankCore
     && erankFreshness.eligibleForRanking
     && erankSupplyPass
@@ -3454,9 +4730,11 @@ export function scoreEverbeeResult(row = {}, options = {}) {
     && (sellingListingCount ?? 0) >= 2
     && (topSalesShare ?? 1) < 0.8
   const passesBGates = safetyPass
+    && !ambiguousIntent
     && freshnessPass
     && hasEverbeeAggregate
     && everbeeCompetition.supportsB
+    && coreDemandSalesScore >= 8
     && (passesErankBGates || passesEtsyMarketplaceBGates)
 
   let opportunityLabel = 'C'
@@ -3479,6 +4757,8 @@ export function scoreEverbeeResult(row = {}, options = {}) {
         : 'D: 除外候補'
 
   const exclusionReasons = []
+  if (etsyZeroDemandSignal) exclusionReasons.push('Etsy公式需要 0点（EverBee月間販売中央値とeRank需要を加えた総合判定）')
+  if (ambiguousIntent) exclusionReasons.push('単語の意味・買い手・用途を特定できない')
   if (candidateClass.action === 'reject') exclusionReasons.push(candidateClass.reason)
   if (riskTerms.length > 0) exclusionReasons.push(`要確認語句: ${riskTerms.join(', ')}`)
   if (!freshnessPass && (hasErankData || hasEtsyMarketplaceData || hasEverbeeData)) exclusionReasons.push('需要・供給データまたはEverBeeの取得日が期限超過または不明')
@@ -3517,14 +4797,14 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       revenueScore: 0,
       trendScore: 0,
       priceScore: 0,
-      erankDemandScore: demandScore,
+      erankDemandScore,
       erankCompetitionScore: supplyScore,
       erankCtrScore: 0,
       erankKeywordDifficultyScore: supplyScore,
       erankTrendScore: 0,
       erankSearchScore: demandScore,
       erankClickScore: demandScore,
-      etsyMarketplaceDemandScore: demandScore,
+      etsyMarketplaceDemandScore: etsyOfficialDemandScore,
       etsyMarketplaceSupplyScore: supplyScore,
       salesDensityScore: 0,
       revenueDensityScore: 0,
@@ -3537,6 +4817,9 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       riskPenalty: safetyPass ? 0 : 100,
       salesBreadthScore,
       medianSalesScore,
+      etsyOfficialDemandScore,
+      everbeeMedianSalesScore,
+      coreDemandSalesScore,
       concentrationScore,
       freshnessScore,
       confidenceScore,
@@ -3553,6 +4836,8 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       demandSupplySource,
       demandSourceConflict,
       demandSignalGap,
+      etsyZeroDemandSignal,
+      ambiguousIntent,
     },
     normalized: {
       keyword,
@@ -3571,6 +4856,7 @@ export function scoreEverbeeResult(row = {}, options = {}) {
       totalVisibleMonthlySales,
       topSalesShare,
       medianListingAgeMonths,
+      ...newcomerAccess(row),
       erankSearchVolume,
       erankClicks,
       erankCtr,
@@ -3615,6 +4901,7 @@ function evidenceStatus(status, label, detail) {
 
 export function explainEverbeeScore(score) {
   const normalized = score.normalized ?? {}
+  const parts = score.parts ?? {}
   const usesEtsyMarketplace = score.validation?.demandSupplySource === 'etsy'
   const demandSourceLabel = usesEtsyMarketplace ? 'Etsy公式' : 'eRank'
   const demandPass = !score.gateReasons?.includes('demand')
@@ -3661,6 +4948,14 @@ export function explainEverbeeScore(score) {
   return {
     summary,
     rows: [
+      {
+        status: score.opportunityLabel === 'A' ? 'strong' : score.opportunityLabel === 'B' ? 'warn' : 'weak',
+        label: score.opportunityLabel === 'A' ? 'A基準' : score.opportunityLabel === 'B' ? 'B基準' : '基準未満',
+        detail: 'Etsy公式検索・EverBee月間販売中央値・eRank需要を各10点で採点します。A 18点以上 / B 8点以上です。',
+        key: 'coreDemandSalesScore',
+        metric: 'A/B判定ポイント',
+        value: `Etsy公式 ${parts.etsyOfficialDemandScore ?? 0}点 + EverBee中央値 ${parts.everbeeMedianSalesScore ?? 0}点 + eRank需要 ${parts.erankDemandScore ?? 0}点 = ${parts.coreDemandSalesScore ?? 0}/30点`,
+      },
       {
         ...demand,
         key: 'demand',
@@ -3992,6 +5287,7 @@ const CATEGORY_ROUTE_SIGNALS = {
   shirt: ['shirt', 'tee', 'tshirt', 'funny', 'dad', 'mom', 'teacher', 'nurse', 'pickleball', 'dog mom', 'dog dad', 'retro', 'vintage'],
   sweatshirt: ['sweatshirt', 'crewneck', 'hoodie', 'cozy', 'fall', 'autumn', 'winter', 'christmas', 'halloween', 'teacher', 'nurse', 'embroidered', 'book lover'],
   mug: ['mug', 'coffee', 'cup', 'caffeine', 'teacher', 'nurse', 'coworker', 'boss', 'dad', 'mom', 'grandma', 'quote'],
+  ornament: ['ornament', 'christmas', 'holiday', 'family', 'memorial', 'pet', 'gift'],
   'wall-art': ['wall art', 'poster', 'print', 'art print', 'nursery', 'decor', 'room', 'aesthetic', 'quote', 'boho', 'minimalist', 'gallery'],
   tote: ['tote', 'bag', 'book lover', 'library', 'teacher', 'market', 'bridesmaid', 'bridal', 'eco', 'grocery'],
   sticker: ['sticker', 'planner', 'laptop', 'water bottle', 'cute', 'kawaii', 'book lover', 'teacher', 'vinyl'],
@@ -4013,6 +5309,7 @@ function routeReason(categoryId, keyword, score) {
   if (categoryId === 'sweatshirt') return 'shirtが重い時の逃がし先。cozy/seasonal/apparel intent がある場合だけ再確認。'
   if (categoryId === 'wall-art') return 'decor/quote/aesthetic intent がある時の逃がし先。アパレル競合を避けやすい。'
   if (categoryId === 'mug') return 'gift/quote/workplace intent と相性がよく、制作コストを抑えやすい。'
+  if (categoryId === 'ornament') return 'christmas/holiday/family/memorial intent と相性がよい。名入れは実測がある場合だけ優先。'
   if (categoryId === 'sticker') return '低単価の趣味・planner・laptop intent向け。IP安全性が必須。'
   if (categoryId === 'tote') return 'book/teacher/market/bridal intent向け。縦長デザインと相性がよい。'
   if (keywordText.includes('shirt') || keywordText.includes('tee')) return 'shirt intent はあるため、eRankの供給と複数商品の販売を確認して判断。'
@@ -4084,6 +5381,52 @@ export function recommendProductRoute(row = {}, scoreInput = null, options = {})
     shirtSaturated,
     hasSalesProof,
   }
+}
+
+function matchesPersonalizationTerm(value) {
+  return PERSONALIZATION_PATTERN.test(normalizePhrase(value))
+}
+
+function personalizationResult(decision, label, summary, etsyEvidenceCount, everbeeEvidenceCount) {
+  return { decision, label, summary, etsyEvidenceCount, everbeeEvidenceCount }
+}
+
+export function recommendPersonalization(row = {}, scoreInput = null, options = {}) {
+  const score = scoreInput?.normalized ? scoreInput : scoreEverbeeResult(row, options)
+  const normalized = score.normalized ?? {}
+  const blocked = score.riskTerms.length > 0 || normalized.candidateClass?.action === 'reject'
+  const etsyEvidenceCount = normalized.etsyMarketplaceFreshness?.eligibleForRanking
+    ? (normalized.etsyRelatedTerms ?? []).filter(matchesPersonalizationTerm).length
+    : 0
+  const everbeeEvidenceCount = normalized.everbeeFreshness?.eligibleForRanking
+    ? (Array.isArray(row.productRows) ? row.productRows : []).filter((product) => (
+      matchesPersonalizationTerm(product?.title ?? product?.keyword)
+      && (parseNumber(product?.monthlySales ?? product?.sales) ?? 0) > 0
+    )).length
+    : 0
+
+  if (blocked) {
+    return personalizationResult('blocked', '名入れ方針: 判定対象外', '商品化不可のため、名入れ方針は判定しません。', 0, 0)
+  }
+  if (etsyEvidenceCount >= 1 && everbeeEvidenceCount >= 2) {
+    return personalizationResult(
+      'recommend',
+      '名入れ方針: 推奨',
+      `Etsy関連語 ${etsyEvidenceCount}件 / EverBee販売商品 ${everbeeEvidenceCount}件。通常版より名入れ版を優先してテスト。`,
+      etsyEvidenceCount,
+      everbeeEvidenceCount,
+    )
+  }
+  if (etsyEvidenceCount > 0 || everbeeEvidenceCount > 0) {
+    return personalizationResult(
+      'verify',
+      '名入れ方針: 要確認',
+      `Etsy関連語 ${etsyEvidenceCount}件 / EverBee販売商品 ${everbeeEvidenceCount}件。名入れ語で追加確認後にテスト。`,
+      etsyEvidenceCount,
+      everbeeEvidenceCount,
+    )
+  }
+  return personalizationResult('not-recommended', '名入れ方針: 根拠なし', 'Etsy関連語 0件 / EverBee販売商品 0件。通常版を先にテスト。', 0, 0)
 }
 
 function phraseTokens(value) {
@@ -4588,12 +5931,22 @@ export function parseEverbeeRows(text) {
     const row = {}
     values.forEach((value, index) => {
       const field = fields[index]
-      if (field === 'productRows' || field === 'sourceKeywords' || field === 'buyerIntentAxes') {
+      if (
+        field === 'productRows'
+        || field === 'sourceKeywords'
+        || field === 'buyerIntentAxes'
+        || field === 'crossNicheSources'
+        || field === 'crossNicheComparison'
+      ) {
         try {
           const parsed = JSON.parse(value)
-          row[field] = Array.isArray(parsed) ? parsed : []
+          row[field] = field === 'crossNicheComparison'
+            ? (parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null)
+            : (Array.isArray(parsed) ? parsed : [])
         } catch {
-          row[field] = field === 'productRows'
+          row[field] = field === 'crossNicheComparison'
+            ? null
+            : field === 'productRows'
             ? []
             : splitSeedText(value)
         }
@@ -4611,7 +5964,8 @@ export function rankResearchRows(rows = [], options = {}) {
       const score = scoreEverbeeResult(row, options)
       const idea = buildProductIdea(row.keyword, options)
       const productRoute = recommendProductRoute(row, score, options)
-      return { ...row, score, idea, productRoute }
+      const personalizationRecommendation = recommendPersonalization(row, score, options)
+      return { ...row, score, idea, productRoute, personalizationRecommendation }
     })
     .sort((a, b) => b.score.score - a.score.score || normalizePhrase(a.keyword).localeCompare(normalizePhrase(b.keyword), 'en'))
 }

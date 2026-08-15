@@ -47,27 +47,99 @@ function addOrigin(plan, byQuery, query, sourceKeyword, queryKind) {
   byQuery.set(normalizedQuery, item)
 }
 
-export function buildErankQueryPlan(candidates, options = {}) {
-  const candidateLimit = Math.max(1, Number(options.candidateLimit) || 20)
-  const ready = (Array.isArray(candidates) ? candidates : [])
+function readyCandidates(candidates, candidateLimit) {
+  return (Array.isArray(candidates) ? candidates : [])
     .filter((candidate) => candidate?.status === undefined || candidate.status === 'ready')
     .slice(0, candidateLimit)
+}
+
+function baseQueryFrom(candidate, sourceKeyword, options) {
+  return normalizeQuery(typeof options.baseQueryFor === 'function'
+    ? options.baseQueryFor(sourceKeyword, candidate)
+    : removePhrase(sourceKeyword, options.eventTerm))
+}
+
+function excludedQuerySet(values) {
+  return new Set((Array.isArray(values) ? values : [...(values ?? [])])
+    .map(normalizeQuery)
+    .filter(Boolean))
+}
+
+export function extractErankSpecificTokens(
+  keyword,
+  {
+    event = {},
+    category = {},
+  } = {},
+) {
+  const eventTokens = String(event?.searchTerm ?? '').split(/\s+/)
+  const categoryTokens = [
+    category?.searchTerm,
+    ...(Array.isArray(category?.tags) ? category.tags : []),
+  ].flatMap((value) => normalizeQuery(value).split(/\s+/))
+  const stopWords = new Set([
+    ...eventTokens,
+    ...categoryTokens,
+    'for',
+    'and',
+    'the',
+    'with',
+    'from',
+    'to',
+    'by',
+    'of',
+    'a',
+    'an',
+  ].map(normalizeQuery).filter(Boolean))
+
+  return normalizeQuery(keyword)
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !stopWords.has(token))
+}
+
+// eRank charges one daily lookup per query, so base phrases stay off by default and are
+// only spent later on candidates whose full phrase came back without demand.
+export function buildErankQueryPlan(candidates, options = {}) {
+  const candidateLimit = Math.max(1, Number(options.candidateLimit) || 20)
+  const ready = readyCandidates(candidates, candidateLimit)
+  const excluded = excludedQuerySet(options.excludeQueries)
   const plan = []
   const byQuery = new Map()
 
   for (const candidate of ready) {
     const sourceKeyword = normalizeQuery(candidate?.keyword)
-    if (!sourceKeyword) continue
+    if (!sourceKeyword || excluded.has(sourceKeyword)) continue
     addOrigin(plan, byQuery, sourceKeyword, sourceKeyword, 'direct')
   }
+
+  if (options.includeBaseQueries !== true) return plan
 
   for (const candidate of ready) {
     const sourceKeyword = normalizeQuery(candidate?.keyword)
     if (!sourceKeyword) continue
-    const baseQuery = normalizeQuery(typeof options.baseQueryFor === 'function'
-      ? options.baseQueryFor(sourceKeyword, candidate)
-      : removePhrase(sourceKeyword, options.eventTerm))
-    if (!baseQuery || baseQuery === sourceKeyword) continue
+    const baseQuery = baseQueryFrom(candidate, sourceKeyword, options)
+    if (!baseQuery || baseQuery === sourceKeyword || excluded.has(baseQuery)) continue
+    addOrigin(plan, byQuery, baseQuery, sourceKeyword, 'base')
+  }
+
+  return plan
+}
+
+export function buildErankBaseFollowUpPlan(candidates, options = {}) {
+  const candidateLimit = Math.max(1, Number(options.candidateLimit) || 20)
+  const ready = readyCandidates(candidates, candidateLimit)
+  const excluded = excludedQuerySet(options.excludeQueries)
+  const needsFollowUp = typeof options.needsFollowUp === 'function'
+    ? options.needsFollowUp
+    : () => true
+  const plan = []
+  const byQuery = new Map()
+
+  for (const candidate of ready) {
+    const sourceKeyword = normalizeQuery(candidate?.keyword)
+    if (!sourceKeyword || !needsFollowUp(sourceKeyword, candidate)) continue
+    const baseQuery = baseQueryFrom(candidate, sourceKeyword, options)
+    if (!baseQuery || baseQuery === sourceKeyword || excluded.has(baseQuery)) continue
     addOrigin(plan, byQuery, baseQuery, sourceKeyword, 'base')
   }
 

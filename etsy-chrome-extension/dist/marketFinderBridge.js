@@ -16,10 +16,28 @@
             });
         });
     }
+    async function announceBridge() {
+        var _a;
+        try {
+            const response = await sendRuntimeMessage('PING_MARKET_FINDER');
+            if ((response === null || response === void 0 ? void 0 : response.ok) === false)
+                throw new Error('Chrome extension background is unavailable.');
+            postToPage({
+                action: 'BRIDGE_READY',
+                version: (_a = response === null || response === void 0 ? void 0 : response.version) !== null && _a !== void 0 ? _a : '',
+            });
+        }
+        catch (error) {
+            postToPage({
+                action: 'BRIDGE_UNAVAILABLE',
+                error: error instanceof Error ? error.message : 'Chrome extension background is unavailable.',
+            });
+        }
+    }
     async function handlePageRequest(request) {
         var _a, _b, _c, _d, _e, _f, _g;
         if (request.action === 'PING') {
-            postToPage({ action: 'BRIDGE_READY' });
+            await announceBridge();
             return;
         }
         if (!request.requestId || !request.action)
@@ -109,5 +127,5 @@
             return;
         handlePageRequest(request);
     });
-    postToPage({ action: 'BRIDGE_READY' });
+    announceBridge();
 })();

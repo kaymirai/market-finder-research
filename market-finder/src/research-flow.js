@@ -20,6 +20,34 @@ function uniqueKeywords(values) {
   })
 }
 
+export function initialResearchRoundKeywords(candidates = []) {
+  return uniqueKeywords(
+    (Array.isArray(candidates) ? candidates : [])
+      .map((candidate) => normalizeKeyword(candidate?.keyword ?? candidate?.query))
+      .filter(Boolean),
+  )
+}
+
+export function everbeeHandoffState({
+  busy = false,
+  restoredAwaiting = false,
+  remainingEtsyCount = 0,
+  officialKeywordCount = 0,
+  erankResultCount = 0,
+} = {}) {
+  const hasSourceResults = Number(officialKeywordCount) > 0 || Number(erankResultCount) > 0
+  const etsyComplete = Number(remainingEtsyCount) <= 0
+  return {
+    disabled: Boolean(busy || !etsyComplete || !hasSourceResults),
+    acceptRestoredOnStart: Boolean(restoredAwaiting && etsyComplete && hasSourceResults),
+  }
+}
+
+function hasRankNumberPrefix(value) {
+  const [firstToken = ''] = normalizeKeyword(value).split(' ')
+  return /^\d{1,3}$/.test(firstToken)
+}
+
 function finiteMetric(value, { positive = false } = {}) {
   if (value === null || value === undefined || value === '') return null
   const number = Number(value)
@@ -53,7 +81,8 @@ function cohortMetrics(row = {}) {
 
 export function extensionResultsImportMode(extensionState, localRows = [], acceptInactiveResults = false) {
   if (!Array.isArray(extensionState?.results) || extensionState.results.length === 0) return 'ignore'
-  if (extensionState.active || acceptInactiveResults) return 'current'
+  if (extensionState.active) return 'ignore'
+  if (acceptInactiveResults) return 'current'
   return Array.isArray(localRows) && localRows.length === 0 ? 'restore' : 'ignore'
 }
 
@@ -70,7 +99,7 @@ export function buildEtsyCandidatesFromErank(erankRows = [], candidates = []) {
     const riskTerms = Array.isArray(row.score?.riskTerms) ? row.score.riskTerms : []
     const metrics = cohortMetrics(row)
     const officialProbe = action === 'hold' && ((metrics.search ?? 0) > 0 || (metrics.clicks ?? 0) > 0)
-    if (!keyword || (!['everbee', 'expand'].includes(action) && !officialProbe) || riskTerms.length > 0) return
+    if (!keyword || hasRankNumberPrefix(keyword) || (!['everbee', 'expand'].includes(action) && !officialProbe) || riskTerms.length > 0) return
 
     const opportunityIndex = Number(row.erankOpportunity?.score) || 0
     const previous = qualifiedByKeyword.get(keyword)
@@ -131,6 +160,44 @@ export function buildEtsyCandidatesFromErank(erankRows = [], candidates = []) {
       || right.opportunityIndex - left.opportunityIndex
       || left.keyword.localeCompare(right.keyword, 'en')
     ))
+}
+
+export function buildEtsyCandidatesFromPool(candidates = []) {
+  const byKeyword = new Map()
+
+  candidates.forEach((source) => {
+    const keyword = normalizeKeyword(source?.keyword ?? source?.query)
+    const riskTerms = Array.isArray(source?.score?.riskTerms) ? source.score.riskTerms : []
+    if (!keyword || hasRankNumberPrefix(keyword) || byKeyword.has(keyword) || riskTerms.length > 0) return
+    if (source.status && source.status !== 'ready') return
+
+    const candidate = {
+      keyword,
+      query: keyword,
+      discoveryLane: source.discoveryLane ?? 'baseline',
+      queryStrategy: source.queryStrategy ?? 'direct',
+      opportunityIndex: Number(source.score?.total) || 0,
+      officialFirst: true,
+    }
+    if (Array.isArray(source.axisTerms) && source.axisTerms.length > 0) candidate.axisTerms = [...source.axisTerms]
+    if (source.sourceQuery) candidate.sourceQuery = source.sourceQuery
+    if (source.intentTrack) candidate.intentTrack = source.intentTrack
+    if (source.historyClusterKey) candidate.historyClusterKey = source.historyClusterKey
+    if (source.buyerIntentIdentity) candidate.buyerIntentIdentity = source.buyerIntentIdentity
+    if (Object.prototype.hasOwnProperty.call(source, 'previouslyResearchedElsewhere')) {
+      candidate.previouslyResearchedElsewhere = Boolean(source.previouslyResearchedElsewhere)
+    }
+    if (Array.isArray(source.priorEventIds) && source.priorEventIds.length > 0) {
+      candidate.priorEventIds = [...source.priorEventIds]
+    }
+    byKeyword.set(keyword, candidate)
+  })
+
+  return [...byKeyword.values()].sort((left, right) => (
+    Number(left.previouslyResearchedElsewhere) - Number(right.previouslyResearchedElsewhere)
+    || right.opportunityIndex - left.opportunityIndex
+    || left.keyword.localeCompare(right.keyword, 'en')
+  ))
 }
 
 export function marketplaceCompletedKeywords(plan) {

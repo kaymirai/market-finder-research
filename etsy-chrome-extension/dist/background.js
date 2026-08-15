@@ -21,7 +21,11 @@
     let marketDelayMs = 4500;
     let marketTimerId = null;
     let marketRunId = 0;
-    const MARKET_KEYWORD_TIMEOUT_MS = 360000;
+    const MARKET_KEYWORD_TIMEOUT_MS = 90000;
+    const ERANK_KEYWORD_TIMEOUT_MS = 330000;
+    const ETSY_CAPTURE_RESPONSE_TIMEOUT_MS = 5000;
+    const ETSY_MARKETPLACE_NAVIGATION_TIMEOUT_MS = 5000;
+    const ERANK_DAILY_LOOKUP_LIMIT_ERROR = 'ERANK_DAILY_LOOKUP_LIMIT_REACHED: eRankの1日あたりの検索上限に達しました。翌日のリセット後に再開してください（Basic 100件/日、Pro 200件/日）。';
     const trendSourceConfigs = {
         erank: {
             id: 'erank',
@@ -52,7 +56,7 @@
         'https://*.everbee.io/*',
     ];
     chrome.runtime.onInstalled.addListener((details) => {
-        if (details.reason !== 'install' && details.reason !== 'update')
+        if (details.reason !== 'install')
             return;
         reloadOpenExtensionWorkflowTabs();
     });
@@ -72,7 +76,14 @@
         });
     }
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-        var _a, _b, _c;
+        var _a, _b, _c, _d;
+        if (request.action === 'PING_MARKET_FINDER') {
+            sendResponse({
+                ok: true,
+                version: chrome.runtime.getManifest().version,
+            });
+            return true;
+        }
         if (request.action === 'START_PROCESS') {
             if (isProcessingImages) {
                 sendResponse({ started: false, error: '画像取得はすでに実行中です。' });
@@ -174,6 +185,16 @@
         if (request.action === 'STOP_MARKET_RESEARCH') {
             stopMarketResearch();
             sendResponse({ stopped: true, state: getMarketState() });
+            return true;
+        }
+        if (request.action === 'REQUEST_RESEARCH_TAB_FOCUS') {
+            // A hidden tab gets its timers clamped and its lazy columns never render, so
+            // the content script asks to be brought forward rather than stalling silently.
+            const senderTabId = (_d = sender.tab) === null || _d === void 0 ? void 0 : _d.id;
+            if (marketActive && senderTabId !== undefined) {
+                activateTab(senderTabId).catch(() => undefined);
+            }
+            sendResponse({ ok: true });
             return true;
         }
         if (request.action === 'GET_MARKET_STATE') {
@@ -311,6 +332,24 @@
             return false;
         }
     }
+    function etsyMarketplaceInsightSearchUrl(rawQuery) {
+        const query = rawQuery.trim().replace(/\s+/g, ' ');
+        return `https://www.etsy.com/your/shops/me/marketplace-insights/search?query=${encodeURIComponent(query)}&search_trigger=results_search_bar&search_term_type=any_phrase`;
+    }
+    function navigateEtsyMarketplaceInsightTab(tabId, query) {
+        const url = etsyMarketplaceInsightSearchUrl(query);
+        return new Promise((resolve, reject) => {
+            chrome.tabs.update(tabId, { url }, (tab) => {
+                var _a;
+                const updateError = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+                if (updateError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                    reject(new Error(updateError || 'Etsy Marketplace Insightsの検索ページを更新できませんでした。'));
+                    return;
+                }
+                resolve();
+            });
+        });
+    }
     async function openEtsyMarketplaceInsightTab(activate = true) {
         const existingTabId = await findEtsyMarketplaceTab();
         if (existingTabId !== null) {
@@ -338,24 +377,33 @@
         return tabId;
     }
     async function runEtsyMarketplaceInsight(rawQuery, activate = true) {
-        var _a;
         const query = rawQuery.trim().replace(/\s+/g, ' ');
         if (!query)
             return { started: false, ok: false, error: 'Marketplace Insightsで調べる語句がありません。' };
-        const tabId = await openEtsyMarketplaceInsightTab(activate);
-        const injection = await chrome.scripting.executeScript({
-            target: { tabId },
-            func: submitEtsyMarketplaceInsightQueryInPage,
-            args: [query],
-        });
-        const result = (_a = injection[0]) === null || _a === void 0 ? void 0 : _a.result;
-        if (!(result === null || result === void 0 ? void 0 : result.submitted)) {
-            return {
-                started: false,
-                ok: false,
-                error: (result === null || result === void 0 ? void 0 : result.error) || '検索欄が見つかりません。Etsyへログインし、Shop Manager > Stats > Marketplace Insightsを表示してください。',
-            };
+        let tabId = await openEtsyMarketplaceInsightTab(activate);
+        try {
+            await withTimeout(navigateEtsyMarketplaceInsightTab(tabId, query), ETSY_MARKETPLACE_NAVIGATION_TIMEOUT_MS, 'ETSY_MARKETPLACE_NAVIGATION_TIMEOUT: 既存のEtsyタブが応答しません。');
         }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!message.includes('ETSY_MARKETPLACE_NAVIGATION_TIMEOUT'))
+                throw error;
+            const url = etsyMarketplaceInsightSearchUrl(query);
+            tabId = await withTimeout(new Promise((resolve, reject) => {
+                chrome.tabs.create({ url, active: activate }, (tab) => {
+                    var _a;
+                    const createError = (_a = chrome.runtime.lastError) === null || _a === void 0 ? void 0 : _a.message;
+                    if (createError || !(tab === null || tab === void 0 ? void 0 : tab.id)) {
+                        reject(new Error(createError || 'Etsy Marketplace Insightsの代替タブを開けませんでした。'));
+                        return;
+                    }
+                    resolve(tab.id);
+                });
+            }), ETSY_MARKETPLACE_NAVIGATION_TIMEOUT_MS, 'Etsy Marketplace Insightsの代替タブ作成がタイムアウトしました。');
+            etsyMarketplaceTabId = tabId;
+        }
+        await waitForTabComplete(tabId);
+        await delay(1200);
         return { started: true, ok: true, query, tabId };
     }
     async function waitForEtsyMarketplaceInsightResult(capture, wait = delay, options = {}) {
@@ -376,6 +424,9 @@
             catch (error) {
                 latestError = error instanceof Error ? error.message : String(error);
             }
+            if (/ETSY_MARKETPLACE_RATE_LIMITED|ETSY_CAPTURE_RESPONSE_TIMEOUT/i.test(latestError)) {
+                throw new Error(latestError);
+            }
             if (attempt < attempts - 1 && retryDelayMs > 0)
                 await wait(retryDelayMs);
         }
@@ -393,7 +444,6 @@
         return { started: true, ok: true, query, result };
     }
     async function captureEtsyMarketplaceInsight(rawQuery, restoreMarketFinderFocus = true) {
-        var _a, _b, _c, _d, _e, _f, _g;
         const query = rawQuery.trim().replace(/\s+/g, ' ');
         const tabId = await findEtsyMarketplaceTab();
         if (tabId === null) {
@@ -409,67 +459,64 @@
                 error: 'Marketplace Insightsのタブが見つかりません。先に「Etsy公式確認を自動実行」を押してください。',
             };
         }
-        const captures = [];
-        let initialMode = 'unknown';
+        let response;
         try {
-            const currentModeInjection = await chrome.scripting.executeScript({
-                target: { tabId },
-                func: switchEtsyMarketplaceRelatedModeInPage,
-                args: ['current'],
-            });
-            initialMode = String((_c = (_b = (_a = currentModeInjection[0]) === null || _a === void 0 ? void 0 : _a.result) === null || _b === void 0 ? void 0 : _b.mode) !== null && _c !== void 0 ? _c : 'unknown');
-            for (const mode of ['similar', 'explore']) {
-                try {
-                    const switchInjection = await chrome.scripting.executeScript({
-                        target: { tabId },
-                        func: switchEtsyMarketplaceRelatedModeInPage,
-                        args: [mode],
-                    });
-                    if (!((_e = (_d = switchInjection[0]) === null || _d === void 0 ? void 0 : _d.result) === null || _e === void 0 ? void 0 : _e.found))
-                        continue;
-                    const extraction = await chrome.scripting.executeScript({
-                        target: { tabId },
-                        func: extractEtsyMarketplaceInsightInPage,
-                        args: [query],
-                    });
-                    const result = (_f = extraction[0]) === null || _f === void 0 ? void 0 : _f.result;
-                    if (result)
-                        captures.push({ mode, result });
-                }
-                catch (_h) {
-                    // A single related view should not block capture of the other view.
-                }
-            }
-            if (captures.length === 0) {
-                const extraction = await chrome.scripting.executeScript({
-                    target: { tabId },
-                    func: extractEtsyMarketplaceInsightInPage,
-                    args: [query],
-                });
-                const result = (_g = extraction[0]) === null || _g === void 0 ? void 0 : _g.result;
-                if (result)
-                    captures.push({ mode: 'visible', result });
-            }
+            response = await requestEtsyMarketplaceCapture(tabId, query);
         }
-        finally {
-            if (initialMode === 'similar' || initialMode === 'explore') {
-                try {
-                    await chrome.scripting.executeScript({
-                        target: { tabId },
-                        func: switchEtsyMarketplaceRelatedModeInPage,
-                        args: [initialMode],
-                    });
-                }
-                catch (_j) {
-                    // Restoring the selected view is best-effort only.
-                }
-            }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`ETSY_CAPTURE_MESSAGE: ${message}`);
         }
         if (restoreMarketFinderFocus)
             focusMarketFinderTab();
-        if (captures.length === 0)
-            throw new Error('Marketplace Insightsの画面から結果を取得できませんでした。');
-        return mergeEtsyMarketplaceInsightResults(captures);
+        if (!response.ok || !response.result) {
+            throw new Error(`ETSY_CAPTURE_MESSAGE: ${response.error || 'Marketplace Insightsの画面から結果を取得できませんでした。'}`);
+        }
+        try {
+            return mergeEtsyMarketplaceInsightResults([{ mode: 'visible', result: response.result }]);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`ETSY_CAPTURE_MERGE: ${message}`);
+        }
+    }
+    async function requestEtsyMarketplaceCapture(tabId, query) {
+        var _a, _b;
+        const firstTry = await sendEtsyMarketplaceCaptureMessage(tabId, query);
+        const shouldReinject = ((_a = firstTry.error) === null || _a === void 0 ? void 0 : _a.includes('Receiving end does not exist'))
+            || ((_b = firstTry.error) === null || _b === void 0 ? void 0 : _b.includes('ETSY_CAPTURE_RESPONSE_TIMEOUT'));
+        if (firstTry.ok || !shouldReinject)
+            return firstTry;
+        await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['dist/etsyMarketplaceContent.js'],
+        });
+        return sendEtsyMarketplaceCaptureMessage(tabId, query);
+    }
+    function sendEtsyMarketplaceCaptureMessage(tabId, query) {
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (response) => {
+                if (settled)
+                    return;
+                settled = true;
+                clearTimeout(timeoutId);
+                resolve(response);
+            };
+            const timeoutId = setTimeout(() => {
+                finish({
+                    ok: false,
+                    error: 'ETSY_CAPTURE_RESPONSE_TIMEOUT: Etsyの取得スクリプトから応答がありません。',
+                });
+            }, ETSY_CAPTURE_RESPONSE_TIMEOUT_MS);
+            chrome.tabs.sendMessage(tabId, { action: 'ETSY_MARKETPLACE_CAPTURE', query }, (response) => {
+                if (chrome.runtime.lastError) {
+                    finish({ ok: false, error: chrome.runtime.lastError.message });
+                    return;
+                }
+                finish(response);
+            });
+        });
     }
     function mergeEtsyMarketplaceInsightResults(captures) {
         var _a, _b, _c;
@@ -604,8 +651,130 @@
         }
         return { submitted: true };
     }
+    function extractVisibleEtsyMarketplaceInsightInPage(expectedQuery) {
+        var _a, _b, _c, _d, _e, _f, _g;
+        function normalize(value) {
+            return String(value !== null && value !== void 0 ? value : '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        }
+        function isDateAxisLabel(value) {
+            const label = String(value !== null && value !== void 0 ? value : '').replace(/\s+/g, ' ').trim();
+            return /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?$/i.test(label)
+                || /^\d{1,2}月\d{1,2}日$/.test(label);
+        }
+        function parseCompactNumber(value) {
+            var _a;
+            const match = String(value !== null && value !== void 0 ? value : '')
+                .replace(/\u00a0/g, ' ')
+                .match(/(\d[\d,]*(?:\.\d+)?)\s*(千|万|百万|億|[kmb])?/i);
+            if (!match)
+                return null;
+            const suffix = String((_a = match[2]) !== null && _a !== void 0 ? _a : '').toLowerCase();
+            let multiplier = 1;
+            if (suffix === 'k' || suffix === '千')
+                multiplier = 1000;
+            else if (suffix === '万')
+                multiplier = 10000;
+            else if (suffix === 'm' || suffix === '百万')
+                multiplier = 1000000;
+            else if (suffix === '億')
+                multiplier = 100000000;
+            else if (suffix === 'b')
+                multiplier = 1000000000;
+            const numeric = Number(match[1].replace(/,/g, ''));
+            return Number.isFinite(numeric) ? Math.round(numeric * multiplier) : null;
+        }
+        const root = (_a = document.querySelector('main, [role="main"]')) !== null && _a !== void 0 ? _a : document.body;
+        const pageText = (_b = root === null || root === void 0 ? void 0 : root.innerText) !== null && _b !== void 0 ? _b : '';
+        if (/slow down,\s*buddy|uh oh!|あらら|まあまあ、そう焦らずに/i.test(pageText)) {
+            return {
+                ok: false,
+                keyword: expectedQuery,
+                etsySearches30d: null,
+                etsyListings: null,
+                etsyRelatedTerms: [],
+                etsyRelatedKeywordMetrics: [],
+                etsyCheckedAt: null,
+                remainingSearches: null,
+                error: 'ETSY_MARKETPLACE_RATE_LIMITED: Etsy側の連続検索制限に達しました。',
+            };
+        }
+        const inputs = (_c = root === null || root === void 0 ? void 0 : root.querySelectorAll([
+            'input[type="search"]',
+            'input[name*="keyword" i]',
+            'input[placeholder*="keyword" i]',
+            'input[aria-label*="keyword" i]',
+        ].join(','))) !== null && _c !== void 0 ? _c : [];
+        const input = Array.from(inputs)[0];
+        const actualQuery = String((_d = input === null || input === void 0 ? void 0 : input.value) !== null && _d !== void 0 ? _d : expectedQuery).trim();
+        const expectedKey = normalize(expectedQuery);
+        const actualKey = normalize(actualQuery);
+        if (expectedKey && actualKey && expectedKey !== actualKey) {
+            return {
+                ok: false,
+                keyword: actualQuery,
+                etsySearches30d: null,
+                etsyListings: null,
+                etsyRelatedTerms: [],
+                etsyRelatedKeywordMetrics: [],
+                etsyCheckedAt: null,
+                remainingSearches: null,
+                error: `表示中の語句は「${actualQuery}」です。「${expectedQuery}」の結果を待っています。`,
+            };
+        }
+        let etsySearches30d = null;
+        let etsyListings = null;
+        const etsyRelatedTerms = [];
+        const etsyRelatedKeywordMetrics = [];
+        const seenRelatedKeys = [];
+        const rows = (_e = root === null || root === void 0 ? void 0 : root.querySelectorAll('tr, [role="row"]')) !== null && _e !== void 0 ? _e : [];
+        for (const row of Array.from(rows)) {
+            const cells = Array.from(row.querySelectorAll('th, td, [role="cell"], [role="rowheader"]'))
+                .map((cell) => { var _a; return String((_a = cell.innerText) !== null && _a !== void 0 ? _a : '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(); })
+                .filter(Boolean);
+            if (cells.length < 3)
+                continue;
+            const keyword = cells[0];
+            const keywordKey = normalize(keyword);
+            if (!keywordKey)
+                continue;
+            const searches = parseCompactNumber(cells[1]);
+            const listings = parseCompactNumber(cells[2]);
+            if (keywordKey === (actualKey || expectedKey)) {
+                etsySearches30d = searches;
+                etsyListings = listings;
+                continue;
+            }
+            if (!/[a-z]/i.test(keyword) || isDateAxisLabel(keyword) || searches === null || listings === null)
+                continue;
+            if (seenRelatedKeys.includes(keywordKey) || etsyRelatedTerms.length >= 100)
+                continue;
+            seenRelatedKeys.push(keywordKey);
+            etsyRelatedTerms.push(keyword);
+            etsyRelatedKeywordMetrics.push({
+                keyword,
+                etsySearches30d: searches,
+                etsyListings: listings,
+                conversionLabel: String((_f = cells[3]) !== null && _f !== void 0 ? _f : '').trim(),
+            });
+        }
+        const remainingMatch = (_g = pageText.match(/(\d+)\s+(?:free\s+)?search(?:es)?\s+(?:remaining|left)/i)) !== null && _g !== void 0 ? _g : pageText.match(/(?:残り|あと)\s*(\d+)\s*(?:回|件)?/);
+        const remainingSearches = remainingMatch ? Number(remainingMatch[1]) : null;
+        const ok = etsySearches30d !== null || etsyListings !== null;
+        return {
+            ok,
+            keyword: actualQuery || expectedQuery,
+            etsySearches30d,
+            etsyListings,
+            etsySearchTrendPercent: null,
+            etsyRelatedTerms,
+            etsyRelatedKeywordMetrics,
+            etsyCheckedAt: ok ? new Date().toISOString() : null,
+            remainingSearches: Number.isFinite(remainingSearches) ? remainingSearches : null,
+            error: ok ? '' : 'Etsyの表示中の結果行から検索数と検索結果を読み取れませんでした。',
+        };
+    }
     function extractEtsyMarketplaceInsightInPage(expectedQuery) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
         function visible(element) {
             const rect = element.getBoundingClientRect();
             const style = window.getComputedStyle(element);
@@ -637,9 +806,23 @@
             return Number.isFinite(numeric) ? Math.round(numeric * multiplier) : null;
         }
         const root = (_a = document.querySelector('main, [role="main"]')) !== null && _a !== void 0 ? _a : document.body;
+        const fullPageText = (_c = (_b = document.body) === null || _b === void 0 ? void 0 : _b.innerText) !== null && _c !== void 0 ? _c : '';
+        if (/slow down,\s*buddy|uh oh!|あらら[！!]?|まあまあ[、,]?\s*そう焦らずに/i.test(fullPageText)) {
+            return {
+                ok: false,
+                keyword: expectedQuery,
+                etsySearches30d: null,
+                etsyListings: null,
+                etsyRelatedTerms: [],
+                etsyRelatedKeywordMetrics: [],
+                etsyCheckedAt: null,
+                remainingSearches: null,
+                error: 'ETSY_MARKETPLACE_RATE_LIMITED: Etsy側の連続検索制限に達しました。時間を空けて再開してください。',
+            };
+        }
         const input = Array.from(root.querySelectorAll('input[type="search"], input[name*="keyword" i], input[placeholder*="keyword" i]'))
             .find((candidate) => visible(candidate));
-        const actualQuery = String((_b = input === null || input === void 0 ? void 0 : input.value) !== null && _b !== void 0 ? _b : '').trim();
+        const actualQuery = String((_d = input === null || input === void 0 ? void 0 : input.value) !== null && _d !== void 0 ? _d : '').trim();
         if (expectedQuery && actualQuery && normalize(expectedQuery) !== normalize(actualQuery)) {
             return {
                 ok: false,
@@ -658,6 +841,33 @@
             .map((element) => { var _a, _b; return (_b = (_a = element.innerText) === null || _a === void 0 ? void 0 : _a.replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim()) !== null && _b !== void 0 ? _b : ''; })
             .filter((text, index, all) => text && text.length <= 500 && all.indexOf(text) === index)
             .sort((left, right) => left.length - right.length);
+        const normalizedQuery = normalize(actualQuery || expectedQuery);
+        function extractCurrentQueryRowMetrics() {
+            if (!normalizedQuery)
+                return null;
+            const rows = Array.from(root.querySelectorAll('tr, [role="row"]'))
+                .filter((row) => visible(row));
+            for (const row of rows) {
+                const cells = Array.from(row.querySelectorAll('th, td, [role="cell"], [role="rowheader"]'))
+                    .map((cell) => { var _a, _b; return (_b = (_a = cell.innerText) === null || _a === void 0 ? void 0 : _a.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()) !== null && _b !== void 0 ? _b : ''; })
+                    .filter(Boolean);
+                if (cells.length < 3)
+                    continue;
+                const termIndex = cells.findIndex((cell) => normalize(cell) === normalizedQuery);
+                if (termIndex < 0)
+                    continue;
+                const numericValues = cells.slice(termIndex + 1)
+                    .map((cell) => parseCompactNumber(cell))
+                    .filter((value) => value !== null);
+                if (numericValues.length >= 2) {
+                    return {
+                        searches: numericValues[0],
+                        listings: numericValues[1],
+                    };
+                }
+            }
+            return null;
+        }
         function extractMetric(labelPattern, excludePattern) {
             const numberPattern = '(\\d[\\d,]*(?:\\.\\d+)?\\s*(?:百万|千|万|億|[kmb])?)';
             const after = new RegExp(`${labelPattern}[^\\d]{0,45}${numberPattern}`, 'i');
@@ -665,10 +875,11 @@
             for (const text of texts) {
                 if (excludePattern === null || excludePattern === void 0 ? void 0 : excludePattern.test(text))
                     continue;
-                const match = text.match(after);
+                const metricText = text.replace(/\b(?:last|past)\s+30\s+days?\b/gi, ' period ');
+                const match = metricText.match(after);
                 if (match)
                     return parseCompactNumber(match[1]);
-                const reverseMatch = text.match(before);
+                const reverseMatch = metricText.match(before);
                 if (reverseMatch)
                     return parseCompactNumber(reverseMatch[1]);
             }
@@ -676,13 +887,13 @@
         }
         const searchLabel = '(?:searches?(?:\\s+in\\s+(?:the\\s+)?last\\s+30\\s+days)?|30[- ]day searches|search volume|buyer searches|検索(?:数)?(?!結果))';
         const listingLabel = '(?:listings|items available|available listings|competition|search results?|掲載数|出品数|検索結果(?:数)?)';
-        const etsySearches30d = extractMetric(searchLabel, /remaining|left|free searches|per week|残り|無料検索|週/i);
-        const etsyListings = extractMetric(listingLabel);
-        const normalizedQuery = normalize(actualQuery || expectedQuery);
-        const searchTrendPercent = (_d = (_c = Array.from(root.querySelectorAll('tr, [role="row"]'))
+        const currentQueryRowMetrics = extractCurrentQueryRowMetrics();
+        const etsySearches30d = (_e = currentQueryRowMetrics === null || currentQueryRowMetrics === void 0 ? void 0 : currentQueryRowMetrics.searches) !== null && _e !== void 0 ? _e : extractMetric(searchLabel, /remaining|left|free searches|per week|残り|無料検索|週/i);
+        const etsyListings = (_f = currentQueryRowMetrics === null || currentQueryRowMetrics === void 0 ? void 0 : currentQueryRowMetrics.listings) !== null && _f !== void 0 ? _f : extractMetric(listingLabel);
+        const searchTrendPercent = (_h = (_g = Array.from(root.querySelectorAll('tr, [role="row"]'))
             .filter((row) => visible(row))
             .map((row) => { var _a, _b; return (_b = (_a = row.innerText) === null || _a === void 0 ? void 0 : _a.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()) !== null && _b !== void 0 ? _b : ''; })
-            .find((rowText) => normalizedQuery && normalize(rowText).includes(normalizedQuery) && /[+-]?\d+(?:\.\d+)?\s*%/.test(rowText))) === null || _c === void 0 ? void 0 : _c.match(/([+-]?\d+(?:\.\d+)?)\s*%/)) === null || _d === void 0 ? void 0 : _d[1];
+            .find((rowText) => normalizedQuery && normalize(rowText).includes(normalizedQuery) && /[+-]?\d+(?:\.\d+)?\s*%/.test(rowText))) === null || _g === void 0 ? void 0 : _g.match(/([+-]?\d+(?:\.\d+)?)\s*%/)) === null || _h === void 0 ? void 0 : _h[1];
         const etsySearchTrendPercent = searchTrendPercent === undefined ? null : Number(searchTrendPercent);
         const relatedTerms = [];
         const relatedTermByKey = new Map();
@@ -721,7 +932,7 @@
         const relatedHeading = Array.from(root.querySelectorAll('h2, h3, h4, [role="heading"]'))
             .find((heading) => { var _a; return /related|similar search|exploration ideas?|explore ideas?|似たような検索ワード|探索のアイデア|関連(?:する)?検索|関連キーワード/i.test((_a = heading.innerText) !== null && _a !== void 0 ? _a : ''); });
         const relatedScopes = [
-            (_e = relatedHeading === null || relatedHeading === void 0 ? void 0 : relatedHeading.closest) === null || _e === void 0 ? void 0 : _e.call(relatedHeading, 'table, section, article, [role="region"]'),
+            (_j = relatedHeading === null || relatedHeading === void 0 ? void 0 : relatedHeading.closest) === null || _j === void 0 ? void 0 : _j.call(relatedHeading, 'table, section, article, [role="region"]'),
             relatedHeading === null || relatedHeading === void 0 ? void 0 : relatedHeading.parentElement,
             relatedHeading === null || relatedHeading === void 0 ? void 0 : relatedHeading.nextElementSibling,
         ].filter((scope, index, scopes) => Boolean(scope) && scopes.indexOf(scope) === index);
@@ -768,8 +979,8 @@
                     addRelatedTerm((_a = element.innerText) !== null && _a !== void 0 ? _a : '');
             });
         });
-        const pageText = (_g = (_f = root.innerText) === null || _f === void 0 ? void 0 : _f.replace(/\u00a0/g, ' ')) !== null && _g !== void 0 ? _g : '';
-        const remainingMatch = (_j = (_h = pageText.match(/(\d+)\s+(?:free\s+)?search(?:es)?\s+(?:remaining|left)/i)) !== null && _h !== void 0 ? _h : pageText.match(/(?:remaining|left)[^\d]{0,20}(\d+)\s+(?:search(?:es)?)?/i)) !== null && _j !== void 0 ? _j : pageText.match(/(?:残り|あと)\s*(\d+)\s*(?:回|件)?/);
+        const pageText = (_l = (_k = root.innerText) === null || _k === void 0 ? void 0 : _k.replace(/\u00a0/g, ' ')) !== null && _l !== void 0 ? _l : '';
+        const remainingMatch = (_o = (_m = pageText.match(/(\d+)\s+(?:free\s+)?search(?:es)?\s+(?:remaining|left)/i)) !== null && _m !== void 0 ? _m : pageText.match(/(?:remaining|left)[^\d]{0,20}(\d+)\s+(?:search(?:es)?)?/i)) !== null && _o !== void 0 ? _o : pageText.match(/(?:残り|あと)\s*(\d+)\s*(?:回|件)?/);
         const remainingSearches = remainingMatch ? Number(remainingMatch[1]) : null;
         const ok = etsySearches30d !== null || etsyListings !== null;
         const limitedRelatedTerms = relatedTerms.slice(0, 100);
@@ -793,11 +1004,15 @@
     if (testHooks)
         testHooks.extractEtsyMarketplaceInsightInPage = extractEtsyMarketplaceInsightInPage;
     if (testHooks)
+        testHooks.extractVisibleEtsyMarketplaceInsightInPage = extractVisibleEtsyMarketplaceInsightInPage;
+    if (testHooks)
         testHooks.mergeEtsyMarketplaceInsightResults = mergeEtsyMarketplaceInsightResults;
     if (testHooks)
         testHooks.switchEtsyMarketplaceRelatedModeInPage = switchEtsyMarketplaceRelatedModeInPage;
     if (testHooks)
         testHooks.waitForEtsyMarketplaceInsightResult = waitForEtsyMarketplaceInsightResult;
+    if (testHooks)
+        testHooks.etsyMarketplaceInsightSearchUrl = etsyMarketplaceInsightSearchUrl;
     function normalizeTrendSources(value) {
         const requested = Array.isArray(value) && value.length > 0
             ? value.map((item) => String(item).toLowerCase())
@@ -1152,6 +1367,20 @@
             return false;
         }
     }
+    function isErankDailyLimitError(value) {
+        return /ERANK_DAILY_LOOKUP_LIMIT_REACHED|1日あたりの検索上限|keyword lookup limit/i.test(String(value !== null && value !== void 0 ? value : ''));
+    }
+    function tabShowsErankPlan(tabId) {
+        return new Promise((resolve) => {
+            chrome.tabs.get(tabId, (tab) => {
+                if (chrome.runtime.lastError || !(tab === null || tab === void 0 ? void 0 : tab.url)) {
+                    resolve(false);
+                    return;
+                }
+                resolve(/\/(?:plans?|pricing|upgrade)(?:\/|$|\?)/i.test(tab.url));
+            });
+        });
+    }
     function getMarketState() {
         return {
             active: marketActive,
@@ -1266,7 +1495,9 @@
             let response;
             if (marketMode === 'erank') {
                 const tabId = await ensureErankTab();
-                response = await runKeywordInErankTab(tabId, keyword);
+                // Without a bound here a keyword whose metrics never render holds the whole
+                // queue for the content script's full internal wait.
+                response = await withTimeout(runKeywordInErankTab(tabId, keyword), ERANK_KEYWORD_TIMEOUT_MS, `eRank timed out for "${keyword}". Skipped this keyword.`);
             }
             else {
                 response = await withTimeout(runEverbeeKeyword(keyword), MARKET_KEYWORD_TIMEOUT_MS, `EverBee timed out for "${keyword}". Skipped this keyword.`);
@@ -1281,13 +1512,32 @@
                 marketResults.push(result);
             }
             else {
-                marketResults.push(buildFailedMarketResult(keyword, response.error || `${marketMode === 'erank' ? 'eRank' : 'EverBee'}調査に失敗しました。`));
+                const message = response.error || `${marketMode === 'erank' ? 'eRank' : 'EverBee'}調査に失敗しました。`;
+                if (marketMode === 'erank' && isErankDailyLimitError(message)) {
+                    marketError = ERANK_DAILY_LOOKUP_LIMIT_ERROR;
+                    marketActive = false;
+                    marketCurrentKeyword = '';
+                    marketQueue.unshift(keyword);
+                    saveMarketState();
+                    focusMarketFinderTab();
+                    return;
+                }
+                marketResults.push(buildFailedMarketResult(keyword, message));
             }
         }
         catch (error) {
             if (!marketActive || runId !== marketRunId)
                 return;
             const message = error instanceof Error ? error.message : 'Unexpected Market Finder extension error.';
+            if (marketMode === 'erank' && isErankDailyLimitError(message)) {
+                marketError = ERANK_DAILY_LOOKUP_LIMIT_ERROR;
+                marketActive = false;
+                marketCurrentKeyword = '';
+                marketQueue.unshift(keyword);
+                saveMarketState();
+                focusMarketFinderTab();
+                return;
+            }
             marketError = message;
             marketResults.push(buildFailedMarketResult(keyword, message));
         }
@@ -1552,7 +1802,7 @@
                 if (updatedTabId === tabId && changeInfo.status === 'complete') {
                     clearTimeout(timeoutId);
                     chrome.tabs.onUpdated.removeListener(listener);
-                    setTimeout(() => resolve(), 1500);
+                    setTimeout(() => resolve(), 500);
                 }
             };
             chrome.tabs.onUpdated.addListener(listener);
@@ -1582,14 +1832,21 @@
         var _a;
         const timeoutMessage = `eRank timed out for "${keyword}". Skipped this keyword.`;
         const firstTry = await withTimeout(sendErankMessage(tabId, keyword), MARKET_KEYWORD_TIMEOUT_MS, timeoutMessage);
+        if (!firstTry.ok && await tabShowsErankPlan(tabId)) {
+            return { ok: false, error: ERANK_DAILY_LOOKUP_LIMIT_ERROR };
+        }
         if (firstTry.ok || !((_a = firstTry.error) === null || _a === void 0 ? void 0 : _a.includes('Receiving end does not exist')))
             return firstTry;
         await chrome.scripting.executeScript({
             target: { tabId },
-            files: ['dist/erankContent.js'],
+            files: ['dist/erankMetricPolicy.js', 'dist/erankContent.js'],
         });
         await activateTab(tabId);
-        return withTimeout(sendErankMessage(tabId, keyword), MARKET_KEYWORD_TIMEOUT_MS, timeoutMessage);
+        const secondTry = await withTimeout(sendErankMessage(tabId, keyword), MARKET_KEYWORD_TIMEOUT_MS, timeoutMessage);
+        if (!secondTry.ok && await tabShowsErankPlan(tabId)) {
+            return { ok: false, error: ERANK_DAILY_LOOKUP_LIMIT_ERROR };
+        }
+        return secondTry;
     }
     function sendEverbeeMessage(tabId, keyword) {
         return new Promise((resolve) => {

@@ -40,13 +40,47 @@
         '[contenteditable="true"]',
     ]
 
-    const SEARCH_BUTTON_WORDS = ['search', 'lookup', 'submit', 'go', 'find', 'analyze']
+    const SEARCH_BUTTON_WORDS = ['search', 'lookup', 'submit', 'find', 'analyze']
+    const SEARCH_BUTTON_NEGATIVE_WORDS = ['dashboard', 'upgrade', 'account', 'log out', 'logout', 'menu', 'close', 'cancel']
     const ERANK_METRICS_READY_TIMEOUT_MS = 300000
     const ERANK_METRIC_HEARTBEAT_MS = 2000
+    const ERANK_KD_GRACE_AFTER_COMPETITION_MS = 8000
+    const ERANK_DAILY_LOOKUP_LIMIT_ERROR = 'ERANK_DAILY_LOOKUP_LIMIT_REACHED: eRankの1日あたりの検索上限に達しました。翌日のリセット後に再開してください（Basic 100件/日、Pro 200件/日）。'
     let erankRunActive = false
 
     function wait(ms: number) {
         return new Promise((resolve) => window.setTimeout(resolve, ms))
+    }
+
+    let lastFocusRequestAt = 0
+
+    // Chrome clamps timers and skips lazy rendering in hidden tabs, so eRank's Competition
+    // and KD columns may never arrive while the tab sits in the background. Ask the
+    // background to bring it forward, throttled so it cannot fight the user for focus.
+    function requestTabFocusIfHidden() {
+        if (document.visibilityState !== 'hidden') return false
+        const now = Date.now()
+        if (now - lastFocusRequestAt < 5000) return true
+        lastFocusRequestAt = now
+        try {
+            chrome.runtime.sendMessage({ action: 'REQUEST_RESEARCH_TAB_FOCUS' })
+        } catch {
+            // The background may be restarting; the next poll retries.
+        }
+        return true
+    }
+
+    // Time spent hidden is not time the page had a chance to render, so it must not count
+    // towards a timeout or a keyword gets failed for being backgrounded.
+    async function waitVisible(ms: number) {
+        await wait(ms)
+        let hiddenFor = 0
+        while (document.visibilityState === 'hidden') {
+            requestTabFocusIfHidden()
+            await wait(500)
+            hiddenFor += 500
+        }
+        return hiddenFor
     }
 
     function waitForMetricDomChange() {
@@ -80,8 +114,20 @@
         return value.replace(/\s+/g, ' ').trim()
     }
 
+    function pageHasDailyLookupLimit() {
+        const text = normalizeText(document.body.innerText || '')
+        const showsPlanLimit = /erank plans/i.test(text) && /keyword lookups?\/day/i.test(text)
+        const showsLimitMessage = /(?:daily|today|per day).{0,50}(?:keyword|lookup).{0,50}(?:limit|reached|used)/i.test(text)
+            || /(?:keyword|lookup).{0,50}(?:daily|today|per day).{0,50}(?:limit|reached|used)/i.test(text)
+        return showsPlanLimit || showsLimitMessage
+    }
+
+    function throwIfDailyLookupLimitReached() {
+        if (pageHasDailyLookupLimit()) throw new Error(ERANK_DAILY_LOOKUP_LIMIT_ERROR)
+    }
+
     function pageHasNoDataMessage() {
-        return /(?:we don't have any data|do not have any data|no data for|no data to show)/i.test(normalizeText(document.body.innerText || ''))
+        return /(?:we don't have any data|do not have any data|could not find data for|no data for|no data to show)/i.test(normalizeText(document.body.innerText || ''))
     }
 
     function normalizeMetric(value: string) {
@@ -196,40 +242,71 @@
         return fields.find((element) => elementLooksSearchable(element)) ?? null
     }
 
-    async function submitSearch(field: EditableSearchField) {
+    // eRank's keyword field is not inside a form, so a page-wide text match picks up
+    // unrelated navigation ("Go to Dashboard"). Only a button sitting near the field is a
+    // plausible submit control.
+    function findSubmitButtonNear(field: EditableSearchField): HTMLElement | null {
         const form = field.closest('form')
         const formButton = form?.querySelector('button[type="submit"], input[type="submit"]') as HTMLElement | null
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')) as HTMLElement[]
-        const button = buttons.find((item) => {
-            const text = `${item.innerText ?? ''} ${(item as HTMLInputElement).value ?? ''} ${item.getAttribute('aria-label') ?? ''}`.toLowerCase()
-            return SEARCH_BUTTON_WORDS.some((word) => text.includes(word))
-        })
+        if (formButton) return formButton
 
+        let scope: HTMLElement | null = field.parentElement
+        for (let depth = 0; depth < 4 && scope; depth += 1) {
+            const candidates = Array.from(scope.querySelectorAll('button, [role="button"], input[type="submit"]')) as HTMLElement[]
+            const match = candidates.find((item) => {
+                const text = `${item.innerText ?? ''} ${(item as HTMLInputElement).value ?? ''} ${item.getAttribute('aria-label') ?? ''}`.toLowerCase()
+                if (SEARCH_BUTTON_NEGATIVE_WORDS.some((word) => text.includes(word))) return false
+                return SEARCH_BUTTON_WORDS.some((word) => text.includes(word)) || text.trim() === ''
+            })
+            if (match) return match
+            scope = scope.parentElement
+        }
+        return null
+    }
+
+    function searchLooksStarted(before: string) {
+        if (document.querySelector('[role="progressbar"], .p-progress-spinner')) return true
+        return normalizeText(document.body.innerText || '') !== before
+    }
+
+    // Enter is what eRank actually responds to. The button is only a fallback, and it is
+    // clicked only when Enter did nothing, so a keyword never spends two daily lookups.
+    async function submitSearch(field: EditableSearchField) {
+        const before = normalizeText(document.body.innerText || '')
         field.focus()
         field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }))
         field.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', bubbles: true }))
         field.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }))
-        await wait(500)
 
-        if (formButton) {
-            formButton.click()
+        await wait(1200)
+        if (searchLooksStarted(before)) return
+
+        const button = findSubmitButtonNear(field)
+        if (button) {
+            button.click()
             return
         }
 
-        if (button) button.click()
+        const submitEvent = field.closest('form')
+        if (submitEvent) submitEvent.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     }
 
-    async function waitForLikelyResults(keyword: string) {
+    // The previous keyword's numbers stay on screen until the new ones arrive, so results
+    // only count once the page differs from what was showing when the search was sent.
+    async function waitForLikelyResults(keyword: string, previousText = '') {
         const startedAt = Date.now()
         let lastText = ''
         let stableCount = 0
 
-        while (Date.now() - startedAt < 18000) {
-            await wait(900)
+        let hiddenMs = 0
+        while (Date.now() - startedAt - hiddenMs < 18000) {
+            hiddenMs += await waitVisible(450)
+            throwIfDailyLookupLimitReached()
             const text = normalizeText(document.body.innerText || '')
             if (pageHasNoDataMessage()) return
             const hasMetric = /(average searches|avg searches|average clicks|avg clicks|etsy competition|search trend|competition|ctr)/i.test(text)
             const hasKeyword = text.toLowerCase().includes(keyword.toLowerCase().slice(0, 16))
+            const changed = !previousText || text !== previousText
 
             if (text === lastText) {
                 stableCount += 1
@@ -238,7 +315,7 @@
                 lastText = text
             }
 
-            if (hasMetric && (stableCount >= 1 || hasKeyword)) return
+            if (changed && hasMetric && (stableCount >= 1 || hasKeyword)) return
         }
     }
 
@@ -326,9 +403,13 @@
         const startedAt = Date.now()
         let lastText = ''
         let stableCount = 0
+        let competitionReadyAt: number | null = null
 
-        while (Date.now() - startedAt < ERANK_METRICS_READY_TIMEOUT_MS) {
+        let hiddenMs = 0
+        while (Date.now() - startedAt - hiddenMs < ERANK_METRICS_READY_TIMEOUT_MS) {
             await waitForMetricDomChange()
+            // Lazy columns do not render in a hidden tab, so waiting there proves nothing.
+            hiddenMs += await waitVisible(0)
             if (pageHasNoDataMessage()) return
             const snapshot = keywordIdeasMetricSnapshot(keyword)
             if (snapshot.text && snapshot.text === lastText) {
@@ -339,28 +420,47 @@
             }
 
             const elapsed = Date.now() - startedAt
-            const waitedEnoughForLazyColumns = elapsed >= 12000
-            const requiredKdRows = Math.max(1, Math.min(snapshot.rows, 3))
+            const requiredCompetitionRows = Math.max(1, Math.min(snapshot.rows, 3))
             const targetReady = snapshot.targetFound
                 && snapshot.targetDemandResolved
                 && snapshot.targetCompetitionResolved
-                && snapshot.targetKdResolved
-            const kdReady = snapshot.targetFound
+            const competitionReady = snapshot.targetFound
                 ? targetReady
-                : snapshot.withKd >= requiredKdRows
+                : snapshot.withCompetition >= requiredCompetitionRows
+            if (competitionReady && competitionReadyAt === null) {
+                competitionReadyAt = Date.now()
+            } else if (!competitionReady) {
+                competitionReadyAt = null
+            }
+            const kdGraceElapsed = snapshot.targetHasKd
+                || snapshot.targetKdResolved
+                || (competitionReadyAt !== null && Date.now() - competitionReadyAt >= ERANK_KD_GRACE_AFTER_COMPETITION_MS)
+            const demandReady = snapshot.targetFound
+                ? snapshot.targetDemandResolved
+                : snapshot.withDemand > 0
             const hasVisibleMetrics = snapshot.rows > 0
-                && (snapshot.withDemand > 0 || targetReady)
-                && kdReady
+                && demandReady
+                && competitionReady
+                && kdGraceElapsed
+            const partialLoadResolved = snapshot.targetFound
+                ? !snapshot.targetPartial
+                : snapshot.partial === 0
             const looksReady = hasVisibleMetrics
-                && snapshot.partial === 0
-                && !snapshot.targetPartial
+                && partialLoadResolved
                 && stableCount >= 3
+            // Lazy columns need a floor, but a row that already resolved demand, competition
+            // and KD has nothing left to load, so it does not have to serve the full wait.
+            const targetFullyResolved = snapshot.targetFound
+                && snapshot.targetDemandResolved
+                && snapshot.targetCompetitionResolved
+                && (snapshot.targetHasKd || snapshot.targetKdResolved)
+            const waitedEnoughForLazyColumns = elapsed >= (targetFullyResolved ? 4000 : 12000)
 
             if (waitedEnoughForLazyColumns && looksReady) return
         }
 
         const latest = keywordIdeasMetricSnapshot(keyword)
-        throw new Error(`eRankの競合・KD表示を5分待ちましたが完了を確認できませんでした。需要=${latest.targetHasDemand ? '取得済み' : '未取得'} 競合=${latest.targetCompetitionResolved ? '表示済み' : '読込中'} KD=${latest.targetHasKd ? '表示済み' : '読込中'} rows=${latest.rows} partial=${latest.partial}`)
+        throw new Error(`eRankのCompetition表示を5分待ちましたが完了を確認できませんでした。需要=${latest.targetDemandResolved ? '確認済み' : '未取得'} Competition=${latest.targetCompetitionResolved ? '表示済み' : '読込中'} KD=${latest.targetHasKd ? '取得済み' : '任意・未表示'} rows=${latest.rows} partial=${latest.partial}`)
     }
 
     function describeElement(element: Element) {
@@ -927,6 +1027,12 @@
         return match?.value ?? ''
     }
 
+    function visualColumnCoverageCount(rect: DOMRect, columns: ErankColumnMap) {
+        return Array.from(columns.values())
+            .filter((column) => column.center >= rect.left - 4 && column.center <= rect.right + 4)
+            .length
+    }
+
     function findVisualRowForKeyword(keyword: string, columns: Map<ErankColumnKey, { left: number, right: number, center: number, top: number }>) {
         const target = normalizeKeywordText(keyword)
         const headerTop = columns.get('keyword')?.top ?? 0
@@ -940,7 +1046,7 @@
                 return Math.abs((rect.left + rect.width / 2) - keywordCenter) <= 220
             })
 
-        const rows: HTMLElement[] = []
+        const rows = new Set<HTMLElement>()
         for (const element of exactKeywordElements) {
             let current: HTMLElement | null = element
             for (let depth = 0; current && depth < 9; depth += 1) {
@@ -954,14 +1060,28 @@
                     && numericCount >= 3
                     && !/avg\.?\s*searches|avg\.?\s*clicks|etsy competition/i.test(text)
                 if (looksLikeRow) {
-                    rows.push(current)
-                    break
+                    rows.add(current)
                 }
                 current = current.parentElement
             }
         }
 
-        return rows.sort((a, b) => a.getBoundingClientRect().height - b.getBoundingClientRect().height)[0] ?? null
+        return Array.from(rows)
+            .map((row) => {
+                const rect = row.getBoundingClientRect()
+                const coverage = visualColumnCoverageCount(rect, columns)
+                const competitionColumn = columns.get('erankCompetition')
+                const coversCompetition = Boolean(
+                    competitionColumn
+                    && competitionColumn.center >= rect.left - 4
+                    && competitionColumn.center <= rect.right + 4,
+                )
+                return { row, rect, coverage, coversCompetition }
+            })
+            .sort((a, b) => Number(b.coversCompetition) - Number(a.coversCompetition)
+                || b.coverage - a.coverage
+                || a.rect.height - b.rect.height
+                || b.rect.width - a.rect.width)[0]?.row ?? null
     }
 
     function textLooksLikeKeywordCell(text: string) {
@@ -1258,11 +1378,26 @@
         const statisticsMetrics = extractKeywordStatisticsMetrics(bodyText)
         const visualMetrics = extractFromVisualGrid(keyword)
         const tableMetrics = extractFromTables(keyword)
-        const erankSearchVolume = statisticsMetrics.erankSearchVolume || visualMetrics.erankSearchVolume || tableMetrics.erankSearchVolume
-        const erankClicks = statisticsMetrics.erankClicks || visualMetrics.erankClicks || tableMetrics.erankClicks
-        const erankCtr = statisticsMetrics.erankCtr || visualMetrics.erankCtr || tableMetrics.erankCtr
-        const erankCompetition = statisticsMetrics.erankCompetition || visualMetrics.erankCompetition || tableMetrics.erankCompetition
-        const erankKeywordDifficulty = visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty
+        const policy = (globalThis as typeof globalThis & {
+            EtsyMiraiErankMetricPolicy?: EtsyMiraiErankMetricPolicyApi
+        }).EtsyMiraiErankMetricPolicy
+        const mergedMetrics = policy?.mergeErankMetrics({
+            statisticsText: keywordStatisticsSection(bodyText),
+            statisticsMetrics,
+            visualMetrics,
+            tableMetrics,
+        }) ?? {
+            erankSearchVolume: statisticsMetrics.erankSearchVolume,
+            erankClicks: statisticsMetrics.erankClicks,
+            erankCtr: statisticsMetrics.erankCtr,
+            erankCompetition: statisticsMetrics.erankCompetition || visualMetrics.erankCompetition || tableMetrics.erankCompetition,
+            erankKeywordDifficulty: visualMetrics.erankKeywordDifficulty || tableMetrics.erankKeywordDifficulty,
+        }
+        const erankSearchVolume = mergedMetrics.erankSearchVolume
+        const erankClicks = mergedMetrics.erankClicks
+        const erankCtr = mergedMetrics.erankCtr
+        const erankCompetition = statisticsMetrics.erankCompetition || mergedMetrics.erankCompetition
+        const erankKeywordDifficulty = mergedMetrics.erankKeywordDifficulty
         const erankTrend = visualMetrics.erankTrend || tableMetrics.erankTrend || metricByRegex(['Search Trend', 'Trend'], bodyText)
         const relatedKeywords = extractRelatedKeywordRows(keyword)
         const erankCheckedAt = new Date().toISOString()
@@ -1304,16 +1439,21 @@
     }
 
     async function runKeyword(keyword: string) {
+        throwIfDailyLookupLimitReached()
         const field = findSearchField()
         if (!field) throw new Error(collectSearchDiagnostics())
 
         field.scrollIntoView({ block: 'center' })
         field.focus()
         setNativeValue(field, keyword)
-        await wait(250)
+        await wait(150)
+        const textBeforeSearch = normalizeText(document.body.innerText || '')
         await submitSearch(field)
-        await wait(4500)
-        await waitForLikelyResults(keyword)
+        await wait(600)
+        throwIfDailyLookupLimitReached()
+        await waitForLikelyResults(keyword, textBeforeSearch)
+        throwIfDailyLookupLimitReached()
+        if (pageHasNoDataMessage()) return extractMetrics(keyword)
         await revealKeywordIdeasTable()
         await waitForKeywordIdeasMetricsReady(keyword)
         return extractMetrics(keyword)
