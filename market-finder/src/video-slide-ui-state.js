@@ -43,6 +43,10 @@ export function migrateVideoSlidePromptTemplate(value) {
       '',
     )
     .replace(
+      /\n?最後のスライドに小さく「この調査結果は売上を保証するものではありません(?:。調査時点のデータを基に、商品化の優先順位を判断したものです)?」と記載してください。?(?=\n|$)/,
+      '',
+    )
+    .replace(
       /【候補別スライド】[\s\S]*?(?=\n\n【動画用デザインルール】)/,
       keywordFirstCandidateBlock,
     )

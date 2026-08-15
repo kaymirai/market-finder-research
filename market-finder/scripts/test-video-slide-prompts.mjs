@@ -164,6 +164,7 @@ test('creates keyword-first candidate slides without a final next-actions slide'
   })
 
   const outputs = buildVideoSlideOutputs(snapshot, 'INPUT\n{{MARKET_FINDER_RESULT}}')
+  const defaultOutputs = buildVideoSlideOutputs(snapshot, DEFAULT_VIDEO_SLIDE_PROMPT)
 
   assert.equal(outputs.slides.length, 3)
   assert.deepEqual(outputs.slides.map((slide) => slide.id), [
@@ -184,6 +185,7 @@ test('creates keyword-first candidate slides without a final next-actions slide'
   assert.equal(outputs.narration.length, outputs.slides.length)
   assert.match(outputs.fullPrompt, /INPUT/)
   assert.match(outputs.fullPrompt, /teacher ghost shirt/)
+  assert.doesNotMatch(defaultOutputs.fullPrompt, /最後のスライドに小さく/)
   assert.doesNotMatch(outputs.fullPrompt, /\{\{MARKET_FINDER_RESULT\}\}/)
 })
 

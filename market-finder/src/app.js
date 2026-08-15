@@ -133,7 +133,7 @@ import {
   buildVideoSlideSnapshot,
   videoSlideFilename,
   videoSlideSnapshotFingerprint,
-} from './video-slide-prompts.js?v=20260813-2'
+} from './video-slide-prompts.js?v=20260815-4'
 import {
   createVideoSlideUiState,
   formatVideoSlideNarrationForCopy,
@@ -141,7 +141,7 @@ import {
   migrateVideoSlidePromptTemplate,
   normalizeVideoSlidePromptTemplate,
   selectVideoSlideOutputView,
-} from './video-slide-ui-state.js?v=20260813-2'
+} from './video-slide-ui-state.js?v=20260815-4'
 import {
   buildFinalEvidenceKeywordPool,
   deriveFinalEvidenceState,

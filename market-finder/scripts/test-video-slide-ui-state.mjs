@@ -59,6 +59,7 @@ test('migrates the legacy candidate block to keyword-first slides while preservi
     '',
     '【動画用デザインルール】',
     'CUSTOM END',
+    '最後のスライドに小さく「この調査結果は売上を保証するものではありません」と記載してください。',
   ].join('\n')
 
   const migrated = migrateVideoSlidePromptTemplate(saved)
@@ -69,6 +70,7 @@ test('migrates the legacy candidate block to keyword-first slides while preservi
   assert.match(migrated, /最大3行/)
   assert.doesNotMatch(migrated, /- 最終：商品案を1つに絞る/)
   assert.doesNotMatch(migrated, /想定購入者、使用場面/)
+  assert.doesNotMatch(migrated, /最後のスライドに小さく/)
   assert.match(migrated, /CUSTOM END/)
 })
 
