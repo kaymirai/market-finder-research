@@ -868,6 +868,121 @@ test('a fresh cycle skips keywords already checked by an earlier cycle', () => {
   ])
 })
 
+test('an automatic fresh cycle keeps accumulated evidence visible toward the winner target', () => {
+  const researchRows = [{
+    keyword: 'fall book lover shirt',
+    researchEventId: 'breast-cancer-awareness',
+    researchCategoryId: 'shirt',
+    opportunityLabel: 'B',
+  }]
+  const researchRounds = {
+    rounds: [{
+      id: 'multi-angle-recent-sales-1',
+      status: 'complete',
+      candidateKeywords: ['fall book lover shirt'],
+    }],
+    activeRoundId: 'multi-angle-recent-sales-1',
+    selectedRoundId: 'all',
+  }
+  const candidateCatalog = [{
+    keyword: 'fall book lover shirt',
+    eventId: 'breast-cancer-awareness',
+    categoryId: 'shirt',
+  }]
+
+  const prepared = multiAngleApi.prepareNewMultiAngleCycle({
+    exploration: createMultiAngleExplorationState({
+      status: 'exhausted',
+      activeEventId: 'breast-cancer-awareness',
+      categoryId: 'shirt',
+    }),
+    researchRows,
+    researchRounds,
+    candidateRoundId: 'multi-angle-recent-sales-1',
+    candidateCatalog,
+  }, {
+    activeEventId: 'breast-cancer-awareness',
+    categoryId: 'shirt',
+    targetWinnerCount: 5,
+    preserveAccumulatedEvidence: true,
+  })
+
+  assert.deepEqual(prepared.researchRows, researchRows)
+  assert.deepEqual(prepared.researchRounds, researchRounds)
+  assert.equal(prepared.candidateRoundId, 'multi-angle-recent-sales-1')
+  assert.deepEqual(prepared.candidateCatalog, candidateCatalog)
+})
+
+test('recovers verified A/B winners from the latest matching archive after an automatic reset', () => {
+  const winners = multiAngleApi.archivedMultiAngleWinners([{
+    capturedAt: '2026-08-14T17:00:00.000Z',
+    context: { eventId: 'breast-cancer-awareness', categoryId: 'shirt' },
+    multiAngleExploration: {
+      winnerKeywords: ['older winner shirt'],
+      resultLanes: {
+        event: [{
+          keyword: 'older winner shirt',
+          eventId: 'breast-cancer-awareness',
+          categoryId: 'shirt',
+          opportunityLabel: 'B',
+          evidenceState: { status: 'verified' },
+        }],
+      },
+    },
+  }, {
+    capturedAt: '2026-08-14T18:00:00.000Z',
+    context: { eventId: 'breast-cancer-awareness', categoryId: 'shirt' },
+    multiAngleExploration: {
+      winnerKeywords: ['comfort colors halloween shirt mockup', 'fall book lover shirt', 'ignored c shirt'],
+      resultLanes: {
+        event: [{
+          keyword: 'comfort colors halloween shirt mockup',
+          eventId: 'breast-cancer-awareness',
+          categoryId: 'shirt',
+          opportunityLabel: 'B',
+          confidenceLabel: 'High',
+          evidenceState: { status: 'verified' },
+        }, {
+          keyword: 'fall book lover shirt',
+          eventId: 'breast-cancer-awareness',
+          categoryId: 'shirt',
+          opportunityLabel: 'B',
+          confidenceLabel: 'High',
+          evidenceState: { status: 'verified' },
+        }, {
+          keyword: 'ignored c shirt',
+          eventId: 'breast-cancer-awareness',
+          categoryId: 'shirt',
+          opportunityLabel: 'C',
+          evidenceState: { status: 'verified' },
+        }],
+      },
+    },
+  }, {
+    capturedAt: '2026-08-14T18:30:00.000Z',
+    context: { eventId: 'breast-cancer-awareness', categoryId: 'shirt' },
+    multiAngleExploration: {
+      winnerKeywords: ['comfort colors halloween shirt mockup', 'fall book lover shirt'],
+      resultLanes: { event: [], evergreen: [] },
+    },
+  }, {
+    capturedAt: '2026-08-14T19:00:00.000Z',
+    context: { eventId: 'halloween', categoryId: 'shirt' },
+    multiAngleExploration: {
+      winnerKeywords: ['wrong context shirt'],
+      resultLanes: { event: [{ keyword: 'wrong context shirt', opportunityLabel: 'A' }] },
+    },
+  }], {
+    eventId: 'breast-cancer-awareness',
+    categoryId: 'shirt',
+  })
+
+  assert.deepEqual(winners.map((row) => [row.keyword, row.opportunityLabel, row.archivedCapturedAt]), [
+    ['comfort colors halloween shirt mockup', 'B', '2026-08-14T18:00:00.000Z'],
+    ['fall book lover shirt', 'B', '2026-08-14T18:00:00.000Z'],
+  ])
+})
+
 test('starts a reused custom-event id with no live evidence from the archived cycle', () => {
   const evidenceArchives = [{
     runId: 'custom-alpha-terminal',
@@ -1311,6 +1426,44 @@ test('persists terminal evidence once before allowing an explicit new cycle', as
   assert.deepEqual(second, { ok: true, persisted: false })
   assert.equal(persistCalls, 1)
   assert.deepEqual(reloadedRecords, [archiveRecord])
+})
+
+test('does not persist an empty terminal archive over an earlier valid result', () => {
+  assert.equal(multiAngleApi.shouldPersistTerminalMultiAngleArchive({
+    demandKeywords: [],
+    supplyListings: [],
+    multiAngleExploration: {
+      winnerKeywords: [],
+    },
+  }), false)
+  assert.equal(multiAngleApi.shouldPersistTerminalMultiAngleArchive({
+    demandKeywords: [],
+    supplyListings: [],
+    multiAngleExploration: {
+      winnerKeywords: ['fall book lover shirt'],
+    },
+  }), false)
+  assert.equal(multiAngleApi.shouldPersistTerminalMultiAngleArchive({
+    demandKeywords: [],
+    supplyListings: [],
+    multiAngleExploration: {
+      winnerKeywords: ['fall book lover shirt'],
+      resultLanes: {
+        evergreen: [{
+          keyword: 'fall book lover shirt',
+          opportunityLabel: 'B',
+          evidenceState: { status: 'verified' },
+        }],
+      },
+    },
+  }), true)
+  assert.equal(multiAngleApi.shouldPersistTerminalMultiAngleArchive({
+    demandKeywords: [{ keyword: 'fall book lover shirt' }],
+    supplyListings: [],
+    multiAngleExploration: {
+      winnerKeywords: [],
+    },
+  }), true)
 })
 
 test('keeps terminal exploration intact when its archive cannot be persisted', async () => {

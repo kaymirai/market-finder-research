@@ -201,6 +201,7 @@ import {
   restoreSavedSeasonalReferences,
 } from './multi-angle-candidates.js?v=20260814-5'
 import {
+  archivedMultiAngleWinners,
   backfillMultiAngleResearchSnapshots,
   createMultiAngleExplorationState,
   hasMeaningfulMultiAngleContext,
@@ -229,10 +230,11 @@ import {
   resumeMultiAngleExploration,
   shouldAutoStartFreshCycle,
   shouldAutoStartMultiAngleExploration,
+  shouldPersistTerminalMultiAngleArchive,
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260815-2'
+} from './multi-angle-exploration.js?v=20260815-7'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -297,6 +299,7 @@ let autoDeepDiveStartPromise = null
 let autoPendingEvidenceStartPromise = null
 let autoFreshCycleTimerId = null
 let autoFreshCycleStarting = false
+let preserveAccumulatedEvidenceForNextCycle = false
 
 function readResearchTabLease() {
   try {
@@ -2017,6 +2020,13 @@ async function loadEvidenceArchives() {
   })
   renderBuyerIdentitySuggestions({ analysis: archiveAnalysis })
   renderModifierEvidence(archiveAnalysis)
+  if (
+    state.researchRows.length === 0
+    && archivedMultiAngleWinners(state.evidenceArchives, activeResearchContext()).length > 0
+  ) {
+    setSimpleStatus('自動継続前に保存したA/B候補を復元しました。残りの候補探索を続けます。')
+    renderAll()
+  }
 }
 
 async function saveEvidenceArchive(options = {}) {
@@ -5469,8 +5479,43 @@ function finalEvidenceRows() {
     }
   })
 
+  const recoveredRows = rows.length === 0
+    && state.researchRows.length === 0
+    ? archivedMultiAngleWinners(state.evidenceArchives, activeContext).map((candidate) => {
+      const raw = {
+        keyword: candidate.keyword,
+        researchEventId: activeContext.eventId,
+        researchCategoryId: activeContext.categoryId,
+        opportunityLabel: candidate.opportunityLabel,
+        confidenceLabel: candidate.confidenceLabel,
+        archivedCapturedAt: candidate.archivedCapturedAt,
+      }
+      return {
+        keyword: candidate.keyword,
+        key: researchRowContextKey(raw),
+        raw,
+        normalized: { candidateClass: { action: 'candidate' } },
+        everbeeRow: null,
+        queryEligibility: classifyMarketplaceBuyerQuery(candidate.keyword, {
+          eventId: activeContext.eventId,
+          categoryId: activeContext.categoryId,
+          excludedRiskTerms: elements.riskInput.value,
+        }),
+        evidenceState: { status: 'verified', nextStage: 'done' },
+        scoreState: { type: 'overall', score: null },
+        opportunityLabel: candidate.opportunityLabel,
+        confidenceLabel: candidate.confidenceLabel,
+        candidateStage: candidate.candidateStage || 'opportunity',
+        decisionReasons: ['保存済みの検証済みA/B候補'],
+        erankChecked: true,
+        etsyChecked: true,
+        everbeeChecked: true,
+        recoveredFromArchive: true,
+      }
+    })
+    : []
   const statusOrder = { verified: 0, pending: 1, hold: 2, failed: 3, excluded: 4 }
-  const sortedRows = rows.sort((left, right) => (
+  const sortedRows = [...rows, ...recoveredRows].sort((left, right) => (
     (right.scoreState.score ?? -1) - (left.scoreState.score ?? -1)
     || (statusOrder[left.evidenceState.status] ?? 9) - (statusOrder[right.evidenceState.status] ?? 9)
     || (right.scoreState.explorationPriority ?? -1) - (left.scoreState.explorationPriority ?? -1)
@@ -6713,7 +6758,7 @@ function scheduleAutoFreshMultiAngleCycle(delayMs = 1500) {
     if (state.multiAngleExploration.status !== 'exhausted') return
     autoFreshCycleStarting = true
     try {
-      await startNewMultiAngleCycle()
+      await startContinuedMultiAngleCycle()
     } catch (error) {
       setSimpleStatus(friendlyExtensionError(error))
       renderAll()
@@ -6829,6 +6874,15 @@ async function startMultiAngleSearch() {
   return queueNextMultiAngleBatch()
 }
 
+async function startContinuedMultiAngleCycle() {
+  preserveAccumulatedEvidenceForNextCycle = true
+  try {
+    return await startNewMultiAngleCycle()
+  } finally {
+    preserveAccumulatedEvidenceForNextCycle = false
+  }
+}
+
 async function startNewMultiAngleCycle() {
   const terminalEvidencePersisted = await preserveTerminalMultiAngleEvidenceForNewDiscovery()
   if (!terminalEvidencePersisted) return false
@@ -6844,6 +6898,7 @@ async function startNewMultiAngleCycle() {
     eventSnapshot: researchEventSnapshot(nextCycleContext.event),
     categorySnapshot: nextCycleContext.category,
     targetWinnerCount: target.targetWinnerCount,
+    preserveAccumulatedEvidence: preserveAccumulatedEvidenceForNextCycle,
   }
   const prepared = prepareNewMultiAngleCycle({
     exploration: state.multiAngleExploration,
@@ -6968,7 +7023,7 @@ async function resumeMultiAngleSearch() {
       setSimpleStatus('既存の探索角度をすべて確認済みです。保存済み結果を学習材料にして、新しい探索サイクルへ進みます。')
       renderAll()
       persistMarketFinderState()
-      return startNewMultiAngleCycle()
+      return startContinuedMultiAngleCycle()
     }
     state.multiAngleExploration = resumed.state
   } else {
@@ -9519,11 +9574,15 @@ async function preserveTerminalMultiAngleEvidenceForNewDiscovery() {
     exploration,
     archiveRecord: record,
     hasArchivedRecord: hasArchivedEvidenceRecord,
-    persistArchiveRecord: (terminalRecord) => saveEvidenceArchive({
-      automatic: true,
-      allowEmptyEvidence: true,
-      record: terminalRecord,
-    }),
+    persistArchiveRecord: (terminalRecord) => (
+      shouldPersistTerminalMultiAngleArchive(terminalRecord)
+        ? saveEvidenceArchive({
+          automatic: true,
+          allowEmptyEvidence: true,
+          record: terminalRecord,
+        })
+        : Promise.resolve(true)
+    ),
   })
   if (result.ok) return true
   const message = '前回の連続探索結果を保存できませんでした。結果は消していません。ローカルサーバーを確認して、もう一度「候補を自動で探す」を押してください。'

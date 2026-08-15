@@ -348,6 +348,12 @@ export function multiAngleAutomationControl(state = {}, workActive = false) {
 
 export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
   const pending = snapshot?.pendingEvidenceAutomation ?? {}
+  const preserveAccumulatedEvidence = context?.preserveAccumulatedEvidence === true
+  const emptyResearchRounds = {
+    rounds: [],
+    activeRoundId: '',
+    selectedRoundId: 'all',
+  }
   const previousExploration = createMultiAngleExplorationState(snapshot?.exploration)
   const exploration = createMultiAngleExplorationState({
     status: 'idle',
@@ -366,17 +372,15 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
   })
   return {
     ...snapshot,
-    researchRows: [],
-    researchRounds: {
-      rounds: [],
-      activeRoundId: '',
-      selectedRoundId: 'all',
-    },
-    candidateRoundId: '',
+    researchRows: preserveAccumulatedEvidence ? snapshot?.researchRows ?? [] : [],
+    researchRounds: preserveAccumulatedEvidence
+      ? snapshot?.researchRounds ?? emptyResearchRounds
+      : emptyResearchRounds,
+    candidateRoundId: preserveAccumulatedEvidence ? snapshot?.candidateRoundId ?? '' : '',
     marketplaceInsightPlan: null,
     marketplaceInsightMessage: '',
     candidates: [],
-    candidateCatalog: [],
+    candidateCatalog: preserveAccumulatedEvidence ? snapshot?.candidateCatalog ?? [] : [],
     erankQueryPlan: [],
     crossNicheProposal: null,
     restoredResearchSavedAt: '',
@@ -395,6 +399,73 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
       targetKeywords: [],
     },
   }
+}
+
+export function archivedMultiAngleWinners(records = [], context = {}) {
+  const eventId = String(context?.eventId ?? context?.activeEventId ?? '').trim()
+  const categoryId = String(context?.categoryId ?? '').trim()
+  const matching = (Array.isArray(records) ? records : [])
+    .filter((record) => {
+      const archivedEventId = String(record?.context?.eventId ?? record?.eventId ?? '').trim()
+      const archivedCategoryId = String(record?.context?.categoryId ?? record?.categoryId ?? '').trim()
+      return archivedEventId === eventId && archivedCategoryId === categoryId
+    })
+    .sort((left, right) => (
+      Date.parse(String(right?.capturedAt ?? '')) - Date.parse(String(left?.capturedAt ?? ''))
+    ))
+  for (const archive of matching) {
+    const winnerKeywords = Array.isArray(archive?.multiAngleExploration?.winnerKeywords)
+      ? archive.multiAngleExploration.winnerKeywords
+      : []
+    if (winnerKeywords.length === 0) continue
+
+    const winners = new Set(winnerKeywords.map(normalizedKeywordKey).filter(Boolean))
+    const lanes = archive.multiAngleExploration.resultLanes ?? {}
+    const rows = [
+      ...(Array.isArray(lanes.event) ? lanes.event : []),
+      ...(Array.isArray(lanes.evergreen) ? lanes.evergreen : []),
+    ]
+    const seen = new Set()
+    const recovered = rows.filter((row) => {
+      const keyword = normalizedKeywordKey(row?.keyword)
+      const label = String(row?.opportunityLabel ?? '').trim().toUpperCase()
+      if (!keyword || seen.has(keyword) || !winners.has(keyword)) return false
+      if (!['A', 'B'].includes(label) || row?.evidenceState?.status !== 'verified') return false
+      seen.add(keyword)
+      return true
+    }).map((row) => ({
+      ...row,
+      keyword: normalizedKeywordKey(row.keyword),
+      opportunityLabel: String(row.opportunityLabel).trim().toUpperCase(),
+      archivedCapturedAt: String(archive.capturedAt ?? '').trim(),
+      recoveredFromArchive: true,
+    }))
+    if (recovered.length > 0) return recovered
+  }
+
+  return []
+}
+
+export function shouldPersistTerminalMultiAngleArchive(record = {}) {
+  const demandKeywords = Array.isArray(record?.demandKeywords) ? record.demandKeywords : []
+  const supplyListings = Array.isArray(record?.supplyListings) ? record.supplyListings : []
+  const winnerKeywords = Array.isArray(record?.multiAngleExploration?.winnerKeywords)
+    ? record.multiAngleExploration.winnerKeywords
+    : []
+  const winnerKeys = new Set(winnerKeywords.map(normalizedKeywordKey).filter(Boolean))
+  const lanes = record?.multiAngleExploration?.resultLanes ?? {}
+  const resultRows = [
+    ...(Array.isArray(lanes.event) ? lanes.event : []),
+    ...(Array.isArray(lanes.evergreen) ? lanes.evergreen : []),
+  ]
+  const hasRecoverableWinner = resultRows.some((row) => {
+    const keyword = normalizedKeywordKey(row?.keyword)
+    const label = String(row?.opportunityLabel ?? '').trim().toUpperCase()
+    return winnerKeys.has(keyword)
+      && ['A', 'B'].includes(label)
+      && row?.evidenceState?.status === 'verified'
+  })
+  return demandKeywords.length > 0 || supplyListings.length > 0 || hasRecoverableWinner
 }
 
 export async function persistTerminalMultiAngleEvidenceBeforeReset({
