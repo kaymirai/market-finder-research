@@ -156,7 +156,7 @@ test('builds a safe snapshot without detailed Etsy, EverBee, or eRank metrics', 
   assert.doesNotMatch(serialized, /99999|88888|77777|66666/)
 })
 
-test('creates cover, conclusion, one slide per candidate, final slide, and matching narration', () => {
+test('creates keyword-first candidate slides without a final next-actions slide', () => {
   const snapshot = buildVideoSlideSnapshot({
     rows: [makeRow('teacher ghost shirt', 82, 'A')],
     context: CONTEXT,
@@ -165,11 +165,22 @@ test('creates cover, conclusion, one slide per candidate, final slide, and match
 
   const outputs = buildVideoSlideOutputs(snapshot, 'INPUT\n{{MARKET_FINDER_RESULT}}')
 
-  assert.equal(outputs.slides.length, 4)
+  assert.equal(outputs.slides.length, 3)
   assert.deepEqual(outputs.slides.map((slide) => slide.id), [
-    'cover', 'conclusion', 'candidate-1', 'next-actions',
+    'cover', 'conclusion', 'candidate-1',
   ])
-  assert.match(outputs.slides[2].prompt, /teacher ghost shirt/)
+  const candidatePrompt = outputs.slides[2].prompt
+  assert.match(candidatePrompt, /teacher ghost shirt/)
+  assert.match(candidatePrompt, /画面の70〜80％/)
+  assert.match(candidatePrompt, /120〜180pt/)
+  assert.match(candidatePrompt, /最大3行/)
+  assert.match(candidatePrompt, /中央/)
+  assert.match(candidatePrompt, /総合点: 82/)
+  assert.match(candidatePrompt, /A\/B評価: A/)
+  assert.doesNotMatch(
+    candidatePrompt,
+    /候補になった理由:|向いている商品:|想定購入者:|使用場面:|商品テーマ:|デザイン要素:|注意点:/,
+  )
   assert.equal(outputs.narration.length, outputs.slides.length)
   assert.match(outputs.fullPrompt, /INPUT/)
   assert.match(outputs.fullPrompt, /teacher ghost shirt/)

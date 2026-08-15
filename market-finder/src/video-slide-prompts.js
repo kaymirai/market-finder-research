@@ -15,15 +15,13 @@ Etsy・PODを使った副業に興味がある初心者。専門用語や英語�
 - 表紙：調査テーマ、調査日、商品カテゴリー、Verification Status
 - 全体結論：候補数、最上位キーワード、Market Finder総合点、商品化判断、最も重要な理由
 - 候補別：A/B候補を総合点順で最大10件、1ワードにつき1枚。A/Bがない場合だけ上位Cを最大3件「試作検討候補」として扱う
-- 最終：商品案を1つに絞る、Etsy上で最新状況を再確認する、1商品を出品して反応を記録する
 
 【候補別スライド】
-- キーワードを最も大きく表示する
-- Market Finder総合点、Opportunity評価、Confidence、商品化判断を表示する
-- 候補になった理由は最大3項目
-- 向いている商品、想定購入者、使用場面を簡潔に表示する
-- 安全に使用できるHero NounsやRelated Nounsは最大3件
-- 競合、季節性、未確認データ、データの古さなどの注意点は最大2項目
+- キーワードを画面中央へ配置し、画面の70〜80％を使って120〜180ptで最大3行に収める
+- キーワードは入力どおりの綴りと語順で表示し、省略・言い換えをしない
+- 画面に残す補助情報はMarket Finder総合点とA/B評価だけとし、キーワードより十分小さく表示する
+- IP・商標が要確認の場合だけ、オレンジの注意表示を追加する
+- 理由、商品、購入者、使用場面、テーマ、デザイン要素、通常の注意点はスライドに置かず、発表者ノートへ移す
 - Etsy公式値、EverBee推定値、eRank値の細かな数値を並べない
 
 【動画用デザインルール】
@@ -258,27 +256,18 @@ function sharedSlideRules() {
 }
 
 function candidateSlidePrompt(candidate, index, mode) {
-  const nouns = [...candidate.heroNouns, ...candidate.relatedNouns].slice(0, 3)
   return [
     sharedSlideRules(),
     '',
     `候補別スライド ${index + 1}。1ワードだけを扱う。`,
     `区分: ${mode === 'ab' ? '販売可能性を検証するA/B候補' : '試作検討候補'}`,
     `大見出し: ${candidate.keyword}`,
-    '候補キーワードは省略・言い換えをせず、入力どおりに大きく表示する。',
-    `総合点: ${candidate.totalScore ?? '未確認'}`,
-    `Opportunity: ${candidate.opportunityLabel}`,
-    `Confidence: ${candidate.confidenceLabel}`,
-    `商品化判断: ${candidate.productDecision}`,
-    compactLines('候補になった理由', candidate.reasons),
-    `向いている商品: ${display(candidate.productCategory)}`,
-    `想定購入者: ${display(candidate.buyer)}`,
-    `使用場面: ${display(candidate.occasion)}`,
-    `商品テーマ: ${display(candidate.theme)}`,
-    compactLines('デザイン要素', nouns),
+    '候補キーワードを画面中央へ配置し、画面の70〜80％を使って120〜180ptで最大3行に収める。',
+    '候補キーワードは省略・言い換えをせず、入力どおりの綴りと語順で表示する。',
+    `総合点: ${candidate.totalScore ?? '未確認'}。キーワードより十分小さく表示する。`,
+    `A/B評価: ${candidate.opportunityLabel}。キーワードより十分小さく表示する。`,
     `IP・商標: ${candidate.ipReviewRequired ? '要確認。オレンジの注意表示を付ける' : '大きな警告なし'}`,
     ...(candidate.ipReviewRequired ? [compactLines('要確認語', candidate.ipRiskTerms)] : []),
-    compactLines('注意点', candidate.cautions),
     '細かな数値表や実在しない商品画像は使わない。',
   ].join('\n')
 }
@@ -347,21 +336,6 @@ export function buildVideoSlideOutputs(snapshot, template = DEFAULT_VIDEO_SLIDE_
       keyword: candidate.keyword,
       prompt: candidateSlidePrompt(candidate, index, snapshot.candidateMode),
     })),
-    {
-      id: 'next-actions',
-      title: '次にやること',
-      keyword: '',
-      prompt: [
-        sharedSlideRules(),
-        '',
-        '最後のスライド。次の行動を3段階で大きく表示する。',
-        '1. 商品案を1つに絞る',
-        '2. Etsy上で最新状況を再確認する',
-        '3. 1商品を出品して反応を記録する',
-        '画面下部の字幕余白より上に、小さく次の注意書きを表示する。',
-        'この調査結果は売上を保証するものではありません。調査時点のデータを基に、商品化の優先順位を判断したものです',
-      ].join('\n'),
-    },
   ]
   const narration = [
     {
@@ -379,11 +353,6 @@ export function buildVideoSlideOutputs(snapshot, template = DEFAULT_VIDEO_SLIDE_
       title: candidate.keyword,
       text: narrationForCandidate(candidate, snapshot.candidateMode),
     })),
-    {
-      slideId: 'next-actions',
-      title: '次にやること',
-      text: '次は商品案を1つに絞り、Etsyの最新状況を確認してから、1商品だけ出品して反応を記録します。結果は売上を保証するものではありません。',
-    },
   ]
   return {
     snapshot,
