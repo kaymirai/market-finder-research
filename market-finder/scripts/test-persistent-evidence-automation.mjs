@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   createMarketplaceRetryState,
+  evidenceRefreshCheckpoint,
   marketplaceRetryDelay,
   normalizePendingEvidenceAutomation,
   restorePendingEvidenceAutomation,
@@ -18,6 +19,7 @@ test('restores an active evidence batch but never restores a stale page timer', 
     scheduled: true,
     initialCount: 8,
     completedBatches: 2,
+    refreshedCompletedCount: 0,
     currentStage: 'pending-etsy',
     targetKeywords: ['Halloween Nurse Shirt', ' halloween nurse shirt ', 'Ghost Book Club'],
   })
@@ -27,9 +29,45 @@ test('restores an active evidence batch but never restores a stale page timer', 
     scheduled: false,
     initialCount: 8,
     completedBatches: 2,
+    refreshedCompletedCount: 0,
     currentStage: 'pending-etsy',
     targetKeywords: ['halloween nurse shirt', 'ghost book club'],
   })
+})
+
+test('refreshes only at an idle fifty-result checkpoint and never repeats it after reload', () => {
+  assert.deepEqual(evidenceRefreshCheckpoint({
+    active: true,
+    initialCount: 128,
+    remainingCount: 78,
+    refreshedCompletedCount: 0,
+    externalWorkActive: false,
+  }), {
+    shouldRefresh: true,
+    completedCount: 50,
+    refreshedCompletedCount: 50,
+  })
+  assert.equal(evidenceRefreshCheckpoint({
+    active: true,
+    initialCount: 128,
+    remainingCount: 78,
+    refreshedCompletedCount: 50,
+    externalWorkActive: false,
+  }).shouldRefresh, false)
+  assert.equal(evidenceRefreshCheckpoint({
+    active: true,
+    initialCount: 128,
+    remainingCount: 28,
+    refreshedCompletedCount: 50,
+    externalWorkActive: true,
+  }).shouldRefresh, false)
+  assert.equal(evidenceRefreshCheckpoint({
+    active: true,
+    initialCount: 128,
+    remainingCount: 79,
+    refreshedCompletedCount: 0,
+    externalWorkActive: false,
+  }).shouldRefresh, false)
 })
 
 test('does not resume an incomplete or inactive saved batch', () => {

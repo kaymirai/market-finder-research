@@ -54,7 +54,15 @@ test('starts a fresh cycle automatically when every angle is exhausted below tar
     winnerCount: 3,
     targetWinnerCount: 5,
     blocked: false,
+    currentCycleEvidenceCount: 8,
   }), true)
+  assert.equal(shouldContinue?.({
+    reason: 'all-angles-exhausted',
+    winnerCount: 3,
+    targetWinnerCount: 5,
+    blocked: false,
+    currentCycleEvidenceCount: 0,
+  }), false)
   assert.equal(shouldContinue?.({
     reason: 'all-angles-exhausted',
     winnerCount: 5,

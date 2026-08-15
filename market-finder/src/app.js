@@ -234,7 +234,7 @@ import {
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260815-7'
+} from './multi-angle-exploration.js?v=20260815-8'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -252,6 +252,7 @@ import {
 } from './marketplace-rate-limit-retry.js?v=20260730-2'
 import {
   createMarketplaceRetryState,
+  evidenceRefreshCheckpoint,
   gateMarketplaceInsightPlanForDispatch,
   marketplaceRetryDelay,
   normalizeMarketplaceRetryState,
@@ -260,7 +261,7 @@ import {
   restorePendingEvidenceAutomation,
   shouldAutoResumeEvidenceAutomation,
   shouldAutoResumeReloadCheckpoint,
-} from './persistent-evidence-automation.js?v=20260814-4'
+} from './persistent-evidence-automation.js?v=20260815-1'
 import {
   completionModalBehavior,
   pendingEvidenceWinnerTargetReached,
@@ -446,7 +447,7 @@ const state = {
   selectedResultKey: '',
   finalEvidenceFilter: 'all',
   finalEvidenceCount: 0,
-  finalEvidenceRenderLimit: Number.MAX_SAFE_INTEGER,
+  finalEvidenceRenderLimit: 40,
   timingOverrideConfirmed: false,
   savedSeasonalReferenceKeys: [],
   savedSeasonalReferences: [],
@@ -455,6 +456,7 @@ const state = {
     scheduled: false,
     initialCount: 0,
     completedBatches: 0,
+    refreshedCompletedCount: 0,
     currentStage: '',
     targetKeywords: [],
   },
@@ -5651,7 +5653,7 @@ function revealFinalEvidenceStatus(status) {
     status === 'failed' ? 'failures' : 'all-results',
   )
   state.consoleUi = selectResearchStage(state.consoleUi, 'results')
-  state.finalEvidenceRenderLimit = Number.MAX_SAFE_INTEGER
+  state.finalEvidenceRenderLimit = 40
   state.selectedResultKey = matchingRows[0]?.key ?? ''
   setSimpleStatus(message)
   window.requestAnimationFrame(() => {
@@ -6791,6 +6793,7 @@ function queueNextMultiAngleBatch() {
       reason: result.reason,
       winnerCount: deriveFinalKeywordDecision(finalEvidenceRows()).recommendedCount,
       targetWinnerCount: calculateListingResearchTarget(state.listingResearchTargetSettings).targetWinnerCount,
+      currentCycleEvidenceCount: state.multiAngleExploration.evidenceKeys.length,
       blocked: Boolean(extensionBlockReason()) || autoFreshCycleStarting,
     })) {
       setSimpleStatus('現在の探索角度をすべて確認しました。A/B候補の目標まで、次の探索サイクルを自動で開始します。')
@@ -7143,6 +7146,7 @@ async function maybeAutoStartMultiAngleDeepDive(source = '') {
     reason: state.multiAngleExploration.status === 'exhausted' ? 'all-angles-exhausted' : '',
     winnerCount: decision.recommendedCount,
     targetWinnerCount: target.targetWinnerCount,
+    currentCycleEvidenceCount: state.multiAngleExploration.evidenceKeys.length,
     blocked: Boolean(blockedReason) || globallyBlocked || timingBlocked || activeWork || autoFreshCycleStarting,
   })) {
     return scheduleAutoFreshMultiAngleCycle()
@@ -7480,6 +7484,25 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
       }
       persistMarketFinderState()
       if (await maybeAutoStartMultiAngleSearch('未検証候補の確認完了')) return
+      return
+    }
+
+    const refreshCheckpoint = evidenceRefreshCheckpoint({
+      active: state.pendingEvidenceAutomation.active,
+      initialCount: state.pendingEvidenceAutomation.initialCount,
+      remainingCount: remainingRows.length,
+      refreshedCompletedCount: state.pendingEvidenceAutomation.refreshedCompletedCount,
+      externalWorkActive: state.extensionState?.active
+        || state.marketplaceInsightAutoRunning
+        || state.marketplaceInsightBusy,
+      threshold: FINAL_EVIDENCE_BATCH_SIZE,
+    })
+    if (refreshCheckpoint.shouldRefresh) {
+      state.pendingEvidenceAutomation.refreshedCompletedCount = refreshCheckpoint.refreshedCompletedCount
+      setSimpleStatus(`${refreshCheckpoint.completedCount}件の確認が終わりました。動作を軽くするため画面を更新し、残りから自動再開します。`)
+      renderPendingEvidenceAutomationButton(remainingRows.length)
+      persistMarketFinderState()
+      window.setTimeout(() => window.location.reload(), 250)
       return
     }
 
@@ -11282,7 +11305,7 @@ function bindEvents() {
       state.resultSubviewUi,
       state.finalEvidenceFilter === 'failed' ? 'failures' : 'all-results',
     )
-    state.finalEvidenceRenderLimit = Number.MAX_SAFE_INTEGER
+    state.finalEvidenceRenderLimit = 40
     state.selectedResultKey = ''
     renderResultsTable()
     persistMarketFinderState()

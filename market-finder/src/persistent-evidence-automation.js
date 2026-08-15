@@ -33,8 +33,36 @@ export function normalizePendingEvidenceAutomation(value = {}) {
     scheduled: false,
     initialCount: Math.max(targetKeywords.length, Number(value?.initialCount) || 0),
     completedBatches: Math.max(0, Number(value?.completedBatches) || 0),
+    refreshedCompletedCount: Math.max(0, Number(value?.refreshedCompletedCount) || 0),
     currentStage: EVIDENCE_STAGES.has(value?.currentStage) ? value.currentStage : '',
     targetKeywords,
+  }
+}
+
+export function evidenceRefreshCheckpoint({
+  active = false,
+  initialCount = 0,
+  remainingCount = 0,
+  refreshedCompletedCount = 0,
+  externalWorkActive = false,
+  threshold = 50,
+} = {}) {
+  const initial = Math.max(0, Math.floor(Number(initialCount) || 0))
+  const remaining = Math.max(0, Math.floor(Number(remainingCount) || 0))
+  const completedCount = Math.max(0, initial - remaining)
+  const refreshedCount = Math.min(
+    completedCount,
+    Math.max(0, Math.floor(Number(refreshedCompletedCount) || 0)),
+  )
+  const refreshThreshold = Math.max(1, Math.floor(Number(threshold) || 50))
+  const shouldRefresh = active === true
+    && externalWorkActive !== true
+    && remaining > 0
+    && completedCount - refreshedCount >= refreshThreshold
+  return {
+    shouldRefresh,
+    completedCount,
+    refreshedCompletedCount: shouldRefresh ? completedCount : refreshedCount,
   }
 }
 

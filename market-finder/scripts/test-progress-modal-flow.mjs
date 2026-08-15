@@ -47,6 +47,7 @@ test('retrying one result keeps the same keyword active through later evidence s
     scheduled: false,
     initialCount: 1,
     completedBatches: 0,
+    refreshedCompletedCount: 0,
     currentStage: '',
     targetKeywords: ['halloween gothic shirt'],
   })
@@ -101,6 +102,7 @@ test('resume replaces stale saved targets with the candidates that are pending n
     scheduled: false,
     initialCount: 1,
     completedBatches: 1,
+    refreshedCompletedCount: 0,
     currentStage: '',
     targetKeywords: ['halloween gothic shirt'],
   })

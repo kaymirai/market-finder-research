@@ -974,8 +974,10 @@ export function shouldAutoStartMultiAngleExploration(input = {}) {
 export function shouldAutoStartFreshCycle(input = {}) {
   const targetWinnerCount = Math.max(1, Number(input.targetWinnerCount) || 5)
   const winnerCount = Math.max(0, Number(input.winnerCount) || 0)
+  const currentCycleEvidenceCount = Math.max(0, Number(input.currentCycleEvidenceCount) || 0)
   return String(input.reason ?? '') === 'all-angles-exhausted'
     && winnerCount < targetWinnerCount
+    && currentCycleEvidenceCount > 0
     && input.blocked !== true
 }
 

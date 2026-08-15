@@ -132,13 +132,15 @@ test('returns to final results after a standalone retry finishes', () => {
   assert.match(scheduleBody, /setActiveResearchStage\('results'\)/)
 })
 
-test('shows every evaluated keyword as a score-ranked primary result list', () => {
+test('shows every evaluated keyword as a score-ranked primary result list without rendering all rows at once', () => {
   const rankingIndex = html.indexOf('id="finalRankingPanel"')
   assert.ok(rankingIndex >= 0, 'the all-result ranking must exist')
   assert.match(html, /data-result-view="all-results"/)
   assert.match(html, /id="finalEvidenceTotal"/)
   assert.match(html, /全評価結果（スコア順）/)
-  assert.match(app, /finalEvidenceRenderLimit:\s*Number\.MAX_SAFE_INTEGER/)
+  assert.match(app, /finalEvidenceRenderLimit:\s*40/)
+  assert.doesNotMatch(app, /state\.finalEvidenceRenderLimit = Number\.MAX_SAFE_INTEGER/)
+  assert.match(app, /data-final-evidence-more>さらに40件表示/)
   assert.match(app, /\(right\.scoreState\.score \?\? -1\) - \(left\.scoreState\.score \?\? -1\)[\s\S]{0,240}statusOrder/)
   assert.match(app, /<th>順位<\/th><th>キーワード<\/th><th>総合点<\/th>/)
   assert.match(app, /elements\.finalEvidenceTotal\.textContent = `全\$\{allRows\.length\}件`/)

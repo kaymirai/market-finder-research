@@ -26,6 +26,7 @@ export function startSingleKeywordEvidenceAutomation(keyword) {
     scheduled: false,
     initialCount: normalizedKeyword ? 1 : 0,
     completedBatches: 0,
+    refreshedCompletedCount: 0,
     currentStage: '',
     targetKeywords: normalizedKeyword ? [normalizedKeyword] : [],
   }
@@ -80,6 +81,7 @@ export function resumePendingEvidenceAutomation(saved = {}, pendingKeywords = []
     scheduled: false,
     initialCount: Math.max(targetKeywords.length, Number(saved.initialCount) || 0),
     completedBatches: Math.max(0, Number(saved.completedBatches) || 0),
+    refreshedCompletedCount: Math.max(0, Number(saved.refreshedCompletedCount) || 0),
     currentStage: '',
     targetKeywords,
   }
