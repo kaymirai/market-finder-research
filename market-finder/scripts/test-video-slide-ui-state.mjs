@@ -44,6 +44,34 @@ test('migrates only the legacy IP exclusion rule while preserving prompt edits',
   ].join('\n'))
 })
 
+test('migrates the legacy candidate block to keyword-first slides while preserving surrounding edits', () => {
+  const saved = [
+    'CUSTOM INTRO',
+    '【基本構成】',
+    '- 表紙：調査テーマ',
+    '- 最終：商品案を1つに絞る、Etsy上で最新状況を再確認する、1商品を出品して反応を記録する',
+    '',
+    '【候補別スライド】',
+    '- キーワードを最も大きく表示する',
+    '- Market Finder総合点、Opportunity評価、Confidence、商品化判断を表示する',
+    '- 向いている商品、想定購入者、使用場面を簡潔に表示する',
+    '- 安全に使用できるHero NounsやRelated Nounsは最大3件',
+    '',
+    '【動画用デザインルール】',
+    'CUSTOM END',
+  ].join('\n')
+
+  const migrated = migrateVideoSlidePromptTemplate(saved)
+
+  assert.match(migrated, /CUSTOM INTRO/)
+  assert.match(migrated, /画面の70〜80％/)
+  assert.match(migrated, /120〜180pt/)
+  assert.match(migrated, /最大3行/)
+  assert.doesNotMatch(migrated, /- 最終：商品案を1つに絞る/)
+  assert.doesNotMatch(migrated, /想定購入者、使用場面/)
+  assert.match(migrated, /CUSTOM END/)
+})
+
 test('formats all slide prompts as numbered copyable sections', () => {
   assert.equal(formatVideoSlidePromptsForCopy([
     { title: '表紙', prompt: 'cover prompt' },

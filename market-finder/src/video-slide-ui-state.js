@@ -20,7 +20,7 @@ export function normalizeVideoSlidePromptTemplate(value, fallback) {
 }
 
 export function migrateVideoSlidePromptTemplate(value) {
-  return String(value ?? '').replace(
+  const ipMigrated = String(value ?? '').replace(
     '- 商標・著作権リスクがある言葉を商品案やデザイン案に使用しない',
     [
       '- 候補キーワードは入力どおり表示する',
@@ -28,6 +28,24 @@ export function migrateVideoSlidePromptTemplate(value) {
       '- 要確認候補に、保護対象を連想させる追加の固有名詞やキャラクター要素を足さない',
     ].join('\n'),
   )
+  const keywordFirstCandidateBlock = [
+    '【候補別スライド】',
+    '- キーワードを画面中央へ配置し、画面の70〜80％を使って120〜180ptで最大3行に収める',
+    '- キーワードは入力どおりの綴りと語順で表示し、省略・言い換えをしない',
+    '- 画面に残す補助情報はMarket Finder総合点とA/B評価だけとし、キーワードより十分小さく表示する',
+    '- IP・商標が要確認の場合だけ、オレンジの注意表示を追加する',
+    '- 理由、商品、購入者、使用場面、テーマ、デザイン要素、通常の注意点はスライドに置かず、発表者ノートへ移す',
+    '- Etsy公式値、EverBee推定値、eRank値の細かな数値を並べない',
+  ].join('\n')
+  return ipMigrated
+    .replace(
+      /\n?- 最終：商品案を1つに絞る、Etsy上で最新状況を再確認する、1商品を出品して反応を記録する(?=\n|$)/,
+      '',
+    )
+    .replace(
+      /【候補別スライド】[\s\S]*?(?=\n\n【動画用デザインルール】)/,
+      keywordFirstCandidateBlock,
+    )
 }
 
 export function formatVideoSlidePromptsForCopy(slides = []) {
