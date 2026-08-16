@@ -8,6 +8,7 @@ import {
   normalizePendingEvidenceAutomation,
   restorePendingEvidenceAutomation,
   restoreInterruptedMarketplaceInsightPlan,
+  pendingEvidenceCompletionStage,
   shouldAutoResumeEvidenceAutomation,
   shouldAutoResumeReloadCheckpoint,
 } from '../src/persistent-evidence-automation.js'
@@ -221,4 +222,15 @@ test('auto-resumes a reload checkpoint only for the preserved reload batch', () 
     exploration: { status: 'paused', pauseReason: 'reload-required' },
     pendingEvidenceAutomation: normalizePendingEvidenceAutomation(),
   }), false)
+})
+
+test('keeps Etsy visible when the official confirmation queue still has work', () => {
+  assert.equal(
+    pendingEvidenceCompletionStage({ marketplaceQueueRemaining: 74 }),
+    'etsy',
+  )
+  assert.equal(
+    pendingEvidenceCompletionStage({ marketplaceQueueRemaining: 0 }),
+    'results',
+  )
 })

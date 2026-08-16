@@ -66,6 +66,12 @@ export function evidenceRefreshCheckpoint({
   }
 }
 
+export function pendingEvidenceCompletionStage({ marketplaceQueueRemaining = 0 } = {}) {
+  return Math.max(0, Number(marketplaceQueueRemaining) || 0) > 0
+    ? 'etsy'
+    : 'results'
+}
+
 export function restorePendingEvidenceAutomation({
   saved,
   winningNicheAutomation,

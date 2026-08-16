@@ -261,6 +261,7 @@ import {
   marketplaceRetryDelay,
   normalizeMarketplaceRetryState,
   normalizePendingEvidenceAutomation,
+  pendingEvidenceCompletionStage,
   restoreInterruptedMarketplaceInsightPlan,
   restorePendingEvidenceAutomation,
   shouldAutoResumeEvidenceAutomation,
@@ -7478,6 +7479,13 @@ function schedulePendingEvidenceAutomation(delayMs = 500) {
     }
     if (state.extensionState?.active || state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) {
       schedulePendingEvidenceAutomation(2000)
+      return
+    }
+
+    const marketplaceQueueRemaining = marketplaceQueueRemainingCount()
+    if (pendingEvidenceCompletionStage({ marketplaceQueueRemaining }) === 'etsy') {
+      setActiveResearchStage('etsy')
+      await runMarketplaceInsightAutomation()
       return
     }
 
