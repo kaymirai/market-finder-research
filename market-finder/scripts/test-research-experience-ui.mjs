@@ -108,6 +108,17 @@ test('shows terminal results after completed evidence exists', () => {
   }
 })
 
+test('keeps a manually selected condition view visible after results exist', () => {
+  const ui = deriveResearchExperienceUi({
+    hasResearchRows: true,
+    decisionStatus: 'ready',
+    activeStage: 'conditions',
+  })
+
+  assert.equal(ui.phase, 'result')
+  assert.equal(ui.stage, 'conditions')
+})
+
 test('keeps incomplete evidence in the running view', () => {
   const ui = deriveResearchExperienceUi({
     hasResearchRows: true,

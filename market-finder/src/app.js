@@ -4435,22 +4435,6 @@ function renderWinningNicheAutomation() {
   renderExplorationResultLanes()
 }
 
-function researchExperienceActiveStage(rows = []) {
-  if (state.marketplaceInsightAutoRunning || state.marketplaceInsightBusy) return 'etsy'
-  if (state.extensionState?.active) {
-    return String(state.extensionState.mode ?? '').toLowerCase().includes('etsy') ? 'etsy' : 'everbee'
-  }
-  if (state.pendingEvidenceAutomation?.active || state.pendingEvidenceAutomation?.scheduled) {
-    const pendingRow = rows.find((row) => row.evidenceState.status === 'pending')
-    return String(pendingRow?.evidenceState.nextStage ?? '').includes('etsy') ? 'etsy' : 'everbee'
-  }
-  if (marketplaceQueueRemainingCount() > 0) return 'etsy'
-  if (['running', 'paused'].includes(state.multiAngleExploration.status)) return 'candidates'
-  const pendingRow = rows.find((row) => row.evidenceState.status === 'pending')
-  if (pendingRow) return String(pendingRow?.evidenceState.nextStage ?? '').includes('etsy') ? 'etsy' : 'everbee'
-  return state.consoleUi.activeStage
-}
-
 function researchExperienceDescription(ui, decision, headerState) {
   if (ui.phase === 'setup') {
     const context = activeResearchContext()
@@ -4614,7 +4598,7 @@ function renderResearchExperience() {
     decisionStatus: decision.status,
     isRunning: activeWork,
     hasResearchRows: rows.length > 0,
-    activeStage: researchExperienceActiveStage(rows),
+    activeStage: state.consoleUi.activeStage,
     targetWinnerCount: target.targetWinnerCount,
     winnerCount: decision.recommendedCount,
   })
@@ -4634,9 +4618,6 @@ function renderResearchExperience() {
   const renderedHeadline = actionFeedback?.headline || ui.headline
 
   document.body.dataset.researchPhase = ui.phase
-  if (state.consoleUi.activeStage !== ui.stage) {
-    state.consoleUi = selectResearchStage(state.consoleUi, ui.stage)
-  }
   elements.researchMissionTarget.textContent = ui.targetLabel
   elements.researchMissionState.textContent = renderedHeadline
   elements.researchProgressView.hidden = ui.phase !== 'running'

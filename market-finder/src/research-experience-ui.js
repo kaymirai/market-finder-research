@@ -77,9 +77,7 @@ export function deriveResearchExperienceUi(input = {}) {
   const isRunning = Boolean(input.isRunning) || decisionStatus === 'pending'
   const hasTerminalResult = Boolean(input.hasResearchRows) && TERMINAL_DECISION_STATUSES.has(decisionStatus)
   const phase = isRunning ? 'running' : hasTerminalResult ? 'result' : 'setup'
-  const stage = phase === 'result'
-    ? 'results'
-    : normalizedStage(input.activeStage, phase === 'running' ? 'conditions' : 'conditions')
+  const stage = normalizedStage(input.activeStage, phase === 'result' ? 'results' : 'conditions')
   const targetWinnerCount = nonNegativeInteger(input.targetWinnerCount)
   const winnerCount = nonNegativeInteger(input.winnerCount)
 

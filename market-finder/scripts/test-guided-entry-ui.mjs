@@ -50,11 +50,11 @@ test('explains beside the main action why it cannot run', () => {
   assert.match(app, /elements\.researchMissionActionReason\.textContent = renderedAction\.reason \|\| ''/)
   assert.match(app, /elements\.researchMissionActionReason\.hidden = !renderedAction\.reason/)
 })
-test('shows the pending provider instead of the final screen while research is incomplete', () => {
+test('keeps the manually selected stage while research is incomplete', () => {
   assert.match(html, /class="research-progress-copy">\s*<small>現在の工程<\/small>/)
-  const stageBody = app.match(/function researchExperienceActiveStage\(rows = \[\]\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
-  assert.match(stageBody, /if \(\['running', 'paused'\]\.includes\(state\.multiAngleExploration\.status\)\) return 'candidates'[\s\S]*const pendingRow = rows\.find\(\(row\) => row\.evidenceState\.status === 'pending'\)/)
-assert.match(stageBody, /String\(pendingRow\?\.evidenceState\.nextStage \?\? ''\)\.includes\('etsy'\) \? 'etsy' : 'everbee'/)
+  const renderBody = app.match(/function renderResearchExperience\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(renderBody, /activeStage: state\.consoleUi\.activeStage/)
+  assert.doesNotMatch(renderBody, /state\.consoleUi = selectResearchStage\(state\.consoleUi, ui\.stage\)/)
 })
 test('uses one set of five numbered workflow steps', () => {
   assert.doesNotMatch(html, /class="workflow-strip"/)
