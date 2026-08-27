@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { extensionResultsImportMode } from '../src/research-flow.js'
 import { deriveErankCaptureUiState } from '../src/research-console-ui.js'
+import { deriveAudienceUiStatus } from '../src/audience-selection-state.js'
 
 const root = new URL('../', import.meta.url)
 const [html, app, styles, extensionManifestText, readme] = await Promise.all([
@@ -13,6 +14,7 @@ const [html, app, styles, extensionManifestText, readme] = await Promise.all([
   readFile(new URL('README.md', root), 'utf8'),
 ])
 const extensionManifest = JSON.parse(extensionManifestText)
+const appLf = app.replace(/\r\n/g, '\n')
 
 function position(id) {
   const index = html.indexOf(`id="${id}"`)
@@ -962,6 +964,202 @@ test('groups evidence-backed audience roles without fixed starter people', () =>
 test('passes selected audience roles into candidate generation', () => {
   assert.match(app, /generateAudienceIntentCandidates\(\{[\s\S]*audienceSelections:\s*currentAudienceSelections\(\)/)
   assert.match(app, /analyzeAudienceEvidence\(marketplaceLearningRecords\(\),\s*currentAudienceContext\(\)/)
+})
+
+test('keeps a selected audience candidate in its exact active event and root context at runtime', () => {
+  const candidateBody = appLf.match(/function candidateFromKeyword\(keyword, generatedMap, trendMetaByKeyword = new Map\(\)\) \{([\s\S]*?)\n\}\n\nfunction generateCandidates/)?.[1] ?? ''
+  const selectedBody = appLf.match(/function selectedAudienceCandidate\(\) \{([\s\S]*?)\n\}\n\nfunction selectedAudienceRootKeyword/)?.[1] ?? ''
+  assert.ok(candidateBody, 'candidate conversion must be executable')
+  assert.ok(selectedBody, 'audience selection must be executable')
+
+  const candidateFromKeyword = new Function(
+    'normalizePhrase',
+    'classifyMarketplaceBuyerQuery',
+    'keywordClassificationOptions',
+    'elements',
+    'keywordClass',
+    'detectRiskTerms',
+    'activeResearchContext',
+    'candidateProvenance',
+    `return function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Map()) {${candidateBody}\n}`,
+  )(
+    (value) => String(value ?? '').trim().toLowerCase(),
+    () => ({ eligible: true }),
+    () => ({}),
+    { riskInput: { value: '' } },
+    () => ({ action: 'candidate' }),
+    () => [],
+    () => ({
+      eventId: 'mothers-day',
+      categoryId: 'mug',
+      event: { jpLabel: '母の日' },
+      category: { label: 'Mug' },
+    }),
+    () => ({}),
+  )
+  const selectedAudienceCandidate = new Function(
+    'state',
+    'activeResearchContext',
+    'normalizePhrase',
+    `return function selectedAudienceCandidate() {${selectedBody}\n}`,
+  )
+
+  const generated = new Map([['teacher mug', {
+    keyword: 'teacher mug',
+    eventId: '',
+    categoryId: 'mug',
+    audienceContextKey: 'mug::mothers day::teacher',
+  }]])
+  const candidate = candidateFromKeyword('teacher mug', generated)
+  const state = { candidates: [candidate], consoleUi: { selectedKeyword: 'teacher mug' } }
+  const selected = selectedAudienceCandidate(
+    state,
+    () => ({ eventId: 'mothers-day', categoryId: 'mug' }),
+    (value) => String(value ?? '').trim().toLowerCase(),
+  )()
+
+  assert.ok(selected, 'the selected audience candidate must stay in the active context')
+  assert.equal(selected.eventId, 'mothers-day')
+  assert.equal(selected.categoryId, 'mug')
+  assert.equal(selected.rootKeyword, 'teacher')
+  assert.equal(`${selected.categoryId}::mothers day::${selected.rootKeyword}`, selected.audienceContextKey)
+})
+
+test('renders a terminal current-context Etsy or EverBee failure as unverified and resets after capture', () => {
+  const providerBody = appLf.match(/function currentAudienceProviderFailed\(\) \{([\s\S]*?)\n\}\n\nfunction currentAudienceAnalysis/)?.[1] ?? ''
+  assert.ok(providerBody, 'current-context audience provider status must be executable')
+
+  const providerFailed = new Function(
+    'state',
+    'activeResearchContext',
+    'candidateMatchesResearchContext',
+    'rowHasEtsyMarketplaceInput',
+    'rowHasEverbeeInput',
+    'normalizePhrase',
+    `return function currentAudienceProviderFailed() {${providerBody}\n}`,
+  )
+  const context = { eventId: 'mothers-day', categoryId: 'mug' }
+  const matchesContext = (row, active) => row.eventId === active.eventId && row.categoryId === active.categoryId
+  const hasEtsy = (row) => row.etsySearches30d !== undefined || row.etsyListings !== undefined
+  const hasEverbee = (row) => row.topMonthlySales !== undefined || row.productRows?.length > 0
+  const makeProviderFailed = (state) => providerFailed(
+    state,
+    () => context,
+    matchesContext,
+    hasEtsy,
+    hasEverbee,
+    (value) => String(value ?? '').trim().toLowerCase(),
+  )
+
+  const etsyFailedState = {
+    marketplaceInsightPlan: {
+      eventId: 'mothers-day',
+      categoryId: 'mug',
+      items: [{ query: 'teacher mug', status: 'error', terminalError: true }],
+    },
+    researchRows: [],
+    candidates: [{ keyword: 'teacher mug', eventId: 'mothers-day', categoryId: 'mug' }],
+    extensionState: null,
+  }
+  assert.equal(makeProviderFailed(etsyFailedState)(), true)
+  assert.equal(deriveAudienceUiStatus({ signals: [], providerFailed: makeProviderFailed(etsyFailedState)() }).label, '取得失敗のため未判定')
+
+  etsyFailedState.marketplaceInsightPlan.items[0] = {
+    query: 'teacher mug',
+    status: 'completed',
+    result: { etsySearches30d: 120, etsyListings: 800 },
+  }
+  assert.equal(makeProviderFailed(etsyFailedState)(), false)
+
+  const everbeeFailedState = {
+    marketplaceInsightPlan: null,
+    researchRows: [],
+    candidates: [{ keyword: 'teacher mug', eventId: 'mothers-day', categoryId: 'mug' }],
+    extensionState: {
+      active: false,
+      mode: 'everbee',
+      error: 'EverBee capture failed',
+      results: [{ keyword: 'teacher mug', error: 'EverBee capture failed' }],
+    },
+  }
+  assert.equal(makeProviderFailed(everbeeFailedState)(), true)
+  everbeeFailedState.extensionState.results = [{ keyword: 'teacher mug', topMonthlySales: 12, error: '' }]
+  assert.equal(makeProviderFailed(everbeeFailedState)(), false)
+})
+
+test('fresh candidate discovery clears audience state while continuation keeps it', async () => {
+  const freshBody = appLf.match(/async function prepareForNewCandidateDiscovery\(\) \{([\s\S]*?)\n\}\n\nfunction appendTrendScoutCandidates/)?.[1] ?? ''
+  const continuationBody = appLf.match(/async function startContinuedMultiAngleCycle\(\) \{([\s\S]*?)\n\}\n\nasync function startNewMultiAngleCycle/)?.[1] ?? ''
+  assert.ok(freshBody, 'fresh candidate discovery must be executable')
+  assert.ok(continuationBody, 'continuation path must stay distinct')
+
+  const prepareForNewCandidateDiscovery = new Function(
+    'state',
+    'confirmExportBeforeClearingResults',
+    'preserveTerminalMultiAngleEvidenceForNewDiscovery',
+    'clearResearchResults',
+    'selectedEvent',
+    'selectedCategory',
+    'calculateListingResearchTarget',
+    'prepareNewMultiAngleCycle',
+    'researchEventSnapshot',
+    'createCrossNicheWorkflowState',
+    'clearAudienceSelectionsForFreshStart',
+    'persistMarketFinderState',
+    `return async function prepareForNewCandidateDiscovery() {${freshBody}\n}`,
+  )
+  const state = {
+    researchRows: [],
+    acceptExtensionResults: true,
+    multiAngleExploration: {},
+    pendingEvidenceAutomation: {},
+    savedSeasonalReferenceKeys: [],
+    savedSeasonalReferences: [],
+    evidenceArchives: [{ runId: 'kept' }],
+    marketplaceInsightPlan: { items: [] },
+    marketplaceInsightMessage: 'old',
+    candidates: [{ keyword: 'teacher mug' }],
+    candidateCatalog: [{ keyword: 'teacher mug' }],
+    crossNicheProposal: null,
+    audienceSelectionsByContext: {
+      'mug::mothers day::teacher': { selections: [{ phrase: 'teacher', role: 'recipient', status: 'manual', selected: true }] },
+    },
+    activeAudienceContextKey: 'mug::mothers day::teacher',
+  }
+  let persisted = 0
+  const prepared = await prepareForNewCandidateDiscovery(
+    state,
+    () => true,
+    async () => true,
+    () => {},
+    () => ({ id: 'mothers-day' }),
+    () => ({ id: 'mug' }),
+    () => ({ targetWinnerCount: 1 }),
+    (snapshot) => ({
+      ...snapshot,
+      exploration: {},
+      pendingEvidenceAutomation: {},
+      marketplaceInsightPlan: null,
+      marketplaceInsightMessage: '',
+      candidates: [],
+      candidateCatalog: [],
+      crossNicheProposal: null,
+    }),
+    (event) => event,
+    () => ({}),
+    () => {
+      state.activeAudienceContextKey = ''
+      state.audienceSelectionsByContext = {}
+    },
+    () => { persisted += 1 },
+  )()
+
+  assert.equal(prepared, true)
+  assert.deepEqual(state.audienceSelectionsByContext, {})
+  assert.equal(state.activeAudienceContextKey, '')
+  assert.deepEqual(state.evidenceArchives, [{ runId: 'kept' }])
+  assert.equal(persisted, 1)
+  assert.match(continuationBody, /preserveAccumulatedEvidenceForNextCycle = true/)
 })
 
 test('shows which candidates carry the personalization lever and the gift intent', () => {

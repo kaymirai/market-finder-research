@@ -44,6 +44,7 @@ import {
 } from '../../shared/market-keyword-engine/index.js?v=20260827-2'
 import {
   audienceSelectionsForContext,
+  clearCurrentAudienceSelection,
   deriveAudienceUiStatus,
   migrateLegacyAudienceState,
   normalizeAudienceSelectionsByContext,
@@ -1399,8 +1400,49 @@ function currentAudienceContext() {
   }
 }
 
+function currentAudienceProviderFailed() {
+  const research = activeResearchContext()
+  const plan = state.marketplaceInsightPlan
+  const planMatchesCurrentContext = Boolean(plan)
+    && String(plan.eventId ?? '') === String(research.eventId ?? '')
+    && String(plan.categoryId ?? '') === String(research.categoryId ?? '')
+  const planItems = planMatchesCurrentContext && Array.isArray(plan?.items) ? plan.items : []
+  const currentRows = (state.researchRows ?? []).filter((row) => (
+    candidateMatchesResearchContext(row, research, { requireContext: true })
+  ))
+  const currentCandidateKeywords = new Set(
+    [...(state.candidates ?? []), ...(state.candidateCatalog ?? [])]
+      .filter((candidate) => candidateMatchesResearchContext(candidate, research, { requireContext: true }))
+      .map((candidate) => normalizePhrase(candidate.keyword))
+      .filter(Boolean),
+  )
+  const extensionState = state.extensionState ?? {}
+  const everbeeResults = String(extensionState.mode ?? '').toLowerCase() === 'everbee'
+    ? (Array.isArray(extensionState.results) ? extensionState.results : [])
+    : []
+  const currentEverbeeResults = everbeeResults.filter((row) => (
+    candidateMatchesResearchContext(row, research, { requireContext: true })
+    || currentCandidateKeywords.has(normalizePhrase(row.keyword))
+  ))
+  const hasSuccessfulCapture = planItems.some((item) => item.status === 'completed')
+    || currentRows.some((row) => rowHasEtsyMarketplaceInput(row) || rowHasEverbeeInput(row))
+    || currentEverbeeResults.some((row) => rowHasEverbeeInput(row))
+  const terminalEtsyFailure = planItems.some((item) => (
+    item.status === 'error' && item.terminalError === true
+  ))
+  const terminalEverbeeFailure = String(extensionState.mode ?? '').toLowerCase() === 'everbee'
+    && extensionState.active !== true
+    && (currentCandidateKeywords.size > 0 || currentEverbeeResults.length > 0)
+    && (normalizePhrase(extensionState.error) !== '' || currentEverbeeResults.some((row) => (
+      normalizePhrase(row.error) !== '' && !rowHasEverbeeInput(row)
+    )))
+
+  return !hasSuccessfulCapture && (terminalEtsyFailure || terminalEverbeeFailure)
+}
+
 function currentAudienceAnalysis() {
   const context = currentAudienceContext()
+  state.audienceProviderFailed = currentAudienceProviderFailed()
   return analyzeAudienceEvidence(marketplaceLearningRecords(), currentAudienceContext(), {
     now: new Date().toISOString(),
     customRiskTerms: elements.riskInput?.value ?? '',
@@ -1481,6 +1523,15 @@ function currentAudienceSelectionSnapshot() {
 
 function audienceSelectionPhrasesForArchive() {
   return currentAudienceSelectionSnapshot().map((selection) => selection.phrase)
+}
+
+function clearAudienceSelectionsForFreshStart() {
+  const contextKey = buildAudienceContextKey(currentAudienceContext())
+  state.audienceSelectionsByContext = clearCurrentAudienceSelection(
+    state.audienceSelectionsByContext,
+    contextKey,
+  )
+  state.activeAudienceContextKey = ''
 }
 
 function selectedTargets() {
@@ -7181,6 +7232,7 @@ async function startContinuedMultiAngleCycle() {
 async function startNewMultiAngleCycle() {
   const terminalEvidencePersisted = await preserveTerminalMultiAngleEvidenceForNewDiscovery()
   if (!terminalEvidencePersisted) return false
+  if (!preserveAccumulatedEvidenceForNextCycle) clearAudienceSelectionsForFreshStart()
   invalidateMultiAngleRetrySchedule()
   const nextCycleContext = {
     event: selectedEvent(),
@@ -8772,8 +8824,15 @@ function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Ma
   const generated = generatedMap.get(normalized)
   const trendMeta = trendMetaByKeyword.get(normalized)
   if (generated) {
+    const research = activeResearchContext()
+    const audienceContextParts = String(generated.audienceContextKey ?? '').split('::')
     return {
       ...generated,
+      eventId: research.eventId,
+      eventLabel: research.event?.jpLabel ?? research.event?.label ?? generated.eventLabel,
+      categoryId: research.categoryId,
+      categoryLabel: research.category?.label ?? generated.categoryLabel,
+      rootKeyword: normalizePhrase(generated.rootKeyword ?? audienceContextParts[2] ?? normalized),
       ...candidateProvenance(trendMeta),
     }
   }
@@ -9922,6 +9981,7 @@ async function prepareForNewCandidateDiscovery() {
   ) return false
   const terminalEvidencePersisted = await preserveTerminalMultiAngleEvidenceForNewDiscovery()
   if (!terminalEvidencePersisted) return false
+  clearAudienceSelectionsForFreshStart()
   state.acceptExtensionResults = false
   if (state.researchRows.length > 0) clearResearchResults('all')
   const event = selectedEvent()
@@ -9955,6 +10015,7 @@ async function prepareForNewCandidateDiscovery() {
   state.crossNicheProposal = prepared.crossNicheProposal
   state.crossNicheWorkflow = createCrossNicheWorkflowState()
   state.erankQueryPlan = []
+  persistMarketFinderState()
   return true
 }
 
