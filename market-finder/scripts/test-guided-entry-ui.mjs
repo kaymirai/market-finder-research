@@ -948,13 +948,20 @@ test('lets the user edit and save the monthly listing research target', () => {
   assert.match(panel, /id="listingResearchTargetProgress"/)
 })
 
-test('asks who the buyer is before generating candidates and feeds it into generation', () => {
-  assert.match(html, /id="buyerIdentityInput"/)
-  assert.match(html, /id="buyerActionInput"/)
-  assert.ok(position('buyerIdentityInput') < position('trendAutoBtn'))
-  assert.match(app, /generateBuyerIntentCandidates/)
-  assert.match(app, /buyerIdentitySeeds/)
-  assert.match(app, /\.\.\.buyerIntentCandidates\(\)/)
+test('groups evidence-backed audience roles without fixed starter people', () => {
+  assert.match(html, /誰向け・何向けの商品ですか/)
+  assert.match(html, /id="audienceStatus"/)
+  assert.match(html, /id="audienceRecipientSuggestions"/)
+  assert.match(html, /id="audienceGiverSuggestions"/)
+  assert.match(html, /id="audienceSubjectSuggestions"/)
+  assert.match(html, /id="audienceReferenceSuggestions"/)
+  assert.match(html, /id="audienceRefreshBtn"[^>]*>実績候補を更新<\/button>/)
+  assert.doesNotMatch(html, /id="buyerIdentityShuffleBtn"/)
+})
+
+test('passes selected audience roles into candidate generation', () => {
+  assert.match(app, /generateAudienceIntentCandidates\(\{[\s\S]*audienceSelections:\s*currentAudienceSelections\(\)/)
+  assert.match(app, /analyzeAudienceEvidence\(marketplaceLearningRecords\(\),\s*currentAudienceContext\(\)/)
 })
 
 test('shows which candidates carry the personalization lever and the gift intent', () => {
@@ -979,31 +986,6 @@ test('shows learned marketplace vocabulary by buyer role and reuses it in genera
 
 test('renders restored candidates even when source freshness was never stored', () => {
   assert.match(app, /candidate\.sourceFreshness\?\.freshnessDays != null/)
-})
-
-test('offers the identity vocabulary as chips so the field is never blank', () => {
-  // The suggestions must precede the field they fill, or they read as a result rather
-  // than a starting point.
-  assert.ok(position('buyerIdentitySuggestions') < position('buyerIdentityInput'))
-  assert.ok(position('buyerIdentityShuffleBtn') < position('buyerIdentityInput'))
-  assert.match(html, /id="buyerContextSuggestions"/)
-  assert.match(app, /learnedBuyerIdentitySuggestions\(chosen, options\.analysis\)/)
-  assert.match(app, /suggestBuyerIdentities\(\{[\s\S]{0,240}exclude: \[\.\.\.chosen, \.\.\.learned/)
-  assert.match(app, /data-buyer-identity=/)
-  assert.match(app, /data-buyer-context=/)
-  assert.match(app, /state\.buyerIdentitySuggestOffset \+= 1/)
-  assert.match(app, /function appendSeedLine\(input, phrase\)/)
-  assert.match(styles, /\.chip-btn \{/)
-})
-
-test('auto-selects measured buyer identities without overwriting a manual choice', () => {
-  assert.match(html, /id="buyerIdentityAutoStatus"/)
-  assert.match(app, /function autoSelectBuyerIdentities\(/)
-  assert.match(app, /selectAutomaticBuyerIdentities\(/)
-  assert.match(app, /state\.buyerIdentitySelectionMode === 'manual'/)
-  assert.match(app, /state\.buyerIdentitySelectionMode = 'manual'/)
-  assert.match(app, /autoSelectBuyerIdentities\(\{ refresh: true \}\)/)
-  assert.match(app, /autoSelectBuyerIdentities\(\{ persist: false \}\)/)
 })
 
 test('puts every next action after the result or inputs it uses', () => {

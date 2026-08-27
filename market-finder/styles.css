@@ -955,6 +955,68 @@ textarea:focus {
   color: var(--slate);
 }
 
+.audience-field,
+.audience-role-group,
+.audience-reference-group {
+  display: grid;
+  gap: 8px;
+}
+
+.audience-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.audience-role-group {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.audience-role-group > strong,
+.audience-reference-group summary {
+  font-size: 13px;
+  color: var(--slate);
+}
+
+.audience-reference-group {
+  padding: 2px 0;
+}
+
+.audience-reference-group summary {
+  cursor: pointer;
+}
+
+.audience-manual-row {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.audience-manual-row input,
+.audience-manual-row select {
+  min-width: 0;
+}
+
+.audience-chip {
+  gap: 4px;
+}
+
+.audience-chip.is-selected {
+  border-color: rgba(15, 118, 110, 0.35);
+  background: #dff4ef;
+}
+
+.audience-chip .audience-evidence,
+.audience-empty {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
 .chip-btn {
   display: inline-grid;
   gap: 1px;
@@ -6281,5 +6343,16 @@ body[data-research-phase="setup"] #winningNicheAutomationPanel .winning-niche-ra
 
   .video-slide-output-actions .dark-btn {
     margin-left: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .audience-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .audience-manual-row {
+    grid-template-columns: 1fr;
   }
 }

@@ -8,9 +8,11 @@ import {
   buildCrossNicheDrilldown,
   buildTimelySeasonalSuggestions,
   buildMarketplaceInsightPlan,
+  analyzeAudienceEvidence,
+  buildAudienceContextKey,
   generateBroadMarketQueries,
   generateBroadEventCandidates,
-  generateBuyerIntentCandidates,
+  generateAudienceIntentCandidates,
   generateKeywordCandidates,
   parseBroadMarketListings,
   everbeeResultsToBroadListings,
@@ -22,10 +24,8 @@ import {
   classifyKeywordBucket,
   buildSeoPlanFromBuckets,
   scoreEverbeeResult,
-  selectAutomaticBuyerIdentities,
   explainEverbeeScore,
   scoreErankOpportunity,
-  suggestBuyerIdentities,
   classifyCandidateKeyword,
   classifyProductionWindow,
   detectRiskTerms,
@@ -33,6 +33,7 @@ import {
   classifyMarketplaceBuyerQuery,
   deriveBuyerSearchQueriesFromTitle,
   getMarketTiming,
+  getAudienceCategoryProfile,
   getBroadEventDiscoveryProfile,
   getSourceFreshness,
   keywordMatchesCategoryProduct,
@@ -40,7 +41,14 @@ import {
   learnedBuyerIntentSignals,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260815-1'
+} from '../../shared/market-keyword-engine/index.js?v=20260827-2'
+import {
+  audienceSelectionsForContext,
+  deriveAudienceUiStatus,
+  migrateLegacyAudienceState,
+  normalizeAudienceSelectionsByContext,
+  setAudienceSelectionsForContext,
+} from './audience-selection-state.js?v=20260827-1'
 import {
   acceptRestoredCheckpoint,
   buildMarketplaceCaptureRows,
@@ -411,9 +419,9 @@ const state = {
   crossNicheProposal: null,
   erankQueryPlan: [],
   designClusterOffset: 0,
-  buyerIdentitySuggestOffset: 0,
-  buyerIdentitySelectionMode: '',
-  buyerIdentityAutoSource: '',
+  audienceSelectionsByContext: {},
+  activeAudienceContextKey: '',
+  audienceProviderFailed: false,
   evidenceArchives: [],
   evidenceArchiveAvailable: null,
   researchRounds: createResearchRoundsState(),
@@ -547,12 +555,17 @@ const elements = {
   listingOutcomesTrendBody: document.querySelector('#listingOutcomesTrendBody'),
   targetChips: document.querySelector('#targetChips'),
   seedInput: document.querySelector('#seedInput'),
-  buyerIdentityInput: document.querySelector('#buyerIdentityInput'),
   buyerActionInput: document.querySelector('#buyerActionInput'),
-  buyerIdentitySuggestions: document.querySelector('#buyerIdentitySuggestions'),
-  buyerIdentitySuggestHint: document.querySelector('#buyerIdentitySuggestHint'),
-  buyerIdentityAutoStatus: document.querySelector('#buyerIdentityAutoStatus'),
-  buyerIdentityShuffleBtn: document.querySelector('#buyerIdentityShuffleBtn'),
+  audienceStatus: document.querySelector('#audienceStatus'),
+  audienceRefreshBtn: document.querySelector('#audienceRefreshBtn'),
+  audienceRecipientSuggestions: document.querySelector('#audienceRecipientSuggestions'),
+  audienceGiverSuggestions: document.querySelector('#audienceGiverSuggestions'),
+  audienceSubjectSuggestions: document.querySelector('#audienceSubjectSuggestions'),
+  audienceReferenceSuggestions: document.querySelector('#audienceReferenceSuggestions'),
+  audienceManualRoleSelect: document.querySelector('#audienceManualRoleSelect'),
+  audienceManualInput: document.querySelector('#audienceManualInput'),
+  audienceAddManualBtn: document.querySelector('#audienceAddManualBtn'),
+  audienceField: document.querySelector('.audience-field'),
   buyerContextSuggestions: document.querySelector('#buyerContextSuggestions'),
   modifierEvidenceTotals: document.querySelector('#modifierEvidenceTotals'),
   modifierEvidenceTable: document.querySelector('#modifierEvidenceTable'),
@@ -914,9 +927,7 @@ function persistMarketFinderState() {
       year: elements.yearInput.value,
       limit: elements.limitInput.value,
       seedKeywords: elements.seedInput.value,
-      buyerIdentitySeeds: elements.buyerIdentityInput?.value ?? '',
-      buyerIdentitySelectionMode: state.buyerIdentitySelectionMode,
-      buyerIdentityAutoSource: state.buyerIdentityAutoSource,
+      buyerIdentitySeeds: '',
       buyerActionSeeds: elements.buyerActionInput?.value ?? '',
       selectedExplorationMode: state.selectedExplorationMode,
       trendScoutKeywords: elements.trendScoutInput.value,
@@ -946,7 +957,8 @@ function persistMarketFinderState() {
       crossNicheProposal: state.crossNicheProposal,
       erankQueryPlan: state.erankQueryPlan,
       designClusterOffset: state.designClusterOffset,
-      buyerIdentitySuggestOffset: state.buyerIdentitySuggestOffset,
+      audienceSelectionsByContext: state.audienceSelectionsByContext,
+      activeAudienceContextKey: state.activeAudienceContextKey,
       researchRounds: state.researchRounds,
       candidateCatalog: state.candidateCatalog,
       researchedMarketHistory: state.researchedMarketHistory,
@@ -997,13 +1009,6 @@ function restorePersistedState() {
   setInputValue(elements.yearInput, form.year)
   setInputValue(elements.limitInput, form.limit)
   setInputValue(elements.seedInput, form.seedKeywords)
-  setInputValue(elements.buyerIdentityInput, form.buyerIdentitySeeds)
-  state.buyerIdentitySelectionMode = ['auto', 'manual'].includes(form.buyerIdentitySelectionMode)
-    ? form.buyerIdentitySelectionMode
-    : (String(form.buyerIdentitySeeds ?? '').trim() ? 'manual' : '')
-  state.buyerIdentityAutoSource = state.buyerIdentitySelectionMode === 'auto'
-    ? String(form.buyerIdentityAutoSource ?? '')
-    : ''
   const restoredProfitUi = restoreProfitStrategyUiState({
     selectedExplorationMode: form.selectedExplorationMode,
     profitInputsByKeyword: savedState.profitInputsByKeyword,
@@ -1089,7 +1094,6 @@ function restorePersistedState() {
     : null
   state.erankQueryPlan = Array.isArray(savedState.erankQueryPlan) ? savedState.erankQueryPlan : []
   state.designClusterOffset = Math.max(0, Number(savedState.designClusterOffset) || 0)
-  state.buyerIdentitySuggestOffset = Math.max(0, Number(savedState.buyerIdentitySuggestOffset) || 0)
   state.researchRounds = createResearchRoundsState(savedState.researchRounds)
   state.candidateCatalog = Array.isArray(savedState.candidateCatalog)
     ? savedState.candidateCatalog.filter((candidate) => !isMarketplaceDateAxisLabel(candidate?.keyword))
@@ -1241,6 +1245,13 @@ function restorePersistedState() {
     state.consoleUi = selectResearchStage(state.consoleUi, 'conditions')
   }
 
+  const fallbackAudienceContextKey = buildAudienceContextKey(currentAudienceContext())
+  state.audienceSelectionsByContext = Object.hasOwn(savedState, 'audienceSelectionsByContext')
+    ? normalizeAudienceSelectionsByContext(savedState.audienceSelectionsByContext, persisted.savedAt)
+    : migrateLegacyAudienceState(form, fallbackAudienceContextKey, persisted.savedAt)
+  state.activeAudienceContextKey = String(savedState.activeAudienceContextKey ?? '')
+    || fallbackAudienceContextKey
+
   return persisted
 }
 
@@ -1334,6 +1345,142 @@ function activeResearchOptions() {
     eventSnapshot: researchEventSnapshot(selectedEvent()),
     categorySnapshot: selectedCategory(),
   })
+}
+
+function selectedAudienceCandidate() {
+  const research = activeResearchContext()
+  const selectedKeyword = normalizePhrase(state.consoleUi?.selectedKeyword)
+  const candidates = state.candidates.filter((candidate) => (
+    candidate?.categoryId === research.categoryId
+    && String(candidate?.eventId ?? '') === String(research.eventId ?? '')
+  ))
+  return candidates.find((candidate) => normalizePhrase(candidate.keyword) === selectedKeyword)
+    ?? candidates[0]
+    ?? null
+}
+
+function selectedAudienceRootKeyword() {
+  const selected = selectedAudienceCandidate()
+  const candidateRoot = normalizePhrase(
+    selected?.rootKeyword
+    ?? selected?.crossNicheRoot
+    ?? selected?.parentKeyword
+    ?? selected?.crossNicheParent
+    ?? selected?.keyword,
+  )
+  if (candidateRoot) return candidateRoot
+
+  const research = activeResearchContext()
+  const selectedKeyword = normalizePhrase(state.consoleUi?.selectedKeyword)
+  const selectedRow = state.researchRows.find((row) => (
+    normalizePhrase(row?.keyword) === selectedKeyword
+    && candidateMatchesResearchContext(row, research, { requireContext: true })
+  ))
+  if (selectedRow) return normalizePhrase(selectedRow.rootKeyword ?? selectedRow.keyword)
+
+  const entrance = generateKeywordCandidates({ ...currentOptions(), limit: 1 })[0]?.keyword
+  return normalizePhrase(entrance ?? research.category?.searchTerm)
+}
+
+function audienceRootIsStaticEntrance() {
+  return !selectedAudienceCandidate() && !state.researchRows.some((row) => (
+    normalizePhrase(row?.keyword) === normalizePhrase(state.consoleUi?.selectedKeyword)
+    && candidateMatchesResearchContext(row, activeResearchContext(), { requireContext: true })
+  ))
+}
+
+function currentAudienceContext() {
+  const research = activeResearchContext()
+  const rootKeyword = selectedAudienceRootKeyword()
+  return {
+    categoryId: research.categoryId,
+    eventId: research.eventId,
+    rootKeyword,
+  }
+}
+
+function currentAudienceAnalysis() {
+  const context = currentAudienceContext()
+  return analyzeAudienceEvidence(marketplaceLearningRecords(), currentAudienceContext(), {
+    now: new Date().toISOString(),
+    customRiskTerms: elements.riskInput?.value ?? '',
+    staticSeedKeywords: audienceRootIsStaticEntrance() ? [context.rootKeyword] : [],
+  })
+}
+
+function audienceSelectionKey(selection = {}) {
+  return [
+    String(selection.role ?? '').trim(),
+    normalizePhrase(selection.phrase),
+    normalizePhrase(selection.subjectType),
+  ].join('::')
+}
+
+function audienceSelectionsMatch(left = [], right = []) {
+  return JSON.stringify(left.map((selection) => ({
+    phrase: selection.phrase,
+    role: selection.role,
+    subjectType: selection.subjectType ?? '',
+    status: selection.status,
+    source: selection.source,
+    selected: selection.selected === true,
+  }))) === JSON.stringify(right.map((selection) => ({
+    phrase: selection.phrase,
+    role: selection.role,
+    subjectType: selection.subjectType ?? '',
+    status: selection.status,
+    source: selection.source,
+    selected: selection.selected === true,
+  })))
+}
+
+function synchronizeAudienceSelectionContext({ autoSelect = true } = {}) {
+  const analysis = currentAudienceAnalysis()
+  const contextKey = analysis.contextKey
+  state.activeAudienceContextKey = contextKey
+  const existing = audienceSelectionsForContext(state.audienceSelectionsByContext, contextKey)
+  if (!autoSelect) return { analysis, contextKey, selections: existing }
+
+  const selectionByKey = new Map(existing.map((selection) => [audienceSelectionKey(selection), selection]))
+  for (const signal of analysis.signals) {
+    if (!signal.autoSelectable) continue
+    const key = audienceSelectionKey(signal)
+    const current = selectionByKey.get(key)
+    if (current?.status === 'manual' || current?.status === 'legacy') continue
+    selectionByKey.set(key, {
+      phrase: signal.phrase,
+      role: signal.role,
+      subjectType: signal.subjectType,
+      status: 'confirmed',
+      source: signal.sources.join(',') || 'evidence',
+      selected: true,
+    })
+  }
+  const selections = [...selectionByKey.values()]
+  if (!audienceSelectionsMatch(existing, selections)) {
+    state.audienceSelectionsByContext = setAudienceSelectionsForContext(
+      state.audienceSelectionsByContext,
+      contextKey,
+      selections,
+    )
+  }
+  return { analysis, contextKey, selections }
+}
+
+function currentAudienceSelections() {
+  const { contextKey, selections } = synchronizeAudienceSelectionContext()
+  state.activeAudienceContextKey = contextKey
+  return selections.filter((selection) => selection.selected === true)
+}
+
+function currentAudienceSelectionSnapshot() {
+  const contextKey = buildAudienceContextKey(currentAudienceContext())
+  return audienceSelectionsForContext(state.audienceSelectionsByContext, contextKey)
+    .filter((selection) => selection.selected === true)
+}
+
+function audienceSelectionPhrasesForArchive() {
+  return currentAudienceSelectionSnapshot().map((selection) => selection.phrase)
 }
 
 function selectedTargets() {
@@ -1525,11 +1672,11 @@ function trendScoutTerms() {
   return parseTrendScoutEntries(elements.trendScoutInput?.value).map((entry) => entry.keyword)
 }
 
-function buyerIntentCandidates() {
-  if (!elements.buyerIdentityInput) return []
-  return generateBuyerIntentCandidates({
+function audienceIntentCandidates() {
+  return generateAudienceIntentCandidates({
     ...currentOptions(),
-    identitySeeds: elements.buyerIdentityInput.value,
+    baseKeywords: combinedSeedKeywords(),
+    audienceSelections: currentAudienceSelections(),
     actions: (elements.buyerActionInput?.value ?? '').split(/\r?\n|,/),
     learnedSignals: learnedSignalsForGeneration(),
   })
@@ -1772,6 +1919,8 @@ function marketplaceLearningRecords() {
 function liveMarketplaceLearningRecord() {
   const researchContext = activeResearchContext()
   const evidence = modifierEvidenceInput()
+  const audienceSelections = currentAudienceSelectionSnapshot()
+  const audiencePhrases = audienceSelections.map((selection) => selection.phrase)
   return {
     version: 3,
     runId: currentEvidenceRunId(),
@@ -1779,13 +1928,15 @@ function liveMarketplaceLearningRecord() {
     categoryId: researchContext.categoryId,
     eventId: researchContext.eventId,
     eventSnapshot: researchContext.event,
-    identitySeeds: buyerIdentityLines(),
+    identitySeeds: audiencePhrases,
+    audienceSelections,
     context: {
       categoryId: researchContext.categoryId,
       eventId: researchContext.eventId,
       eventSnapshot: researchContext.event,
       eventTerm: normalizePhrase(researchContext.event.searchTerm),
-      buyerIdentities: buyerIdentityLines(),
+      buyerIdentities: audiencePhrases,
+      audienceSelections,
     },
     demandKeywords: evidence.demandKeywords,
     supplyListings: evidence.supplyListings,
@@ -1796,7 +1947,7 @@ function currentModifierAnalysis() {
   const analysisDay = new Date().toISOString().slice(0, 10)
   const options = {
     ...activeResearchOptions(),
-    identitySeeds: elements.buyerIdentityInput?.value ?? '',
+    identitySeeds: audienceSelectionPhrasesForArchive().join('\n'),
     now: `${analysisDay}T00:00:00.000Z`,
   }
   const optionsSignature = stableRenderSignature(options)
@@ -1841,6 +1992,8 @@ function evidenceArchiveRecord() {
   ))
   const capturedAt = new Date().toISOString()
   const runId = currentEvidenceRunId()
+  const audienceSelections = currentAudienceSelectionSnapshot()
+  const audiencePhrases = audienceSelections.map((selection) => selection.phrase)
   const previousNodes = state.evidenceArchives
     .filter((record) => String(record?.runId ?? '').trim() === runId)
     .flatMap((record) => Array.isArray(record?.drilldownNodes) ? record.drilldownNodes : [])
@@ -1853,13 +2006,15 @@ function evidenceArchiveRecord() {
     categoryId: researchContext.categoryId,
     eventId: researchContext.eventId,
     eventSnapshot: researchContext.event,
-    identitySeeds: buyerIdentityLines(),
+    identitySeeds: audiencePhrases,
+    audienceSelections,
     context: {
       categoryId: researchContext.categoryId,
       eventId: researchContext.eventId,
       eventSnapshot: researchContext.event,
       eventTerm: normalizePhrase(researchContext.event.searchTerm),
-      buyerIdentities: buyerIdentityLines(),
+      buyerIdentities: audiencePhrases,
+      audienceSelections,
     },
     demandKeywords: evidence.demandKeywords.map((row) => ({
       keyword: normalizePhrase(row.keyword),
@@ -1997,6 +2152,7 @@ function evidenceArchiveBlockReason(options = {}) {
 async function loadEvidenceArchives() {
   if (!window.location.origin.startsWith('http')) {
     state.evidenceArchiveAvailable = false
+    state.audienceProviderFailed = false
     return
   }
   try {
@@ -2016,17 +2172,14 @@ async function loadEvidenceArchives() {
       }
     }))
     state.evidenceArchives = records.filter((record) => record && typeof record === 'object')
+    state.audienceProviderFailed = false
   } catch {
     state.evidenceArchiveAvailable = false
     state.evidenceArchives = []
+    state.audienceProviderFailed = true
   }
   const archiveAnalysis = currentModifierAnalysis()
-  autoSelectBuyerIdentities({
-    persist: false,
-    analysis: archiveAnalysis,
-    renderSuggestions: false,
-  })
-  renderBuyerIdentitySuggestions({ analysis: archiveAnalysis })
+  renderAudienceSuggestions()
   renderModifierEvidence(archiveAnalysis)
   if (
     state.researchRows.length === 0
@@ -2070,11 +2223,15 @@ async function saveEvidenceArchive(options = {}) {
       ...state.evidenceArchives.filter((archived) => String(archived?.runId ?? '').trim() !== record.runId),
       record,
     ]
+    state.audienceProviderFailed = false
     elements.evidenceArchiveStatus.textContent = `${automatic ? '自動保管' : '保管'}: ${name} / 検索語${record.demandKeywords.length}件、商品${record.supplyListings.length}件。`
     renderModifierEvidence()
+    renderAudienceSuggestions()
     return true
   } catch (error) {
+    state.audienceProviderFailed = true
     elements.evidenceArchiveStatus.textContent = `${automatic ? '自動保管' : '保管'}に失敗しました: ${error instanceof Error ? error.message : String(error)}`
+    renderAudienceSuggestions()
     return false
   } finally {
     elements.evidenceArchiveBtn.disabled = false
@@ -2151,59 +2308,206 @@ function learnedSignalsForGeneration() {
   })
 }
 
-function learnedBuyerIdentitySuggestions(exclude = [], analysis = currentModifierAnalysis()) {
-  const excluded = new Set(exclude.map(normalizePhrase))
-  return analysis.rows
-    .filter((row) => row.signalType === 'person' && !excluded.has(row.phrase))
-    .filter((row) => row.freshnessLabel !== 'stale')
-    .slice(0, 6)
-    .map((row) => ({
-      phrase: row.phrase,
-      groupLabel: '過去の実測',
-      note: `Etsy検索語${row.demandKeywords}件、販売商品${row.supplyListings}件、${row.observationRuns}回の調査で確認`,
-    }))
-}
-
-function automaticBuyerIdentityAnalysis(analysis = null) {
-  return analysis ?? analyzeMarketplaceVocabulary(marketplaceLearningRecords(), {
-    ...activeResearchOptions(),
-    identitySeeds: '',
-    now: new Date().toISOString(),
-  })
-}
-
-function autoSelectBuyerIdentities(options = {}) {
-  const current = buyerIdentityLines()
-  if (current.length > 0 && state.buyerIdentitySelectionMode === 'manual') {
-    return { phrases: current, source: 'manual' }
-  }
-  if (
-    options.refresh !== true
-    && current.length > 0
-    && state.buyerIdentitySelectionMode === 'auto'
-    && state.buyerIdentityAutoSource === 'learned'
-  ) {
-    return { phrases: current, source: 'learned' }
-  }
-
-  const selected = selectAutomaticBuyerIdentities(automaticBuyerIdentityAnalysis(options.analysis), {
-    limit: 3,
-    offset: state.buyerIdentitySuggestOffset,
-    customRiskTerms: elements.riskInput?.value ?? '',
-  })
-  if (selected.length === 0) return { phrases: current, source: '' }
-
-  elements.buyerIdentityInput.value = selected.map((item) => item.phrase).join('\n')
-  state.buyerIdentitySelectionMode = 'auto'
-  state.buyerIdentityAutoSource = selected[0].source
-  if (options.renderSuggestions !== false) {
-    renderBuyerIdentitySuggestions({ analysis: options.analysis })
-  }
-  if (options.persist !== false) persistMarketFinderState()
+function audienceStatusLabel(status) {
   return {
-    phrases: selected.map((item) => item.phrase),
-    source: selected[0].source,
+    confirmed: '確認済み',
+    verify: '要確認',
+    reference: '別テーマ参考',
+    manual: '手動仮説',
+    legacy: '旧形式・要確認',
+  }[status] ?? '未判定'
+}
+
+function audienceEvidenceLabel(signal = {}) {
+  if (!signal?.evidence) return '未検証の仮説'
+  const evidence = signal.evidence
+  const sources = Array.isArray(signal.sources) && signal.sources.length > 0
+    ? ` / ${signal.sources.join('・')}`
+    : ''
+  return `Etsy関連語${evidence.etsyRelatedTermCount ?? 0}件 / EverBee販売${evidence.everbeeSellingListingCount ?? 0}件${sources}`
+}
+
+function audienceRoleContainer(role) {
+  return {
+    recipient: elements.audienceRecipientSuggestions,
+    giver: elements.audienceGiverSuggestions,
+    subject: elements.audienceSubjectSuggestions,
+  }[role] ?? null
+}
+
+function audienceDisplayRows(analysis, selections, role) {
+  const selectedByKey = new Map(selections.map((selection) => [audienceSelectionKey(selection), selection]))
+  const signals = analysis.signals.filter((signal) => signal.role === role)
+  const signalByKey = new Map(signals.map((signal) => [audienceSelectionKey(signal), signal]))
+  const rows = signals.flatMap((signal) => {
+    const selection = selectedByKey.get(audienceSelectionKey(signal))
+    if (signal.status === 'reference' && selection?.status !== 'manual') return []
+    return [{
+      ...signal,
+      selection,
+      displayStatus: selection?.status === 'manual' ? 'manual' : signal.status,
+      evidenceStatus: signal.status,
+    }]
+  })
+  for (const selection of selections) {
+    if (selection.role !== role || signalByKey.has(audienceSelectionKey(selection))) continue
+    rows.push({
+      ...selection,
+      selection,
+      displayStatus: selection.status,
+      evidenceStatus: '',
+      evidence: null,
+      sources: [],
+    })
   }
+  return rows
+}
+
+function audienceChipMarkup(row) {
+  const selected = row.selection?.selected === true
+  const status = row.displayStatus ?? row.status
+  const selectable = !selected && ['verify', 'reference'].includes(row.evidenceStatus || status)
+  const removable = selected && status === 'manual'
+  const action = removable ? 'remove' : selectable ? 'select' : ''
+  const buttonAttrs = action
+    ? ` data-audience-action="${action}" data-audience-role="${escapeHtml(row.role)}" data-audience-phrase="${escapeHtml(row.phrase)}" data-audience-subject-type="${escapeHtml(row.subjectType ?? '')}"`
+    : ''
+  const disabled = status === 'confirmed' ? ' disabled' : ''
+  const evidenceStatus = status === 'manual' && row.evidenceStatus
+    ? ` / 根拠: ${audienceStatusLabel(row.evidenceStatus)}`
+    : ''
+  return `
+    <button type="button" class="chip-btn audience-chip ${selected ? 'is-selected' : ''}"${buttonAttrs} aria-pressed="${selected}"${disabled}>
+      <small>${escapeHtml(audienceStatusLabel(status) + evidenceStatus)}</small>
+      <span>${escapeHtml(row.phrase)}</span>
+      <small class="audience-evidence">${escapeHtml(audienceEvidenceLabel(row))}</small>
+    </button>
+  `
+}
+
+function renderAudienceRoleSuggestions(container, rows) {
+  if (!container) return
+  container.innerHTML = rows.length > 0
+    ? rows.map(audienceChipMarkup).join('')
+    : '<span class="audience-empty">実績候補はありません。Etsy公式・EverBeeを確認してから更新します。</span>'
+}
+
+function renderAudienceSuggestions() {
+  const { analysis, contextKey, selections } = synchronizeAudienceSelectionContext()
+  const profile = getAudienceCategoryProfile(currentAudienceContext().categoryId)
+  const allowedRoles = new Set([...profile.primaryRoles, ...profile.secondaryRoles])
+  const statusSignals = [
+    ...analysis.signals,
+    ...selections.filter((selection) => ['manual', 'legacy'].includes(selection.status)),
+  ]
+  const uiStatus = deriveAudienceUiStatus({
+    providerFailed: state.audienceProviderFailed,
+    signals: statusSignals,
+  })
+
+  if (elements.audienceStatus) {
+    elements.audienceStatus.textContent = uiStatus.label
+    elements.audienceStatus.dataset.status = uiStatus.status
+  }
+  for (const role of ['recipient', 'giver', 'subject']) {
+    const container = audienceRoleContainer(role)
+    const group = container?.closest('[data-audience-role-group]')
+    if (group) group.hidden = !allowedRoles.has(role)
+    renderAudienceRoleSuggestions(
+      container,
+      allowedRoles.has(role) ? audienceDisplayRows(analysis, selections, role) : [],
+    )
+  }
+
+  const selectedByKey = new Map(selections.map((selection) => [audienceSelectionKey(selection), selection]))
+  const referenceRows = analysis.signals
+    .filter((signal) => signal.status === 'reference')
+    .filter((signal) => selectedByKey.get(audienceSelectionKey(signal))?.status !== 'manual')
+    .map((signal) => ({
+      ...signal,
+      selection: selectedByKey.get(audienceSelectionKey(signal)),
+      displayStatus: 'reference',
+      evidenceStatus: 'reference',
+    }))
+  renderAudienceRoleSuggestions(elements.audienceReferenceSuggestions, referenceRows)
+
+  if (elements.audienceManualRoleSelect) {
+    const allowed = ['recipient', 'giver', 'subject'].filter((role) => allowedRoles.has(role))
+    for (const option of elements.audienceManualRoleSelect.options) {
+      const usable = allowed.includes(option.value)
+      option.disabled = !usable
+      option.hidden = !usable
+    }
+    if (!allowed.includes(elements.audienceManualRoleSelect.value)) {
+      elements.audienceManualRoleSelect.value = allowed[0] ?? 'recipient'
+    }
+  }
+  state.activeAudienceContextKey = contextKey
+}
+
+function setAudienceSelection(selection) {
+  const contextKey = buildAudienceContextKey(currentAudienceContext())
+  const current = audienceSelectionsForContext(state.audienceSelectionsByContext, contextKey)
+  const key = audienceSelectionKey(selection)
+  const next = current.filter((existing) => audienceSelectionKey(existing) !== key)
+  next.push(selection)
+  state.audienceSelectionsByContext = setAudienceSelectionsForContext(
+    state.audienceSelectionsByContext,
+    contextKey,
+    next,
+  )
+  state.activeAudienceContextKey = contextKey
+}
+
+function handleAudienceSuggestionAction(event) {
+  const button = event.target?.closest?.('[data-audience-action]')
+  if (!button) return
+  const role = String(button.dataset.audienceRole ?? '')
+  const phrase = normalizePhrase(button.dataset.audiencePhrase)
+  const subjectType = normalizePhrase(button.dataset.audienceSubjectType)
+  if (!phrase || !['recipient', 'giver', 'subject'].includes(role)) return
+
+  const contextKey = buildAudienceContextKey(currentAudienceContext())
+  const current = audienceSelectionsForContext(state.audienceSelectionsByContext, contextKey)
+  const key = audienceSelectionKey({ role, phrase, subjectType })
+  if (button.dataset.audienceAction === 'remove') {
+    state.audienceSelectionsByContext = setAudienceSelectionsForContext(
+      state.audienceSelectionsByContext,
+      contextKey,
+      current.filter((selection) => audienceSelectionKey(selection) !== key),
+    )
+  } else {
+    const signal = currentAudienceAnalysis().signals.find((candidate) => (
+      audienceSelectionKey(candidate) === key
+    ))
+    if (!signal || !['verify', 'reference', 'legacy'].includes(signal.status)) return
+    setAudienceSelection({
+      phrase: signal.phrase,
+      role: signal.role,
+      subjectType: signal.subjectType,
+      status: 'manual',
+      source: `manual-${signal.status}`,
+      selected: true,
+    })
+  }
+  resetCandidatesForInputChange()
+}
+
+function addManualAudienceSelection() {
+  const phrase = normalizePhrase(elements.audienceManualInput?.value)
+  const role = String(elements.audienceManualRoleSelect?.value ?? '')
+  const profile = getAudienceCategoryProfile(currentAudienceContext().categoryId)
+  const allowedRoles = new Set([...profile.primaryRoles, ...profile.secondaryRoles])
+  if (!phrase || !allowedRoles.has(role)) return
+  setAudienceSelection({
+    phrase,
+    role,
+    status: 'manual',
+    source: 'manual',
+    selected: true,
+  })
+  elements.audienceManualInput.value = ''
+  resetCandidatesForInputChange()
 }
 
 function fillSelects() {
@@ -2243,47 +2547,6 @@ function renderTargets(options = {}) {
       <span>${escapeHtml(target)}</span>
     </label>
   `).join('')
-}
-
-function buyerIdentityLines() {
-  return String(elements.buyerIdentityInput?.value ?? '')
-    .split(/\r?\n/)
-    .map((line) => normalizePhrase(line))
-    .filter(Boolean)
-}
-
-// Suggestions exclude what is already chosen, so pressing a chip never leaves a dead chip
-// behind and "別の候補を見る" keeps producing names the operator has not already rejected.
-function renderBuyerIdentitySuggestions(options = {}) {
-  if (!elements.buyerIdentitySuggestions) return
-  const chosen = buyerIdentityLines()
-  const learned = learnedBuyerIdentitySuggestions(chosen, options.analysis)
-  const builtIn = suggestBuyerIdentities({
-    limit: 12,
-    offset: state.buyerIdentitySuggestOffset,
-    exclude: [...chosen, ...learned.map((item) => item.phrase)].join('\n'),
-  })
-  const suggestions = [...learned, ...builtIn].slice(0, 12)
-  elements.buyerIdentitySuggestions.innerHTML = suggestions.map((suggestion) => `
-    <button type="button" class="chip-btn" data-buyer-identity="${escapeHtml(suggestion.phrase)}" title="${escapeHtml(suggestion.note)}">
-      <small>${escapeHtml(suggestion.groupLabel)}</small>
-      <span>${escapeHtml(suggestion.phrase)}</span>
-    </button>
-  `).join('')
-  if (elements.buyerIdentityAutoStatus) {
-    elements.buyerIdentityAutoStatus.textContent = state.buyerIdentitySelectionMode === 'manual'
-      ? '手動指定'
-      : state.buyerIdentityAutoSource === 'learned'
-        ? '過去実績から自動選択'
-        : state.buyerIdentityAutoSource === 'starter'
-          ? '初期候補から自動選択'
-          : '自動選択待ち'
-  }
-  if (elements.buyerIdentitySuggestHint) {
-    elements.buyerIdentitySuggestHint.textContent = chosen.length > 0
-      ? `${chosen.length}件を選択中です。押すと下の欄に入ります。自分が中身を分かる領域を優先すると、デザインの当たり率が上がります。`
-      : '押すと下の欄に入ります。自分が中身を分かる領域を優先すると、デザインの当たり率が上がります。'
-  }
 }
 
 function renderBuyerContextSuggestions() {
@@ -8179,6 +8442,7 @@ function researchHeaderState() {
 
 function renderGlobalResearchStatus() {
   if (!elements.researchGlobalCondition) return
+  renderAudienceSuggestions()
   const headerState = researchHeaderState()
   elements.researchGlobalCondition.textContent = headerState.condition
   elements.researchGlobalCondition.title = headerState.condition
@@ -8536,9 +8800,9 @@ function generateCandidates({ preserveMarketplacePlan = false } = {}) {
   const baseGenerated = broadEventMode
     ? generateBroadEventCandidates({ ...options, limit: 40 })
     : generateKeywordCandidates(options)
-  // Buyer-intent phrases lead: naming the person produces long-tail terms that event
-  // templates cannot reach, and every competing tool generates the event templates.
-  const generated = [...buyerIntentCandidates(), ...baseGenerated]
+  // Audience phrases expand only from confirmed evidence or an explicit manual hypothesis;
+  // base discovery remains available before an audience has been verified.
+  const generated = [...audienceIntentCandidates(), ...baseGenerated]
   const generatedMap = new Map(generated.map((candidate) => [normalizePhrase(candidate.keyword), candidate]))
   const trendEntries = trendCandidateEntries()
   const trendKeywords = cleanKeywordList(trendEntries.map((entry) => entry.keyword)).slice(0, 50)
@@ -9720,7 +9984,6 @@ function appendTrendScoutCandidates(candidates) {
 
 async function collectTrendScoutTerms() {
   if (!await prepareForNewCandidateDiscovery()) return
-  autoSelectBuyerIdentities({ persist: false })
   const originalLabel = elements.trendAutoBtn.textContent
   state.lastTrendRunStartedAt = new Date().toISOString()
   state.recentTrendKeywords = new Set()
@@ -11166,30 +11429,24 @@ function bindEvents() {
     state.timingOverrideConfirmed = false
     const pausedForContext = pauseMultiAngleForInputChange()
     renderTargets({ syncYear: true })
-    autoSelectBuyerIdentities({ refresh: true })
+    renderAudienceSuggestions()
     if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.customEventInput.addEventListener('input', () => {
     state.timingOverrideConfirmed = false
     const pausedForContext = pauseMultiAngleForInputChange()
     renderTargets({ syncYear: false })
-    autoSelectBuyerIdentities({ refresh: true })
+    renderAudienceSuggestions()
     if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.categorySelect.addEventListener('change', () => {
     const pausedForContext = pauseMultiAngleForInputChange()
-    autoSelectBuyerIdentities({ refresh: true })
+    renderAudienceSuggestions()
     if (!pausedForContext) resetCandidatesForInputChange()
   })
   elements.yearInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.limitInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.seedInput.addEventListener('input', () => resetCandidatesForInputChange())
-  elements.buyerIdentityInput.addEventListener('input', () => {
-    state.buyerIdentitySelectionMode = 'manual'
-    state.buyerIdentityAutoSource = ''
-    renderBuyerIdentitySuggestions()
-    resetCandidatesForInputChange()
-  })
   elements.buyerActionInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.marketTimingOverrideBtn?.addEventListener('click', () => {
     state.timingOverrideConfirmed = true
@@ -11222,19 +11479,12 @@ function bindEvents() {
     persistMarketFinderState()
   })
   elements.evidenceArchiveBtn?.addEventListener('click', saveEvidenceArchive)
-  elements.buyerIdentityShuffleBtn?.addEventListener('click', () => {
-    state.buyerIdentitySuggestOffset += 1
-    renderBuyerIdentitySuggestions()
+  elements.audienceRefreshBtn?.addEventListener('click', () => {
+    renderAudienceSuggestions()
     persistMarketFinderState()
   })
-  elements.buyerIdentitySuggestions?.addEventListener('click', (event) => {
-    const phrase = event.target?.closest?.('[data-buyer-identity]')?.dataset?.buyerIdentity
-    if (!phrase) return
-    state.buyerIdentitySelectionMode = 'manual'
-    state.buyerIdentityAutoSource = ''
-    appendSeedLine(elements.buyerIdentityInput, phrase)
-    renderBuyerIdentitySuggestions()
-  })
+  elements.audienceField?.addEventListener('click', handleAudienceSuggestionAction)
+  elements.audienceAddManualBtn?.addEventListener('click', addManualAudienceSelection)
   elements.buyerContextSuggestions?.addEventListener('click', (event) => {
     const phrase = event.target?.closest?.('[data-buyer-context]')?.dataset?.buyerContext
     if (!phrase) return
@@ -11278,6 +11528,7 @@ function bindEvents() {
     const button = event.target.closest('[data-console-keyword]')
     if (!button) return
     state.consoleUi = { ...state.consoleUi, selectedKeyword: button.dataset.consoleKeyword }
+    renderAudienceSuggestions()
     renderResearchQueue()
     renderResearchInspector()
     persistMarketFinderState()
@@ -11529,7 +11780,7 @@ function init() {
   migrateLegacyResearchRounds()
   const restoredPreview = restoredResultsAwaitingConfirmation()
   renderTargets({ selectedTargets: persisted?.form?.targets })
-  renderBuyerIdentitySuggestions()
+  renderAudienceSuggestions()
   renderBuyerContextSuggestions()
   loadEvidenceArchives()
   initListingOutcomes()
