@@ -10,6 +10,7 @@ import {
 } from '../src/audience-selection-state.js'
 import {
   createMultiAngleExplorationState,
+  prepareNewMultiAngleCycle,
   startMultiAngleExploration,
 } from '../src/multi-angle-exploration.js'
 
@@ -1412,6 +1413,282 @@ test('fresh candidate discovery clears audience state while continuation keeps i
   assert.deepEqual(state.evidenceArchives, [{ runId: 'kept' }])
   assert.equal(persisted, 1)
   assert.match(continuationBody, /preserveAccumulatedEvidenceForNextCycle = true/)
+})
+
+test('fresh discovery freezes only the new candidate root for live and archived evidence', async () => {
+  const selectedBody = appLf.match(/function selectedAudienceCandidate\(\) \{([\s\S]*?)\n\}\n\nfunction selectedAudienceRootKeyword/)?.[1] ?? ''
+  const rootBody = appLf.match(/function selectedAudienceRootKeyword\(\) \{([\s\S]*?)\n\}\n\nfunction audienceRootIsStaticEntrance/)?.[1] ?? ''
+  const contextBody = appLf.match(/function currentAudienceContext\(\) \{([\s\S]*?)\n\}\n\nfunction currentAudienceProviderFailed/)?.[1] ?? ''
+  const activeKeyBody = appLf.match(/function activeAudienceBatchContextKey\(\) \{([\s\S]*?)\n\}\n\nfunction activeAudienceSelectionSnapshot/)?.[1] ?? ''
+  const archiveContextBody = appLf.match(/function activeAudienceArchiveContext\(\) \{([\s\S]*?)\n\}\n\nfunction normalizeArchivedAudienceSignals/)?.[1] ?? ''
+  const liveBody = appLf.match(/function liveMarketplaceLearningRecord\(\) \{([\s\S]*?)\n\}\n\nfunction currentModifierAnalysis/)?.[1] ?? ''
+  const archiveBody = appLf.match(/function evidenceArchiveRecord\(\) \{([\s\S]*?)\n\}\n\nfunction parseOptionalNumber/)?.[1] ?? ''
+  const freshBody = appLf.match(/async function prepareForNewCandidateDiscovery\(\) \{([\s\S]*?)\n\}\n\nfunction appendTrendScoutCandidates/)?.[1] ?? ''
+  const beginRoundBody = appLf.match(/function beginInitialResearchRound\(status = 'pending-etsy'\) \{([\s\S]*?)\n\}\n\nfunction syncActiveRoundStatus/)?.[1] ?? ''
+  for (const [name, body] of Object.entries({
+    selectedBody,
+    rootBody,
+    contextBody,
+    activeKeyBody,
+    archiveContextBody,
+    liveBody,
+    archiveBody,
+    freshBody,
+    beginRoundBody,
+  })) assert.ok(body, `${name} must be executable`)
+
+  const normalizePhrase = (value) => String(value ?? '').trim().toLowerCase()
+  const buildAudienceContextKey = (context) => [
+    normalizePhrase(context.categoryId).replace(/-/g, ' '),
+    normalizePhrase(context.eventId).replace(/-/g, ' '),
+    normalizePhrase(context.rootKeyword),
+  ].join('::')
+  const state = {
+    researchRows: [],
+    researchRounds: { rounds: [], activeRoundId: '', selectedRoundId: 'all' },
+    acceptExtensionResults: true,
+    multiAngleExploration: createMultiAngleExplorationState({
+      status: 'idle',
+      activeEventId: 'mothers-day',
+      categoryId: 'mug',
+      audienceContextKey: 'mug::mothers day::teacher',
+      audienceRootKeyword: 'teacher',
+    }),
+    pendingEvidenceAutomation: {},
+    savedSeasonalReferenceKeys: [],
+    savedSeasonalReferences: [],
+    evidenceArchives: [],
+    marketplaceInsightPlan: null,
+    marketplaceInsightMessage: '',
+    candidates: [{
+      keyword: 'teacher mug',
+      rootKeyword: 'teacher',
+      categoryId: 'mug',
+      eventId: 'mothers-day',
+    }],
+    candidateCatalog: [],
+    crossNicheProposal: null,
+    crossNicheWorkflow: {},
+    erankQueryPlan: [],
+    consoleUi: { selectedKeyword: 'teacher mug' },
+    activeAudienceContextKey: 'mug::mothers day::teacher',
+    audienceSelectionsByContext: {},
+    listingResearchTargetSettings: {},
+  }
+  const selectedAudienceUiContext = () => ({
+    categoryId: 'mug',
+    eventId: 'mothers-day',
+    category: { id: 'mug', label: 'Mug', searchTerm: 'mug' },
+    event: { id: 'mothers-day', label: "Mother's Day", searchTerm: 'mothers day' },
+  })
+  const selectedAudienceCandidate = new Function(
+    'state',
+    'selectedAudienceUiContext',
+    'normalizePhrase',
+    `return function selectedAudienceCandidate() {${selectedBody}\n}`,
+  )(state, selectedAudienceUiContext, normalizePhrase)
+  const selectedAudienceRootKeyword = new Function(
+    'state',
+    'selectedAudienceCandidate',
+    'selectedAudienceUiContext',
+    'candidateMatchesResearchContext',
+    'generateKeywordCandidates',
+    'currentOptions',
+    'normalizePhrase',
+    `return function selectedAudienceRootKeyword() {${rootBody}\n}`,
+  )(
+    state,
+    selectedAudienceCandidate,
+    selectedAudienceUiContext,
+    () => false,
+    () => [{ keyword: 'mug' }],
+    () => ({}),
+    normalizePhrase,
+  )
+  const currentAudienceContext = new Function(
+    'selectedAudienceUiContext',
+    'selectedAudienceRootKeyword',
+    `return function currentAudienceContext() {${contextBody}\n}`,
+  )(selectedAudienceUiContext, selectedAudienceRootKeyword)
+  const activeResearchContext = () => ({
+    categoryId: 'mug',
+    eventId: 'mothers-day',
+    category: { id: 'mug', searchTerm: 'mug' },
+    event: { id: 'mothers-day', searchTerm: 'mothers day' },
+  })
+
+  const prepareForNewCandidateDiscovery = new Function(
+    'state',
+    'confirmExportBeforeClearingResults',
+    'preserveTerminalMultiAngleEvidenceForNewDiscovery',
+    'clearResearchResults',
+    'selectedEvent',
+    'selectedCategory',
+    'calculateListingResearchTarget',
+    'currentAudienceContext',
+    'buildAudienceContextKey',
+    'prepareNewMultiAngleCycle',
+    'researchEventSnapshot',
+    'createCrossNicheWorkflowState',
+    'clearAudienceSelectionsForFreshStart',
+    'persistMarketFinderState',
+    `return async function prepareForNewCandidateDiscovery() {${freshBody}\n}`,
+  )(
+    state,
+    () => true,
+    async () => true,
+    () => {},
+    () => selectedAudienceUiContext().event,
+    () => selectedAudienceUiContext().category,
+    () => ({ targetWinnerCount: 1 }),
+    currentAudienceContext,
+    buildAudienceContextKey,
+    prepareNewMultiAngleCycle,
+    (event) => event,
+    () => ({}),
+    () => { state.activeAudienceContextKey = '' },
+    () => {},
+  )
+
+  await prepareForNewCandidateDiscovery()
+  const preparedSnapshot = {
+    candidateCount: state.candidates.length,
+    selectedKeyword: state.consoleUi.selectedKeyword,
+  }
+  state.candidates = [{
+    keyword: 'dog mom mug',
+    rootKeyword: 'dog mom',
+    categoryId: 'mug',
+    eventId: 'mothers-day',
+  }]
+  state.consoleUi.selectedKeyword = 'dog mom mug'
+
+  const beginInitialResearchRound = new Function(
+    'state',
+    'initialResearchRoundKeywords',
+    'startResearchRound',
+    'currentAudienceContext',
+    'buildAudienceContextKey',
+    'createMultiAngleExplorationState',
+    `return function beginInitialResearchRound(status = 'pending-etsy') {${beginRoundBody}\n}`,
+  )(
+    state,
+    (candidates) => candidates.map((candidate) => candidate.keyword),
+    (rounds) => ({ ...rounds, activeRoundId: 'initial-dog-mom' }),
+    currentAudienceContext,
+    buildAudienceContextKey,
+    createMultiAngleExplorationState,
+  )
+  beginInitialResearchRound()
+
+  const activeAudienceBatchContextKey = new Function(
+    'state',
+    'createMultiAngleExplorationState',
+    'activeResearchContext',
+    'buildAudienceContextKey',
+    'normalizePhrase',
+    `return function activeAudienceBatchContextKey() {${activeKeyBody}\n}`,
+  )(state, createMultiAngleExplorationState, activeResearchContext, buildAudienceContextKey, normalizePhrase)
+  const audienceContextFromKey = (key, fallback = {}) => {
+    const [categoryId = '', eventId = '', rootKeyword = ''] = String(key ?? '').split('::')
+    return {
+      categoryId: categoryId || fallback.categoryId || '',
+      eventId: eventId || fallback.eventId || '',
+      rootKeyword: rootKeyword || fallback.rootKeyword || '',
+    }
+  }
+  const activeAudienceArchiveContext = new Function(
+    'activeResearchContext',
+    'activeAudienceBatchContextKey',
+    'audienceContextFromKey',
+    'buildAudienceContextKey',
+    `return function activeAudienceArchiveContext() {${archiveContextBody}\n}`,
+  )(activeResearchContext, activeAudienceBatchContextKey, audienceContextFromKey, buildAudienceContextKey)
+  const activeAudienceSelectionSnapshot = () => []
+  const modifierEvidenceInput = () => ({
+    demandKeywords: [{ keyword: 'dog mom mug', etsySearches30d: 900, etsyListings: 400 }],
+    supplyListings: [{ title: 'Dog Mom Mug', monthlySales: 6 }],
+  })
+  const liveMarketplaceLearningRecord = new Function(
+    'activeResearchContext',
+    'modifierEvidenceInput',
+    'activeAudienceSelectionSnapshot',
+    'currentEvidenceRunId',
+    'activeAudienceArchiveContext',
+    'normalizePhrase',
+    `return function liveMarketplaceLearningRecord() {${liveBody}\n}`,
+  )(
+    activeResearchContext,
+    modifierEvidenceInput,
+    activeAudienceSelectionSnapshot,
+    () => 'initial-dog-mom',
+    activeAudienceArchiveContext,
+    normalizePhrase,
+  )
+  const evidenceArchiveRecord = new Function(
+    'activeResearchContext',
+    'modifierEvidenceInput',
+    'state',
+    'candidateMatchesResearchContext',
+    'currentEvidenceRunId',
+    'activeAudienceSelectionSnapshot',
+    'activeAudienceArchiveContext',
+    'analyzeAudienceEvidence',
+    'marketplaceLearningRecords',
+    'normalizeArchivedAudienceSignals',
+    'elements',
+    'currentCrossNicheDrilldown',
+    'createMultiAngleExplorationState',
+    'mergeNicheDrilldownNodes',
+    'buildNicheDrilldownGraph',
+    'normalizePhrase',
+    'parseOptionalNumber',
+    'normalizeArchivedSupplyListings',
+    `return function evidenceArchiveRecord() {${archiveBody}\n}`,
+  )(
+    activeResearchContext,
+    modifierEvidenceInput,
+    state,
+    () => true,
+    () => 'initial-dog-mom',
+    activeAudienceSelectionSnapshot,
+    activeAudienceArchiveContext,
+    () => ({ signals: [] }),
+    () => [],
+    (signals) => signals,
+    { riskInput: { value: '' } },
+    () => ({ candidates: [] }),
+    createMultiAngleExplorationState,
+    (_previous, nodes) => nodes,
+    () => [],
+    normalizePhrase,
+    (value) => Number(value),
+    (rows) => rows,
+  )
+
+  const audienceContext = activeAudienceArchiveContext()
+  const live = liveMarketplaceLearningRecord()
+  const archive = evidenceArchiveRecord()
+  assert.deepEqual({
+    preparedSnapshot,
+    audienceContext,
+    liveRootKeyword: live.rootKeyword,
+    liveContextRootKeyword: live.context.rootKeyword,
+    archiveRootKeyword: archive.rootKeyword,
+    archivedAudienceRootKeyword: archive.audienceContext.rootKeyword,
+  }, {
+    preparedSnapshot: { candidateCount: 0, selectedKeyword: '' },
+    audienceContext: {
+      categoryId: 'mug',
+      eventId: 'mothers day',
+      rootKeyword: 'dog mom',
+      contextKey: 'mug::mothers day::dog mom',
+    },
+    liveRootKeyword: 'dog mom',
+    liveContextRootKeyword: 'dog mom',
+    archiveRootKeyword: 'dog mom',
+    archivedAudienceRootKeyword: 'dog mom',
+  })
 })
 
 test('shows which candidates carry the personalization lever and the gift intent', () => {

@@ -1635,7 +1635,9 @@ function currentAudienceSelectionSnapshot() {
 
 function activeAudienceBatchContextKey() {
   const exploration = createMultiAngleExplorationState(state.multiAngleExploration)
-  if (exploration.audienceContextKey) return exploration.audienceContextKey
+  if (exploration.status !== 'idle' && exploration.audienceContextKey) {
+    return exploration.audienceContextKey
+  }
 
   const research = activeResearchContext()
   const storedKey = String(state.activeAudienceContextKey ?? '').trim()
@@ -1643,7 +1645,11 @@ function activeAudienceBatchContextKey() {
   const storedMatchesActiveResearch = storedCategoryId === research.categoryId
     && storedEventId === normalizePhrase(research.eventId).replace(/-/g, ' ')
   const rootKeyword = normalizePhrase(
-    storedMatchesActiveResearch ? storedRootKeyword : exploration.audienceRootKeyword,
+    storedMatchesActiveResearch
+      ? storedRootKeyword
+      : exploration.status === 'idle'
+        ? ''
+        : exploration.audienceRootKeyword,
   ) || normalizePhrase(research.category?.searchTerm)
   return buildAudienceContextKey({
     categoryId: research.categoryId,
@@ -2941,6 +2947,13 @@ function activeRoundLabel() {
 }
 
 function beginInitialResearchRound(status = 'pending-etsy') {
+  const audienceContext = currentAudienceContext()
+  state.activeAudienceContextKey = buildAudienceContextKey(audienceContext)
+  state.multiAngleExploration = createMultiAngleExplorationState({
+    ...state.multiAngleExploration,
+    audienceContextKey: state.activeAudienceContextKey,
+    audienceRootKeyword: audienceContext.rootKeyword,
+  })
   const keywords = initialResearchRoundKeywords(state.candidates)
   state.researchRounds = startResearchRound(state.researchRounds, {
     type: 'initial',
@@ -10330,9 +10343,10 @@ async function prepareForNewCandidateDiscovery() {
   clearAudienceSelectionsForFreshStart()
   state.acceptExtensionResults = false
   if (state.researchRows.length > 0) clearResearchResults('all')
+  state.candidates = []
+  state.consoleUi = { ...state.consoleUi, selectedKeyword: '' }
   const event = selectedEvent()
   const category = selectedCategory()
-  const audienceContext = currentAudienceContext()
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
   const prepared = prepareNewMultiAngleCycle({
     exploration: state.multiAngleExploration,
@@ -10350,8 +10364,6 @@ async function prepareForNewCandidateDiscovery() {
     categoryId: category.id,
     eventSnapshot: researchEventSnapshot(event),
     categorySnapshot: category,
-    audienceContextKey: buildAudienceContextKey(audienceContext),
-    audienceRootKeyword: audienceContext.rootKeyword,
     targetWinnerCount: target.targetWinnerCount,
   })
   state.multiAngleExploration = prepared.exploration
