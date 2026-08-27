@@ -278,6 +278,7 @@ function createEvidenceBucket() {
     etsySearches: 0,
     everbeeListingCount: 0,
     everbeeSellingListingCount: 0,
+    everbeeSellingTitleKeys: new Set(),
     everbeeMonthlySales: 0,
     runs: new Set(),
     sources: new Set(),
@@ -315,6 +316,7 @@ function recordEverbeeEvidence(bucket, record, title, normalize, runId) {
   const monthlySales = Math.max(0, numberOrZero(title?.monthlySales ?? title?.sales))
   bucket.everbeeListingCount += 1
   bucket.everbeeSellingListingCount += 1
+  bucket.everbeeSellingTitleKeys.add(normalizedTitle)
   bucket.everbeeMonthlySales += monthlySales
   bucket.runs.add(runId)
   bucket.sources.add('everbee-title')
@@ -327,6 +329,7 @@ function bucketEvidence(bucket) {
     etsySearches: bucket.etsySearches,
     everbeeListingCount: bucket.everbeeListingCount,
     everbeeSellingListingCount: bucket.everbeeSellingListingCount,
+    everbeeDistinctSellingTitleCount: bucket.everbeeSellingTitleKeys.size,
     everbeeMonthlySales: bucket.everbeeMonthlySales,
     observationRuns: bucket.runs.size,
     latestCapturedAt: bucket.latestCapturedAt,
@@ -414,7 +417,7 @@ export function analyzeAudienceEvidenceCore(records = [], context = {}, options 
       const sources = Array.from((hasCurrentEvidence ? entry.current : entry.reference).sources).sort()
       const status = hasCurrentEvidence
         ? ((current.etsyRelatedTermCount >= 1 && current.everbeeSellingListingCount >= 1)
-            || current.everbeeSellingListingCount >= 2)
+            || current.everbeeDistinctSellingTitleCount >= 2)
           ? 'confirmed'
           : 'verify'
         : 'reference'
@@ -442,6 +445,7 @@ export function analyzeAudienceEvidenceCore(records = [], context = {}, options 
     summary[signal.status] += 1
     summary.etsyRelatedTermCount += signal.evidence.etsyRelatedTermCount
     summary.everbeeSellingListingCount += signal.evidence.everbeeSellingListingCount
+    summary.everbeeDistinctSellingTitleCount += signal.evidence.everbeeDistinctSellingTitleCount
     return summary
   }, {
     records: Array.isArray(records) ? records.length : 0,
@@ -451,6 +455,7 @@ export function analyzeAudienceEvidenceCore(records = [], context = {}, options 
     reference: 0,
     etsyRelatedTermCount: 0,
     everbeeSellingListingCount: 0,
+    everbeeDistinctSellingTitleCount: 0,
   })
 
   return { contextKey, signals, totals }

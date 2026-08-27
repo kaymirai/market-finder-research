@@ -207,6 +207,50 @@ test('confirms repeated selling-title evidence without Etsy related terms', () =
   assert.equal(analysis.signals[0].autoSelectable, true)
 })
 
+test('keeps repeated captures of one selling title at verify', () => {
+  const analysis = analyzeAudienceEvidence([
+    {
+      runId: 'everbee-run-1',
+      capturedAt: '2026-08-27T00:00:00Z',
+      categoryId: 'mug',
+      eventId: '',
+      rootKeyword: 'teacher mug',
+      demandKeywords: [],
+      supplyListings: [{ title: 'Teacher Mug Gift', monthlySales: 8 }],
+    },
+    {
+      runId: 'everbee-run-2',
+      capturedAt: '2026-08-27T01:00:00Z',
+      categoryId: 'mug',
+      eventId: '',
+      rootKeyword: 'teacher mug',
+      demandKeywords: [],
+      supplyListings: [{ title: 'Teacher Mug Gift', monthlySales: 8 }],
+    },
+  ], { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }, {
+    now: '2026-08-27T12:00:00Z',
+  })
+
+  assert.deepEqual(
+    analysis.signals.map(({ phrase, status, autoSelectable, evidence }) => ({
+      phrase,
+      status,
+      autoSelectable,
+      everbeeSellingListingCount: evidence.everbeeSellingListingCount,
+      everbeeDistinctSellingTitleCount: evidence.everbeeDistinctSellingTitleCount,
+      observationRuns: evidence.observationRuns,
+    })),
+    [{
+      phrase: 'teacher',
+      status: 'verify',
+      autoSelectable: false,
+      everbeeSellingListingCount: 2,
+      everbeeDistinctSellingTitleCount: 1,
+      observationRuns: 2,
+    }],
+  )
+})
+
 test('does not create a reference signal from a non-selling EverBee title', () => {
   const analysis = analyzeAudienceEvidence([{
     runId: 'everbee-no-sales',
