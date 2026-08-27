@@ -2494,8 +2494,10 @@ function buyerIntentPhrases(identity, product, options = {}) {
   }
   add(`gift for ${identity} ${product}`, 'assumed')
   if (kind === 'identity') add(`for my ${identity} ${product}`, 'assumed')
-  for (const giver of buyerGiverPhrases(kind, groupId, options)) {
-    add(`${identity} ${product} ${giver}`, 'assumed')
+  if (options.includeDefaultGivers !== false) {
+    for (const giver of buyerGiverPhrases(kind, groupId, options)) {
+      add(`${identity} ${product} ${giver}`, 'assumed')
+    }
   }
   for (const transition of axes.transition ?? []) {
     add(`${transition} ${identity} ${product}`, 'assumed')
@@ -2919,61 +2921,187 @@ export function measuredModifierPhrases(analysis = {}, options = {}) {
 const PERSONALIZATION_PATTERN = /\b(personalized|personalised|custom|custom name|with name|monogram|monogrammed|name)\b/
 const GIFT_INTENT_PATTERN = /\b(gift|gifts|appreciation|from daughter|from son|from the kids|from the grandkids|from the team|from coworkers|from students|from patients|from parents|from families|from the class|from the club|from the crew|for my|thank you)\b/
 
-// Identity comes from the user because only they know how that group names itself. The
-// engine supplies the combination patterns, not the vocabulary of the niche.
-export function generateBuyerIntentCandidates(options = {}) {
+function audienceCandidateContextKey(selection, options, categoryId, baseKeyword) {
+  const explicitKey = String(selection?.audienceContextKey ?? selection?.contextKey ?? options.audienceContextKey ?? '').trim()
+  if (explicitKey) return explicitKey
+  const context = selection?.context ?? options.audienceContext ?? {
+    categoryId,
+    eventId: options.eventId,
+    rootKeyword: options.rootKeyword ?? baseKeyword,
+  }
+  return buildAudienceContextKey(context)
+}
+
+function audienceBaseKeywords(options = {}) {
+  const source = Array.isArray(options.baseKeywords)
+    ? options.baseKeywords
+    : splitSeedText(options.baseKeywords)
+  return unique(source.map(normalizePhrase).filter(Boolean))
+}
+
+function selectionPhraseAlreadyInBase(phrase, baseKeyword) {
+  return phraseHasTerm(baseKeyword, phrase)
+}
+
+function combineAudiencePhrase(phrase, baseKeyword) {
+  return selectionPhraseAlreadyInBase(phrase, baseKeyword)
+    ? normalizePhrase(baseKeyword)
+    : normalizePhrase(`${phrase} ${baseKeyword}`)
+}
+
+function removeAudiencePhraseFromBase(phrase, baseKeyword) {
+  const normalizedPhrase = normalizePhrase(phrase)
+  const normalizedBase = normalizePhrase(baseKeyword)
+  if (!normalizedPhrase || !normalizedBase) return normalizedBase
+  return normalizePhrase(` ${normalizedBase} `
+    .replace(new RegExp(`\\s${escapeRegExp(normalizedPhrase)}\\s`, 'g'), ' '))
+}
+
+function eligibleAudienceSelections(options = {}) {
+  const categoryProfile = getAudienceCategoryProfile(options.categoryId)
+  const allowedRoles = new Set([...categoryProfile.primaryRoles, ...categoryProfile.secondaryRoles])
+  const selections = Array.isArray(options.audienceSelections) ? options.audienceSelections : []
+  const byKey = new Map()
+
+  for (const selection of selections) {
+    const phrase = normalizePhrase(selection?.phrase)
+    const role = normalizePhrase(selection?.role)
+    const status = normalizePhrase(selection?.status)
+    if (!phrase || !allowedRoles.has(role) || !['confirmed', 'manual'].includes(status)) continue
+    const key = `${role}::${phrase}`
+    if (!byKey.has(key) || (status === 'confirmed' && byKey.get(key).status !== 'confirmed')) {
+      byKey.set(key, { ...selection, phrase, role, status, subjectType: normalizePhrase(selection?.subjectType) })
+    }
+  }
+
+  return [...byKey.values()]
+}
+
+function buildAudienceIntentCandidate(keyword, metadata, category, customRiskTerms, options) {
+  const normalized = normalizePhrase(keyword)
+  if (countWords(normalized) < 2) return null
+  if (hasRepeatedAdjacentPhrase(normalized)) return null
+  if (hasDuplicateGarmentProductTerms(normalized)) return null
+  if (hasConflictingRecipientRoles(normalized)) return null
+  if (classifyCandidateKeyword(normalized, options).action !== 'candidate') return null
+
+  const riskTerms = detectRiskTerms(normalized, customRiskTerms)
+  return {
+    keyword: normalized,
+    modifierEvidence: metadata.modifierEvidence ?? 'assumed',
+    eventId: '',
+    eventLabel: '買い手意図',
+    categoryId: category.id,
+    categoryLabel: category.label,
+    score: scoreCandidateKeyword(normalized, customRiskTerms),
+    wordCount: countWords(normalized),
+    riskTerms,
+    status: riskTerms.length > 0 ? 'review' : 'ready',
+    discoveryLane: 'audience',
+    queryStrategy: 'audience-intent',
+    buyerIntentIdentity: metadata.audienceRole === 'recipient' ? metadata.audiencePhrase : '',
+    buyerIntentKind: metadata.audienceRole === 'recipient' ? classifyBuyerIdentity(metadata.audiencePhrase).kind : '',
+    personalizable: PERSONALIZATION_PATTERN.test(normalized),
+    giftIntent: GIFT_INTENT_PATTERN.test(normalized),
+    audienceRole: metadata.audienceRole,
+    audiencePhrase: metadata.audiencePhrase,
+    audienceStatus: metadata.audienceStatus,
+    audienceContextKey: metadata.audienceContextKey,
+    audienceSubjectType: metadata.audienceSubjectType ?? '',
+  }
+}
+
+// Audience evidence controls the vocabulary. Confirmed market observations and explicit
+// manual choices are the only inputs that may create queries; verify/reference records stay
+// available to the UI without silently becoming candidate phrases.
+export function generateAudienceIntentCandidates(options = {}) {
   const category = getCategory(options.categoryId)
-  const product = normalizePhrase(category.searchTerm)
-  const identities = splitSeedText(options.identitySeeds)
-    .map((value) => normalizePhrase(value))
-    .filter(Boolean)
-  if (identities.length === 0) return []
+  const baseKeywords = audienceBaseKeywords(options)
+  const selections = eligibleAudienceSelections(options)
+  if (baseKeywords.length === 0 || selections.length === 0) return []
 
   const customRiskTerms = splitSeedText(options.customRiskTerms)
-  const perIdentity = Math.max(1, Math.min(Number(options.perIdentity) || 25, 60))
+  const perSelection = Math.max(1, Math.min(Number(options.perSelection ?? options.perIdentity) || 25, 60))
   const limit = Math.max(1, Math.min(Number(options.limit) || 200, 400))
+  const candidateMetadata = new Map()
+  const anchors = []
 
-  const evidenceByKeyword = new Map()
-  const keywords = unique(
-    identities.flatMap((identity) => buyerIntentPhrases(identity, product, options)
-      .slice(0, perIdentity))
-      .map((entry) => {
-        const keyword = normalizePhrase(entry.phrase)
-        if (keyword && !evidenceByKeyword.has(keyword)) evidenceByKeyword.set(keyword, entry.evidence)
-        return keyword
-      })
-      .filter((keyword) => countWords(keyword) >= 2)
-      .filter((keyword) => !hasRepeatedAdjacentPhrase(keyword))
-      .filter((keyword) => !hasDuplicateGarmentProductTerms(keyword))
-      .filter((keyword) => !hasConflictingRecipientRoles(keyword))
-      .filter((keyword) => classifyCandidateKeyword(keyword, options).action === 'candidate')
-  )
+  const addCandidate = (keyword, metadata, anchor = false) => {
+    const normalized = normalizePhrase(keyword)
+    if (!normalized || candidateMetadata.has(normalized)) return
+    candidateMetadata.set(normalized, metadata)
+    if (anchor) anchors.push({ keyword: normalized, metadata })
+  }
 
-  return keywords
-    .map((keyword) => {
-      const riskTerms = detectRiskTerms(keyword, customRiskTerms)
-      const identity = identities.find((value) => keyword.includes(value)) ?? ''
-      return {
-        keyword,
-        modifierEvidence: evidenceByKeyword.get(keyword) ?? 'assumed',
-        eventId: '',
-        eventLabel: '買い手意図',
-        categoryId: category.id,
-        categoryLabel: category.label,
-        score: scoreCandidateKeyword(keyword, customRiskTerms),
-        wordCount: countWords(keyword),
-        riskTerms,
-        status: riskTerms.length > 0 ? 'review' : 'ready',
-        discoveryLane: 'audience',
-        queryStrategy: 'buyer-intent',
-        buyerIntentIdentity: identity,
-        buyerIntentKind: classifyBuyerIdentity(identity).kind,
-        personalizable: PERSONALIZATION_PATTERN.test(keyword),
-        giftIntent: GIFT_INTENT_PATTERN.test(keyword),
+  for (const selection of selections.filter((item) => item.role !== 'giver')) {
+    for (const baseKeyword of baseKeywords) {
+      const metadata = {
+        audienceRole: selection.role,
+        audiencePhrase: selection.phrase,
+        audienceStatus: selection.status,
+        audienceContextKey: audienceCandidateContextKey(selection, options, category.id, baseKeyword),
+        audienceSubjectType: selection.subjectType,
       }
-    })
+      if (selection.role === 'subject') {
+        addCandidate(combineAudiencePhrase(selection.phrase, baseKeyword), {
+          ...metadata,
+          modifierEvidence: 'subject',
+        }, true)
+        continue
+      }
+
+      const recipientProduct = selectionPhraseAlreadyInBase(selection.phrase, baseKeyword)
+        ? removeAudiencePhraseFromBase(selection.phrase, baseKeyword)
+        : baseKeyword
+      const anchorKeyword = combineAudiencePhrase(selection.phrase, baseKeyword)
+      const phrases = buyerIntentPhrases(selection.phrase, recipientProduct, {
+        ...options,
+        includeDefaultGivers: options.includeDefaultGivers === true,
+      }).slice(0, perSelection)
+      for (const entry of phrases) {
+        addCandidate(entry.phrase, { ...metadata, modifierEvidence: entry.evidence }, entry.phrase === anchorKeyword)
+      }
+    }
+  }
+
+  for (const giver of selections.filter((item) => item.role === 'giver')) {
+    for (const anchor of anchors) {
+      addCandidate(`${anchor.keyword} from ${giver.phrase}`, {
+        audienceRole: 'giver',
+        audiencePhrase: giver.phrase,
+        audienceStatus: giver.status,
+        audienceContextKey: audienceCandidateContextKey(giver, options, category.id, anchor.keyword),
+        audienceSubjectType: '',
+        modifierEvidence: 'giver',
+      })
+    }
+  }
+
+  return [...candidateMetadata.entries()]
+    .map(([keyword, metadata]) => buildAudienceIntentCandidate(keyword, metadata, category, customRiskTerms, options))
+    .filter(Boolean)
     .sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, 'en'))
     .slice(0, limit)
+}
+
+// Kept while the UI migration still passes newline-separated buyer identities. The wrapper
+// explicitly treats that field as a manual recipient choice, so it cannot make verify or
+// reference evidence selectable by accident.
+export function generateBuyerIntentCandidates(options = {}) {
+  const category = getCategory(options.categoryId)
+  const identities = splitSeedText(options.identitySeeds).map(normalizePhrase).filter(Boolean)
+  if (identities.length === 0) return []
+
+  return generateAudienceIntentCandidates({
+    ...options,
+    baseKeywords: [normalizePhrase(category.searchTerm)],
+    audienceSelections: identities.map((phrase) => ({ phrase, role: 'recipient', status: 'manual' })),
+    perSelection: options.perIdentity,
+    includeDefaultGivers: true,
+  }).map((candidate) => ({
+    ...candidate,
+    queryStrategy: 'buyer-intent',
+  }))
 }
 
 const BROAD_EVENT_LANE_ORDER = ['motif', 'moment', 'audience', 'aesthetic', 'adjacent']

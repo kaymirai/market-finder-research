@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import * as marketKeywordEngine from '../../shared/market-keyword-engine/index.js'
 import {
   aggregateEverbeeListings,
+  analyzeAudienceEvidence,
   buildCrossNicheDrilldown,
   everbeeResultsToBroadListings,
   extractNicheHintsFromListings,
@@ -27,6 +28,7 @@ import {
   deriveBuyerSearchQueriesFromTitle,
   explainEverbeeScore,
   generateBroadEventCandidates,
+  generateAudienceIntentCandidates,
   generateBuyerIntentCandidates,
   generateBuyerIdentityDrilldownCandidates,
   getBroadEventDiscoveryProfile,
@@ -1627,12 +1629,28 @@ test('adds a different specificity axis on the next buyer drilldown depth', () =
   assert.equal(candidates.every((candidate) => candidate.rootKeyword === 'teacher shirt'), true)
 })
 
-test('falls back to safe starter identities when there is no measured buyer history', () => {
-  const selected = selectAutomaticBuyerIdentities({ rows: [] }, { limit: 3 })
+test('does not auto-select audience candidates from unrelated Shirt history for an Ornament context', () => {
+  const analysis = analyzeAudienceEvidence([{
+    runId: 'shirt-history',
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'shirt',
+    eventId: '',
+    rootKeyword: 'mom shirt',
+    demandKeywords: [{ keyword: 'mom shirt', etsySearches30d: 9000 }],
+    supplyListings: [{ title: 'Mom Shirt', monthlySales: 20 }],
+  }], {
+    categoryId: 'ornament',
+    eventId: '',
+    rootKeyword: 'memorial ornament',
+  }, { now: '2026-08-27T12:00:00Z' })
+  const candidates = generateAudienceIntentCandidates({
+    categoryId: 'ornament',
+    baseKeywords: ['memorial ornament'],
+    audienceSelections: analysis.signals,
+  })
 
-  assert.equal(selected.length, 3)
-  assert.equal(selected.every((item) => item.source === 'starter'), true)
-  assert.equal(selected.every((item) => detectRiskTerms(item.phrase, []).length === 0), true)
+  assert.deepEqual(analysis.signals, [])
+  assert.deepEqual(candidates, [])
 })
 
 test('rotates and excludes so pressing for more never repeats what is already chosen', () => {

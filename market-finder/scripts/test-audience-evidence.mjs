@@ -4,6 +4,7 @@ import {
   analyzeAudienceEvidence,
   buildAudienceContextKey,
   extractAudienceRoleSignals,
+  generateAudienceIntentCandidates,
   getAudienceCategoryProfile,
 } from '../../shared/market-keyword-engine/index.js'
 
@@ -124,6 +125,65 @@ test('keeps one-source and different-theme audience evidence unselected', () => 
     [{ phrase: 'teacher', status: 'reference', autoSelectable: false }],
   )
   assert.equal(analysis.signals.some((signal) => signal.phrase === 'mom'), false)
+})
+
+test('generates recipient giver and subject phrases without crossing their grammar', () => {
+  const candidates = generateAudienceIntentCandidates({
+    categoryId: 'ornament',
+    baseKeywords: ['memorial ornament'],
+    audienceSelections: [
+      { phrase: 'pet', role: 'subject', subjectType: 'pet', status: 'confirmed' },
+      { phrase: 'students', role: 'giver', subjectType: '', status: 'confirmed' },
+    ],
+    limit: 20,
+  })
+  const keywords = candidates.map((candidate) => candidate.keyword)
+
+  assert.ok(keywords.includes('pet memorial ornament'))
+  assert.equal(keywords.some((keyword) => keyword.includes('gift for pet memorial')), false)
+  assert.equal(keywords.some((keyword) => keyword === 'students ornament'), false)
+})
+
+test('keeps theme discovery active when audience is empty', () => {
+  assert.deepEqual(generateAudienceIntentCandidates({
+    categoryId: 'wall-art',
+    baseKeywords: ['landscape wall art'],
+    audienceSelections: [],
+  }), [])
+})
+
+test('uses confirmed and manual audience selections while keeping verify and reference visible only', () => {
+  const candidates = generateAudienceIntentCandidates({
+    categoryId: 'ornament',
+    baseKeywords: ['memorial ornament'],
+    audienceSelections: [
+      { phrase: 'mom', role: 'subject', subjectType: 'person', status: 'confirmed', contextKey: 'ornament::::memorial ornament' },
+      { phrase: 'daughter', role: 'giver', status: 'manual', contextKey: 'ornament::::memorial ornament' },
+      { phrase: 'teacher', role: 'recipient', status: 'verify' },
+      { phrase: 'pet', role: 'subject', subjectType: 'pet', status: 'reference' },
+    ],
+  })
+
+  assert.ok(candidates.some((candidate) => candidate.keyword === 'mom memorial ornament'))
+  assert.ok(candidates.some((candidate) => candidate.keyword === 'mom memorial ornament from daughter'))
+  assert.equal(candidates.some((candidate) => candidate.keyword.includes('teacher')), false)
+  assert.equal(candidates.some((candidate) => candidate.keyword.includes('pet')), false)
+  assert.ok(candidates.every((candidate) => candidate.audienceStatus === 'confirmed' || candidate.audienceStatus === 'manual'))
+  assert.ok(candidates.every((candidate) => candidate.audienceContextKey === 'ornament::::memorial ornament'))
+})
+
+test('reuses a recipient already present in the base phrase before attaching a confirmed giver', () => {
+  const candidates = generateAudienceIntentCandidates({
+    categoryId: 'ornament',
+    baseKeywords: ['teacher ornament'],
+    audienceSelections: [
+      { phrase: 'teacher', role: 'recipient', status: 'confirmed' },
+      { phrase: 'students', role: 'giver', status: 'confirmed' },
+    ],
+  })
+
+  assert.ok(candidates.some((candidate) => candidate.keyword === 'teacher ornament'))
+  assert.ok(candidates.some((candidate) => candidate.keyword === 'teacher ornament from students'))
 })
 
 test('does not count a static demand seed as audience evidence', () => {
