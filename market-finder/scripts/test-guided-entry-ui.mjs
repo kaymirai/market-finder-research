@@ -1175,6 +1175,11 @@ test('archives and analyses a paused batch with its frozen Audience selections a
     'candidateMatchesResearchContext',
     'currentEvidenceRunId',
     'activeAudienceSelectionSnapshot',
+    'activeAudienceArchiveContext',
+    'analyzeAudienceEvidence',
+    'marketplaceLearningRecords',
+    'normalizeArchivedAudienceSignals',
+    'elements',
     'currentCrossNicheDrilldown',
     'createMultiAngleExplorationState',
     'mergeNicheDrilldownNodes',
@@ -1190,6 +1195,21 @@ test('archives and analyses a paused batch with its frozen Audience selections a
     (row, context) => row.categoryId === context.categoryId && row.eventId === context.eventId,
     () => 'old-batch',
     activeAudienceSelectionSnapshot,
+    () => ({ categoryId: 'mug', eventId: 'mothers day', rootKeyword: 'teacher mug', contextKey: oldKey }),
+    () => ({
+      signals: [{
+        phrase: 'teacher',
+        role: 'recipient',
+        subjectType: '',
+        status: 'confirmed',
+        autoSelectable: true,
+        sources: ['etsy-related', 'everbee-title'],
+        evidence: { etsyRelatedTermCount: 1, everbeeSellingListingCount: 1 },
+      }],
+    }),
+    () => [],
+    (signals) => signals,
+    { riskInput: { value: '' } },
     () => ({ candidates: [] }),
     createMultiAngleExplorationState,
     (_previous, nodes) => nodes,
@@ -1227,6 +1247,18 @@ test('archives and analyses a paused batch with its frozen Audience selections a
   assert.deepEqual(archive.identitySeeds, ['teacher'])
   assert.deepEqual(archive.audienceSelections.map((selection) => selection.phrase), ['teacher'])
   assert.equal(archive.audienceSelections.some((selection) => selection.phrase === 'pumpkin'), false)
+  assert.deepEqual(archive.audienceContext, {
+    categoryId: 'mug', eventId: 'mothers day', rootKeyword: 'teacher mug', contextKey: oldKey,
+  })
+  assert.deepEqual(archive.audienceSignals, [{
+    phrase: 'teacher',
+    role: 'recipient',
+    subjectType: '',
+    status: 'confirmed',
+    autoSelectable: true,
+    sources: ['etsy-related', 'everbee-title'],
+    evidence: { etsyRelatedTermCount: 1, everbeeSellingListingCount: 1 },
+  }])
   assert.equal(capturedOptions.at(-1)?.identitySeeds, 'teacher')
 })
 

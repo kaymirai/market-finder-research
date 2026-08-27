@@ -1567,6 +1567,66 @@ function audienceSelectionPhrasesForArchive() {
   return activeAudienceSelectionSnapshot().map((selection) => selection.phrase)
 }
 
+function audienceContextFromKey(contextKey, fallback = {}) {
+  const [categoryId = '', eventId = '', rootKeyword = ''] = String(contextKey ?? '').split('::')
+  return {
+    categoryId: categoryId || fallback.categoryId || '',
+    eventId: eventId || fallback.eventId || '',
+    rootKeyword: rootKeyword || fallback.rootKeyword || '',
+  }
+}
+
+function activeAudienceArchiveContext() {
+  const research = activeResearchContext()
+  const context = audienceContextFromKey(activeAudienceBatchContextKey(), {
+    categoryId: research.categoryId,
+    eventId: research.eventId,
+    rootKeyword: research.category?.searchTerm,
+  })
+  return {
+    ...context,
+    contextKey: buildAudienceContextKey(context),
+  }
+}
+
+function normalizeArchivedAudienceSignals(signals = []) {
+  const validRoles = new Set(['recipient', 'giver', 'subject'])
+  const validStatuses = new Set(['confirmed', 'verify', 'reference', 'manual', 'legacy'])
+  return (Array.isArray(signals) ? signals : []).flatMap((signal) => {
+    const phrase = normalizePhrase(signal?.phrase)
+    const role = String(signal?.role ?? '').trim()
+    const status = String(signal?.status ?? '').trim()
+    if (!phrase || !validRoles.has(role) || !validStatuses.has(status)) return []
+    const evidence = signal?.evidence && typeof signal.evidence === 'object' ? signal.evidence : {}
+    return [{
+      phrase,
+      role,
+      subjectType: role === 'subject' ? normalizePhrase(signal.subjectType) : '',
+      status,
+      autoSelectable: signal.autoSelectable === true,
+      sources: Array.isArray(signal.sources) ? signal.sources.map(normalizePhrase).filter(Boolean) : [],
+      evidence: {
+        etsyRelatedTermCount: parseOptionalNumber(evidence.etsyRelatedTermCount) ?? 0,
+        etsySearches: parseOptionalNumber(evidence.etsySearches) ?? 0,
+        everbeeListingCount: parseOptionalNumber(evidence.everbeeListingCount) ?? 0,
+        everbeeSellingListingCount: parseOptionalNumber(evidence.everbeeSellingListingCount) ?? 0,
+        everbeeDistinctSellingTitleCount: parseOptionalNumber(evidence.everbeeDistinctSellingTitleCount) ?? 0,
+        everbeeMonthlySales: parseOptionalNumber(evidence.everbeeMonthlySales) ?? 0,
+        observationRuns: parseOptionalNumber(evidence.observationRuns) ?? 0,
+        latestCapturedAt: String(evidence.latestCapturedAt ?? '').trim(),
+      },
+    }]
+  })
+}
+
+function audienceContextMatchesRecord(audienceContext = {}, record = {}) {
+  const recordContext = record.context && typeof record.context === 'object' ? record.context : {}
+  const categoryId = record.categoryId ?? recordContext.categoryId ?? ''
+  const eventId = record.eventId ?? recordContext.eventId ?? ''
+  const rootKeyword = record.rootKeyword ?? recordContext.rootKeyword ?? audienceContext.rootKeyword ?? ''
+  return buildAudienceContextKey({ categoryId, eventId, rootKeyword }) === buildAudienceContextKey(audienceContext)
+}
+
 function clearAudienceSelectionsForFreshStart() {
   const contextKey = buildAudienceContextKey(currentAudienceContext())
   state.audienceSelectionsByContext = clearCurrentAudienceSelection(
@@ -1766,12 +1826,26 @@ function trendScoutTerms() {
 }
 
 function audienceIntentCandidates() {
+  const analysis = currentAudienceAnalysis()
+  const signals = new Map(analysis.signals.map((signal) => [audienceSelectionKey(signal), signal]))
   return generateAudienceIntentCandidates({
     ...currentOptions(),
     baseKeywords: combinedSeedKeywords(),
     audienceSelections: currentAudienceSelections(),
     actions: (elements.buyerActionInput?.value ?? '').split(/\r?\n|,/),
     learnedSignals: learnedSignalsForGeneration(),
+  }).map((candidate) => {
+    const signal = signals.get(audienceSelectionKey({
+      phrase: candidate.audiencePhrase,
+      role: candidate.audienceRole,
+      subjectType: candidate.audienceSubjectType,
+    }))
+    return {
+      ...candidate,
+      audienceSources: signal?.sources ?? [],
+      audienceEvidence: signal?.evidence ?? {},
+      audienceContextKey: candidate.audienceContextKey || analysis.contextKey,
+    }
   })
 }
 
@@ -1994,11 +2068,22 @@ function modifierEvidenceInput() {
 
 function normalizeLearningRecord(record = {}) {
   const context = record.context && typeof record.context === 'object' ? record.context : {}
+  const version = Number(record.version) || 1
+  const audienceContext = record.audienceContext && typeof record.audienceContext === 'object'
+    ? record.audienceContext
+    : null
+  let audienceSignals = []
+  if (version >= 4 && audienceContextMatchesRecord(audienceContext ?? {}, record)) {
+    audienceSignals = normalizeArchivedAudienceSignals(record.audienceSignals)
+  }
   return {
     ...record,
+    version,
     categoryId: record.categoryId ?? context.categoryId ?? '',
     eventId: record.eventId ?? context.eventId ?? '',
     identitySeeds: record.identitySeeds ?? context.buyerIdentities ?? [],
+    audienceContext,
+    audienceSignals,
   }
 }
 
@@ -2085,14 +2170,22 @@ function evidenceArchiveRecord() {
   ))
   const capturedAt = new Date().toISOString()
   const runId = currentEvidenceRunId()
+  const audienceContext = activeAudienceArchiveContext()
+  const audienceAnalysis = analyzeAudienceEvidence(marketplaceLearningRecords(), audienceContext, {
+    now: capturedAt,
+    customRiskTerms: elements.riskInput?.value ?? '',
+  })
+  const audienceSignals = normalizeArchivedAudienceSignals(audienceAnalysis.signals)
   const audienceSelections = activeAudienceSelectionSnapshot()
-  const audiencePhrases = audienceSelections.map((selection) => selection.phrase)
+  const audiencePhrases = audienceSelections
+    .filter((selection) => selection.role === 'recipient' && ['confirmed', 'manual'].includes(selection.status))
+    .map((selection) => selection.phrase)
   const previousNodes = state.evidenceArchives
     .filter((record) => String(record?.runId ?? '').trim() === runId)
     .flatMap((record) => Array.isArray(record?.drilldownNodes) ? record.drilldownNodes : [])
   const drilldown = currentCrossNicheDrilldown()
   return {
-    version: 3,
+    version: 4,
     runId,
     capturedAt,
     locale: 'en-US',
@@ -2101,11 +2194,14 @@ function evidenceArchiveRecord() {
     eventSnapshot: researchContext.event,
     identitySeeds: audiencePhrases,
     audienceSelections,
+    audienceContext,
+    audienceSignals,
     context: {
       categoryId: researchContext.categoryId,
       eventId: researchContext.eventId,
       eventSnapshot: researchContext.event,
       eventTerm: normalizePhrase(researchContext.event.searchTerm),
+      rootKeyword: audienceContext.rootKeyword,
       buyerIdentities: audiencePhrases,
       audienceSelections,
     },
@@ -9503,6 +9599,12 @@ const RESEARCH_METADATA_CSV_HEADERS = [
   'Drilldown Verdict',
   'Stop Reason',
   'Parent Comparison JSON',
+  'Audience Subject',
+  'Audience Subject Type',
+  'Audience Status',
+  'Audience Sources JSON',
+  'Audience Evidence JSON',
+  'Audience Context Key',
 ]
 
 function researchRoundForRow(row) {
@@ -9538,8 +9640,8 @@ function researchMetadataCsvValues(row) {
     row.erankAttemptedAt ?? row.erankCheckedAt ?? '',
     JSON.stringify(row.buyerIntentAxes ?? []),
     row.wearerIntent ?? '',
-    row.recipientRole ?? '',
-    row.giverRole ?? '',
+    row.recipientRole ?? (row.audienceRole === 'recipient' ? row.audiencePhrase ?? '' : ''),
+    row.giverRole ?? (row.audienceRole === 'giver' ? row.audiencePhrase ?? '' : ''),
     row.occasion ?? '',
     row.personalization ?? '',
     counts.A,
@@ -9555,6 +9657,24 @@ function researchMetadataCsvValues(row) {
     drilldown?.verdict ?? row.crossNicheVerdict ?? '',
     drilldown?.stopReason ?? row.crossNicheStopReason ?? '',
     JSON.stringify(drilldown?.comparison ?? row.crossNicheComparison ?? null),
+    ...audienceCsvProvenance(row),
+  ]
+}
+
+function audienceCsvProvenance(row = {}) {
+  const role = String(row.audienceRole ?? '').trim()
+  const phrase = String(row.audiencePhrase ?? '').trim()
+  const sources = Array.isArray(row.audienceSources) ? row.audienceSources : []
+  const evidence = row.audienceEvidence && typeof row.audienceEvidence === 'object'
+    ? row.audienceEvidence
+    : {}
+  return [
+    role === 'subject' ? phrase : '',
+    role === 'subject' ? String(row.audienceSubjectType ?? '').trim() : '',
+    String(row.audienceStatus ?? '').trim(),
+    sources.length > 0 ? JSON.stringify(sources) : '',
+    Object.keys(evidence).length > 0 ? JSON.stringify(evidence) : '',
+    String(row.audienceContextKey ?? '').trim(),
   ]
 }
 

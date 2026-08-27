@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import * as marketKeywordEngine from '../../shared/market-keyword-engine/index.js'
 import {
   aggregateEverbeeListings,
@@ -52,7 +53,53 @@ import {
   selectCrossNicheParentMarkets,
 } from '../../shared/market-keyword-engine/index.js'
 
+const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8')
+
 const SCORE_OPTIONS = { categoryId: 'shirt', now: '2026-07-19T00:00:00Z' }
+
+test('appends audience CSV provenance fields after legacy recipient and giver columns', () => {
+  const headers = app.match(/const RESEARCH_METADATA_CSV_HEADERS = \[([\s\S]*?)\n\]/)?.[1] ?? ''
+  assert.match(headers, /'Recipient Role'/)
+  assert.match(headers, /'Giver Role'/)
+  assert.match(headers, /'Audience Subject'/)
+  assert.match(headers, /'Audience Subject Type'/)
+  assert.match(headers, /'Audience Status'/)
+  assert.match(headers, /'Audience Sources JSON'/)
+  assert.match(headers, /'Audience Evidence JSON'/)
+  assert.match(headers, /'Audience Context Key'/)
+  assert.match(app, /function audienceCsvProvenance\(row = \{\}\)/)
+})
+
+test('reanalyzes a version-three archive from captured demand and supply, never identity seeds alone', () => {
+  const context = { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }
+  const identityOnly = analyzeAudienceEvidence([{
+    version: 3,
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    identitySeeds: ['teacher'],
+    demandKeywords: [],
+    supplyListings: [],
+  }], context, { now: '2026-08-27T12:00:00Z' })
+  assert.deepEqual(identityOnly.signals, [])
+
+  const capturedEvidence = analyzeAudienceEvidence([{
+    version: 3,
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    identitySeeds: ['someone else'],
+    demandKeywords: [{ keyword: 'teacher mug', etsySearches30d: 1200 }],
+    supplyListings: [{ title: 'Teacher Mug', monthlySales: 8 }],
+  }], context, { now: '2026-08-27T12:00:00Z' })
+  assert.deepEqual(capturedEvidence.signals.map((signal) => ({
+    phrase: signal.phrase,
+    role: signal.role,
+    status: signal.status,
+  })), [{ phrase: 'teacher', role: 'recipient', status: 'confirmed' }])
+})
 
 function freshRow(overrides = {}) {
   return {

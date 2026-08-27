@@ -53,16 +53,17 @@ test('loads only the newest cumulative archive for each research context', () =>
   ])
 })
 
-test('reuses one archive vocabulary analysis for both archive-driven panels', () => {
+test('refreshes archive-driven evidence panels without reviving buyer-only suggestions', () => {
   assert.match(app, /const archiveAnalysis = currentModifierAnalysis\(\)/)
-  assert.match(app, /renderBuyerIdentitySuggestions\(\{ analysis: archiveAnalysis \}\)/)
+  assert.match(app, /renderAudienceSuggestions\(\)/)
   assert.match(app, /renderModifierEvidence\(archiveAnalysis\)/)
+  assert.doesNotMatch(app, /renderBuyerIdentitySuggestions/)
 })
 
-test('initializes buyer suggestions without archive-only options', () => {
+test('initializes evidence-backed audience roles without archive-only options', () => {
   const initBody = app.match(/function init\(\) \{([\s\S]*?)\r?\n\}\r?\n\r?\ninit\(\)/)?.[1] ?? ''
-  assert.match(initBody, /\r?\n  renderBuyerIdentitySuggestions\(\)\r?\n/)
-  assert.doesNotMatch(initBody, /options\.renderSuggestions/)
+  assert.match(initBody, /\r?\n  renderAudienceSuggestions\(\)\r?\n/)
+  assert.doesNotMatch(initBody, /renderBuyerIdentitySuggestions/)
 })
 
 test('stores research evidence on disk and lists it back', async (t) => {
@@ -218,14 +219,18 @@ test('updates one version-three archive for the same run and creates a new file 
   assert.equal(readdirSync(join(dir, 'market-finder', 'archive')).length, 2)
 })
 
-test('feeds versioned contextual archives into the next candidate search', () => {
+test('persists contextual audience evidence without treating legacy identities as marketplace proof', () => {
   assert.match(app, /analyzeMarketplaceVocabulary\(marketplaceLearningRecords\(\)/)
   const learningBody = app.match(/function marketplaceLearningRecords\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   assert.match(learningBody, /liveMarketplaceLearningRecord\(\)/)
   assert.doesNotMatch(learningBody, /evidenceArchiveRecord\(\)/)
   assert.match(app, /learnedBuyerIntentSignals\(analysis/)
   assert.match(app, /learnedSignals: learnedSignalsForGeneration\(\)/)
-  assert.match(app, /version: 3/)
+  assert.match(app, /version: 4/)
+  assert.match(app, /audienceContext,\r?\n\s*audienceSignals,/)
+  assert.match(app, /function normalizeArchivedAudienceSignals/)
+  assert.match(app, /if \(version >= 4 && audienceContextMatchesRecord/)
+  assert.doesNotMatch(learningBody, /identitySeeds.*audienceSignals/)
   assert.match(app, /drilldownNodes:/)
   assert.match(app, /multiAngleExploration:\s*createMultiAngleExplorationState\(state\.multiAngleExploration\)/)
   assert.match(app, /explorationProvenance:\s*state\.multiAngleExploration\.provenance/)
@@ -234,7 +239,7 @@ test('feeds versioned contextual archives into the next candidate search', () =>
   assert.match(app, /const runId = currentEvidenceRunId\(\)/)
   assert.match(app, /locale: 'en-US'/)
   assert.match(app, /context: \{/)
-  assert.match(app, /buyerIdentities: buyerIdentityLines\(\)/)
+  assert.match(app, /buyerIdentities: audiencePhrases/)
   assert.match(app, /function evidenceRecordFingerprint\(/)
   assert.match(app, /runId: String\(record\.runId \?\? ''\)/)
   assert.match(app, /function scheduleEvidenceAutoArchive\(/)
