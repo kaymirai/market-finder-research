@@ -1474,20 +1474,106 @@ function currentAudienceAnalysis() {
 
 function preferredArchivedAudienceSignals(records = [], context = {}, rawSignals = [], now = new Date()) {
   const contextKey = buildAudienceContextKey(context)
+  const statusRank = (status) => ({ confirmed: 3, verify: 2, reference: 1, manual: 4, legacy: 0 }[status] ?? -1)
+  const evidenceStrength = (evidence = {}) => (
+    Number(evidence.etsyRelatedTermCount ?? 0)
+    + Number(evidence.everbeeSellingListingCount ?? 0)
+    + Number(evidence.everbeeDistinctSellingTitleCount ?? 0)
+    + Number(evidence.observationRuns ?? 0)
+  )
+  const signalFreshness = (entry = {}) => getSourceFreshness(
+    entry.signal?.evidence?.latestCapturedAt || entry.capturedAt,
+    now,
+  )
+  const preferSignal = (left, right) => {
+    const leftFreshness = signalFreshness(left)
+    const rightFreshness = signalFreshness(right)
+    const comparisons = [
+      statusRank(left.signal?.status) - statusRank(right.signal?.status),
+      Number(leftFreshness.eligibleForRanking) - Number(rightFreshness.eligibleForRanking),
+      String(leftFreshness.capturedAt ?? '').localeCompare(String(rightFreshness.capturedAt ?? '')),
+      evidenceStrength(left.signal?.evidence) - evidenceStrength(right.signal?.evidence),
+      Number(left.source === 'raw') - Number(right.source === 'raw'),
+    ]
+    const difference = comparisons.find((value) => value !== 0)
+    if (difference != null) return difference >= 0 ? left : right
+    return JSON.stringify(left.signal).localeCompare(JSON.stringify(right.signal)) <= 0 ? left : right
+  }
+  const mergedEvidence = (left = {}, right = {}) => {
+    const merged = { ...left, ...right }
+    for (const key of [
+      'etsyRelatedTermCount',
+      'etsySearches',
+      'everbeeListingCount',
+      'everbeeSellingListingCount',
+      'everbeeDistinctSellingTitleCount',
+      'everbeeMonthlySales',
+      'observationRuns',
+    ]) {
+      const values = [left[key], right[key]].map(Number).filter(Number.isFinite)
+      if (values.length > 0) merged[key] = Math.max(...values)
+    }
+    const latest = [left.latestCapturedAt, right.latestCapturedAt]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+      .sort()
+      .at(-1)
+    if (latest) merged.latestCapturedAt = latest
+    return merged
+  }
+  const mergeSignals = (left, right) => {
+    const preferred = preferSignal(left, right)
+    const sources = [...new Set([
+      ...(Array.isArray(left.signal?.sources) ? left.signal.sources : []),
+      ...(Array.isArray(right.signal?.sources) ? right.signal.sources : []),
+    ])].sort()
+    return {
+      ...preferred,
+      signal: {
+        ...preferred.signal,
+        autoSelectable: preferred.signal?.status === 'confirmed' && preferred.signal?.autoSelectable === true,
+        sources,
+        evidence: mergedEvidence(left.signal?.evidence, right.signal?.evidence),
+      },
+    }
+  }
   const persisted = (Array.isArray(records) ? records : [])
     .filter((record) => Number(record?.version) >= 4)
     .filter((record) => record?.audienceContext && typeof record.audienceContext === 'object')
     .filter((record) => buildAudienceContextKey(record.audienceContext) === contextKey)
     .flatMap((record) => (Array.isArray(record.audienceSignals)
-      ? record.audienceSignals.map((signal) => ({ record, signal }))
+      ? record.audienceSignals.map((signal) => ({
+        source: 'archive',
+        capturedAt: record.capturedAt,
+        signal: getSourceFreshness(signal?.evidence?.latestCapturedAt || record?.capturedAt, now).eligibleForRanking
+          ? signal
+          : { ...signal, status: 'reference', autoSelectable: false },
+      }))
       : []))
-  if (persisted.length === 0) return Array.isArray(rawSignals) ? rawSignals : []
-  return persisted.map(({ record, signal }) => {
-    const capturedAt = signal?.evidence?.latestCapturedAt || record?.capturedAt
-    const freshness = getSourceFreshness(capturedAt, now)
-    if (freshness.eligibleForRanking) return signal
-    return { ...signal, status: 'reference', autoSelectable: false }
-  })
+  const live = (Array.isArray(rawSignals) ? rawSignals : []).map((signal) => ({
+    source: 'raw',
+    capturedAt: signal?.evidence?.latestCapturedAt,
+    signal,
+  }))
+  const signalsByKey = new Map()
+  for (const entry of [...persisted, ...live]) {
+    const signal = entry.signal ?? {}
+    const key = [
+      buildAudienceContextKey(signal.context ?? context),
+      String(signal.role ?? '').trim(),
+      String(signal.phrase ?? '').trim(),
+    ].join('::')
+    signalsByKey.set(key, signalsByKey.has(key) ? mergeSignals(signalsByKey.get(key), entry) : entry)
+  }
+  return [...signalsByKey.values()]
+    .map((entry) => entry.signal)
+    .sort((left, right) => (
+      statusRank(right.status) - statusRank(left.status)
+      || evidenceStrength(right.evidence) - evidenceStrength(left.evidence)
+      || String(right.evidence?.latestCapturedAt ?? '').localeCompare(String(left.evidence?.latestCapturedAt ?? ''))
+      || String(left.phrase ?? '').localeCompare(String(right.phrase ?? ''))
+      || String(left.role ?? '').localeCompare(String(right.role ?? ''))
+    ))
 }
 
 function audienceSelectionKey(selection = {}) {

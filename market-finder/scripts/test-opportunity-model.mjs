@@ -195,6 +195,107 @@ test('downgrades stale version-four restored audience signals to non-auto refere
   })), [{ status: 'reference', autoSelectable: false }])
 })
 
+test('merges matching version-four archive signals with fresh live raw audience signals', () => {
+  const preferredArchivedAudienceSignals = preferredArchivedAudienceSignalsForTest()
+  const context = { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }
+  const restored = preferredArchivedAudienceSignals([{
+    version: 4,
+    capturedAt: '2026-08-26T12:00:00Z',
+    audienceContext: context,
+    audienceSignals: [{
+      phrase: 'teacher',
+      role: 'recipient',
+      subjectType: '',
+      status: 'confirmed',
+      autoSelectable: true,
+      sources: ['everbee-title'],
+      evidence: { everbeeSellingListingCount: 2, latestCapturedAt: '2026-08-26T12:00:00Z' },
+    }],
+  }], context, [{
+    phrase: 'nurse',
+    role: 'recipient',
+    subjectType: '',
+    status: 'confirmed',
+    autoSelectable: true,
+    context,
+    sources: ['etsy-related', 'everbee-title'],
+    evidence: {
+      etsyRelatedTermCount: 1,
+      everbeeSellingListingCount: 3,
+      latestCapturedAt: '2026-08-27T12:00:00Z',
+    },
+  }], '2026-08-27T12:00:00Z')
+  assert.deepEqual(restored.map((signal) => ({
+    phrase: signal.phrase,
+    role: signal.role,
+    status: signal.status,
+    autoSelectable: signal.autoSelectable,
+  })), [
+    { phrase: 'nurse', role: 'recipient', status: 'confirmed', autoSelectable: true },
+    { phrase: 'teacher', role: 'recipient', status: 'confirmed', autoSelectable: true },
+  ])
+})
+
+test('merges same audience signal provenance deterministically with stronger fresh live evidence', () => {
+  const preferredArchivedAudienceSignals = preferredArchivedAudienceSignalsForTest()
+  const context = { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }
+  const merged = preferredArchivedAudienceSignals([{
+    version: 4,
+    capturedAt: '2026-08-26T12:00:00Z',
+    audienceContext: context,
+    audienceSignals: [{
+      phrase: 'teacher',
+      role: 'recipient',
+      subjectType: '',
+      status: 'confirmed',
+      autoSelectable: true,
+      sources: ['everbee-title'],
+      evidence: {
+        everbeeSellingListingCount: 2,
+        everbeeMonthlySales: 12,
+        latestCapturedAt: '2026-08-26T12:00:00Z',
+      },
+    }],
+  }], context, [{
+    phrase: 'teacher',
+    role: 'recipient',
+    subjectType: '',
+    status: 'confirmed',
+    autoSelectable: true,
+    context,
+    sources: ['etsy-related', 'everbee-title'],
+    evidence: {
+      etsyRelatedTermCount: 1,
+      everbeeSellingListingCount: 3,
+      everbeeMonthlySales: 18,
+      latestCapturedAt: '2026-08-27T12:00:00Z',
+    },
+  }], '2026-08-27T12:00:00Z')
+  assert.deepEqual(merged.map((signal) => ({
+    phrase: signal.phrase,
+    status: signal.status,
+    autoSelectable: signal.autoSelectable,
+    sources: signal.sources,
+    evidence: {
+      etsyRelatedTermCount: signal.evidence.etsyRelatedTermCount,
+      everbeeSellingListingCount: signal.evidence.everbeeSellingListingCount,
+      everbeeMonthlySales: signal.evidence.everbeeMonthlySales,
+      latestCapturedAt: signal.evidence.latestCapturedAt,
+    },
+  })), [{
+    phrase: 'teacher',
+    status: 'confirmed',
+    autoSelectable: true,
+    sources: ['etsy-related', 'everbee-title'],
+    evidence: {
+      etsyRelatedTermCount: 1,
+      everbeeSellingListingCount: 3,
+      everbeeMonthlySales: 18,
+      latestCapturedAt: '2026-08-27T12:00:00Z',
+    },
+  }])
+})
+
 test('carries audience candidate provenance through merged research rows into CSV values', () => {
   const provenanceBody = app.match(/function audienceProvenanceForResearchRow\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   const csvBody = app.match(/function audienceCsvProvenance\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
