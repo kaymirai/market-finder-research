@@ -205,6 +205,12 @@ export function extractAudienceRoleSignalsCore(value, options = {}, dependencies
         || findKnownPhrase(before, personIdentities, normalize, { endOnly: true })
       if (subject) addKnownAt(subject, AUDIENCE_ROLES.subject, subjectTypeFor(subject, dependencies), matchingPhrase.indexOf(subject))
     }
+    if (memorialIndex === 0) {
+      const after = tokens.slice(1).filter((token) => !CONNECTOR_WORDS.has(token)).join(' ')
+      const subject = findKnownPhrase(after, petSubjects, normalize, { startOnly: true })
+        || findKnownPhrase(after, personIdentities, normalize, { startOnly: true })
+      if (subject) addKnownAt(subject, AUDIENCE_ROLES.subject, subjectTypeFor(subject, dependencies), matchingPhrase.indexOf(subject))
+    }
   } else {
     const giftFor = matchingPhrase.match(/(?:^|\s)gift\s+for\s+(.+)$/)
     if (giftFor) {

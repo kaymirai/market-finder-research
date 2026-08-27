@@ -48,6 +48,16 @@ test('classifies recipient giver and memorial subject from the complete phrase',
       .map(({ phrase, role, subjectType }) => ({ phrase, role, subjectType })),
     [{ phrase: 'pet', role: 'subject', subjectType: 'pet' }],
   )
+  assert.deepEqual(
+    extractAudienceRoleSignals('memorial pet ornament', { categoryId: 'ornament' })
+      .map(({ phrase, role, subjectType }) => ({ phrase, role, subjectType })),
+    [{ phrase: 'pet', role: 'subject', subjectType: 'pet' }],
+  )
+  assert.deepEqual(
+    extractAudienceRoleSignals('memorial mom ornament', { categoryId: 'ornament' })
+      .map(({ phrase, role, subjectType }) => ({ phrase, role, subjectType })),
+    [{ phrase: 'mom', role: 'subject', subjectType: 'person' }],
+  )
 })
 
 test('does not invent an audience from product style or format words', () => {
