@@ -221,7 +221,11 @@ export function extractAudienceRoleSignalsCore(value, options = {}, dependencies
 
     // `<identity> <product>` is the common recipient grammar. Restrict this to
     // known identity vocabulary so style and format words cannot become people.
-    const recipient = findKnownPhrase(matchingPhrase, personIdentities, normalize, { startOnly: true })
+    const recipientPhrase = matchingPhrase
+      .split(' ')
+      .filter((token, index, tokens) => !(index < tokens.length - 1 && STYLE_WORDS.has(token)))
+      .join(' ')
+    const recipient = findKnownPhrase(recipientPhrase, personIdentities, normalize, { startOnly: true })
     if (recipient && !signals.some((signal) => signal.phrase === recipient && signal.role === AUDIENCE_ROLES.giver)) {
       addKnownAt(recipient, AUDIENCE_ROLES.recipient, '', matchingPhrase.indexOf(recipient))
     }
@@ -239,6 +243,197 @@ export function extractAudienceRoleSignalsCore(value, options = {}, dependencies
   return signals
     .sort((left, right) => left.position - right.position || left.role.localeCompare(right.role))
     .map(({ position, ...signal }) => signal)
+}
+
+function normalizeAudienceContext(context = {}, dependencies) {
+  const normalize = dependencies.normalizePhrase
+  const categoryId = canonicalCategoryId(context.categoryId, normalize)
+  const eventId = normalize(context.eventId)
+  const rootKeyword = dependencies.buildKeywordClusterKey(context.rootKeyword ?? context.keyword ?? '', { categoryId })
+  return { categoryId, eventId, rootKeyword }
+}
+
+export function buildAudienceContextKeyCore(context = {}, dependencies) {
+  const normalized = normalizeAudienceContext(context, dependencies)
+  return [normalized.categoryId, normalized.eventId, normalized.rootKeyword].join('::')
+}
+
+function numberOrZero(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
+}
+
+function isSellingListing(listing = {}, normalize) {
+  if (numberOrZero(listing.monthlySales ?? listing.sales) > 0) return true
+  if (listing.isSelling === true || listing.selling === true) return true
+  const state = normalize(listing.sellingState ?? listing.saleState ?? listing.salesState ?? listing.status)
+  return new Set(['selling', 'sold', 'has sales', 'sales']).has(state)
+}
+
+function createEvidenceBucket() {
+  return {
+    etsyObservationKeys: new Set(),
+    everbeeObservationKeys: new Set(),
+    etsyRelatedTermCount: 0,
+    etsySearches: 0,
+    everbeeListingCount: 0,
+    everbeeSellingListingCount: 0,
+    everbeeMonthlySales: 0,
+    runs: new Set(),
+    sources: new Set(),
+    latestCapturedAt: null,
+  }
+}
+
+function updateLatestCapturedAt(bucket, capturedAt) {
+  if (!capturedAt) return
+  const date = new Date(capturedAt)
+  if (!Number.isFinite(date.getTime())) return
+  const value = date.toISOString()
+  if (!bucket.latestCapturedAt || value > bucket.latestCapturedAt) bucket.latestCapturedAt = value
+}
+
+function recordEtsyEvidence(bucket, record, keyword, normalize, runId) {
+  const normalizedKeyword = normalize(keyword?.keyword ?? keyword?.query ?? keyword)
+  if (!normalizedKeyword) return
+  const observationKey = `${runId}::etsy-related::${normalizedKeyword}`
+  if (bucket.etsyObservationKeys.has(observationKey)) return
+  bucket.etsyObservationKeys.add(observationKey)
+  bucket.etsyRelatedTermCount += 1
+  bucket.etsySearches += Math.max(0, numberOrZero(keyword?.etsySearches30d ?? keyword?.searches ?? keyword?.searchVolume))
+  bucket.runs.add(runId)
+  bucket.sources.add('etsy-related')
+  updateLatestCapturedAt(bucket, record.capturedAt)
+}
+
+function recordEverbeeEvidence(bucket, record, title, normalize, runId) {
+  const normalizedTitle = normalize(title?.title ?? title?.name ?? title)
+  if (!normalizedTitle || !isSellingListing(title, normalize)) return
+  const observationKey = `${runId}::everbee-title::${normalizedTitle}`
+  if (bucket.everbeeObservationKeys.has(observationKey)) return
+  bucket.everbeeObservationKeys.add(observationKey)
+  const monthlySales = Math.max(0, numberOrZero(title?.monthlySales ?? title?.sales))
+  bucket.everbeeListingCount += 1
+  bucket.everbeeSellingListingCount += 1
+  bucket.everbeeMonthlySales += monthlySales
+  bucket.runs.add(runId)
+  bucket.sources.add('everbee-title')
+  updateLatestCapturedAt(bucket, record.capturedAt)
+}
+
+function bucketEvidence(bucket) {
+  return {
+    etsyRelatedTermCount: bucket.etsyRelatedTermCount,
+    etsySearches: bucket.etsySearches,
+    everbeeListingCount: bucket.everbeeListingCount,
+    everbeeSellingListingCount: bucket.everbeeSellingListingCount,
+    everbeeMonthlySales: bucket.everbeeMonthlySales,
+    observationRuns: bucket.runs.size,
+    latestCapturedAt: bucket.latestCapturedAt,
+  }
+}
+
+function signalKey(signal) {
+  return [signal.phrase, signal.role, signal.subjectType ?? ''].join('::')
+}
+
+function addEvidenceSignals(groups, kind, value, categoryId, source, record, dependencies, runId) {
+  const normalize = dependencies.normalizePhrase
+  if (source === 'everbee-title' && !isSellingListing(value, normalize)) return
+  const phraseValue = source === 'etsy-related'
+    ? (value?.keyword ?? value?.query ?? value)
+    : (value?.title ?? value?.name ?? value)
+  for (const signal of extractAudienceRoleSignalsCore(phraseValue, { categoryId }, dependencies)) {
+    const key = signalKey(signal)
+    const entry = groups.get(key) ?? {
+      ...signal,
+      current: createEvidenceBucket(),
+      reference: createEvidenceBucket(),
+    }
+    groups.set(key, entry)
+    const bucket = entry[kind]
+    if (source === 'etsy-related') recordEtsyEvidence(bucket, record, value, normalize, runId)
+    else recordEverbeeEvidence(bucket, record, value, normalize, runId)
+  }
+}
+
+function statusRank(status) {
+  return { confirmed: 0, verify: 1, reference: 2 }[status] ?? 3
+}
+
+export function analyzeAudienceEvidenceCore(records = [], context = {}, options = {}, dependencies) {
+  const normalizedContext = normalizeAudienceContext(context, dependencies)
+  const contextKey = buildAudienceContextKeyCore(normalizedContext, dependencies)
+  const groups = new Map()
+  const now = options.now ?? new Date()
+  let matchedRecordCount = 0
+
+  for (const [index, record] of (Array.isArray(records) ? records : []).entries()) {
+    const recordContext = normalizeAudienceContext(record, dependencies)
+    if (!recordContext.categoryId || recordContext.categoryId !== normalizedContext.categoryId) continue
+    matchedRecordCount += 1
+    const recordContextKey = buildAudienceContextKeyCore(recordContext, dependencies)
+    const freshness = dependencies.getSourceFreshness(record?.capturedAt, now)
+    const kind = recordContextKey === contextKey && freshness.eligibleForRanking ? 'current' : 'reference'
+    const runId = dependencies.normalizePhrase(record?.runId) || `record-${index}`
+
+    for (const keyword of Array.isArray(record?.demandKeywords) ? record.demandKeywords : []) {
+      addEvidenceSignals(groups, kind, keyword, recordContext.categoryId, 'etsy-related', record, dependencies, runId)
+    }
+    for (const listing of Array.isArray(record?.supplyListings) ? record.supplyListings : []) {
+      addEvidenceSignals(groups, kind, listing, recordContext.categoryId, 'everbee-title', record, dependencies, runId)
+    }
+  }
+
+  const signals = Array.from(groups.values())
+    .map((entry) => {
+      const current = bucketEvidence(entry.current)
+      const reference = bucketEvidence(entry.reference)
+      const hasCurrentEvidence = current.etsyRelatedTermCount > 0 || current.everbeeSellingListingCount > 0
+      const evidence = hasCurrentEvidence ? current : reference
+      const sources = Array.from((hasCurrentEvidence ? entry.current : entry.reference).sources).sort()
+      const status = hasCurrentEvidence
+        ? ((current.etsyRelatedTermCount >= 1 && current.everbeeSellingListingCount >= 1)
+            || current.everbeeSellingListingCount >= 2)
+          ? 'confirmed'
+          : 'verify'
+        : 'reference'
+      return {
+        phrase: entry.phrase,
+        role: entry.role,
+        subjectType: entry.subjectType ?? '',
+        status,
+        autoSelectable: status === 'confirmed',
+        context: normalizedContext,
+        evidence,
+        sources,
+      }
+    })
+    .sort((left, right) => (
+      statusRank(left.status) - statusRank(right.status)
+      || right.evidence.everbeeSellingListingCount - left.evidence.everbeeSellingListingCount
+      || right.sources.length - left.sources.length
+      || right.evidence.observationRuns - left.evidence.observationRuns
+      || left.phrase.localeCompare(right.phrase)
+      || left.role.localeCompare(right.role)
+    ))
+
+  const totals = signals.reduce((summary, signal) => {
+    summary[signal.status] += 1
+    summary.etsyRelatedTermCount += signal.evidence.etsyRelatedTermCount
+    summary.everbeeSellingListingCount += signal.evidence.everbeeSellingListingCount
+    return summary
+  }, {
+    records: Array.isArray(records) ? records.length : 0,
+    categoryRecords: matchedRecordCount,
+    confirmed: 0,
+    verify: 0,
+    reference: 0,
+    etsyRelatedTermCount: 0,
+    everbeeSellingListingCount: 0,
+  })
+
+  return { contextKey, signals, totals }
 }
 
 export { CATEGORY_PROFILES }

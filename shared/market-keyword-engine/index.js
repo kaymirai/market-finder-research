@@ -1,5 +1,7 @@
 import { classifyProductionWindow } from './market-timing.js'
 import {
+  analyzeAudienceEvidenceCore,
+  buildAudienceContextKeyCore,
   extractAudienceRoleSignalsCore,
   getAudienceCategoryProfileCore,
 } from './audience-evidence.js'
@@ -1335,6 +1337,7 @@ function audienceEvidenceDependencies() {
   return {
     normalizePhrase,
     buildKeywordClusterKey,
+    getSourceFreshness,
     productCategories: PRODUCT_CATEGORIES,
     productAliases: Object.values(PRODUCT_FAMILY_TERMS).flat(),
     personIdentities,
@@ -1352,6 +1355,14 @@ export function getAudienceCategoryProfile(categoryId) {
 
 export function extractAudienceRoleSignals(value, options = {}) {
   return extractAudienceRoleSignalsCore(value, options, audienceEvidenceDependencies())
+}
+
+export function buildAudienceContextKey(context = {}) {
+  return buildAudienceContextKeyCore(context, audienceEvidenceDependencies())
+}
+
+export function analyzeAudienceEvidence(records = [], context = {}, options = {}) {
+  return analyzeAudienceEvidenceCore(records, context, options, audienceEvidenceDependencies())
 }
 
 export function clusterKeywordCandidates(candidates = [], options = {}) {

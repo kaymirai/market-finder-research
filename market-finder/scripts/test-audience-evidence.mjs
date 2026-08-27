@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  analyzeAudienceEvidence,
+  buildAudienceContextKey,
   extractAudienceRoleSignals,
   getAudienceCategoryProfile,
 } from '../../shared/market-keyword-engine/index.js'
@@ -68,4 +70,120 @@ test('does not invent an audience from product style or format words', () => {
       .map(({ phrase, role, subjectType }) => ({ phrase, role, subjectType })),
     [{ phrase: 'landscape', role: 'subject', subjectType: 'interest' }],
   )
+})
+
+test('confirms an audience only from current-context Etsy and selling EverBee evidence', () => {
+  const context = { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }
+  const analysis = analyzeAudienceEvidence([
+    {
+      runId: 'mug-1',
+      capturedAt: '2026-08-27T00:00:00Z',
+      categoryId: 'mug',
+      eventId: '',
+      rootKeyword: 'teacher mug',
+      demandKeywords: [{ keyword: 'teacher mug', etsySearches30d: 1200 }],
+      supplyListings: [{ title: 'Teacher Mug Gift', monthlySales: 8 }],
+    },
+  ], context, { now: '2026-08-27T12:00:00Z' })
+
+  assert.equal(analysis.contextKey, buildAudienceContextKey(context))
+  assert.deepEqual(
+    analysis.signals.map(({ phrase, role, status, autoSelectable }) => ({ phrase, role, status, autoSelectable })),
+    [{ phrase: 'teacher', role: 'recipient', status: 'confirmed', autoSelectable: true }],
+  )
+})
+
+test('keeps one-source and different-theme audience evidence unselected', () => {
+  const analysis = analyzeAudienceEvidence([
+    {
+      runId: 'teacher-ornament',
+      capturedAt: '2026-08-27T00:00:00Z',
+      categoryId: 'ornament',
+      eventId: '',
+      rootKeyword: 'teacher ornament',
+      demandKeywords: [{ keyword: 'teacher ornament', etsySearches30d: 400 }],
+      supplyListings: [],
+    },
+    {
+      runId: 'shirt-history',
+      capturedAt: '2026-08-27T00:00:00Z',
+      categoryId: 'shirt',
+      eventId: '',
+      rootKeyword: 'mom shirt',
+      demandKeywords: [{ keyword: 'mom shirt', etsySearches30d: 9000 }],
+      supplyListings: [{ title: 'Mom Shirt', monthlySales: 20 }],
+    },
+  ], {
+    categoryId: 'ornament',
+    eventId: '',
+    rootKeyword: 'memorial ornament',
+  }, { now: '2026-08-27T12:00:00Z' })
+
+  assert.deepEqual(
+    analysis.signals.map(({ phrase, status, autoSelectable }) => ({ phrase, status, autoSelectable })),
+    [{ phrase: 'teacher', status: 'reference', autoSelectable: false }],
+  )
+  assert.equal(analysis.signals.some((signal) => signal.phrase === 'mom'), false)
+})
+
+test('does not count a static demand seed as audience evidence', () => {
+  const analysis = analyzeAudienceEvidence([], {
+    categoryId: 'ornament',
+    eventId: '',
+    rootKeyword: 'memorial ornament',
+    staticSeedKeywords: ['memorial ornament'],
+  }, { now: '2026-08-27T12:00:00Z' })
+  assert.deepEqual(analysis.signals, [])
+})
+
+test('keeps exact-context Etsy-only evidence at verify', () => {
+  const analysis = analyzeAudienceEvidence([{
+    runId: 'etsy-only',
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    demandKeywords: [{ keyword: 'teacher mug', etsySearches30d: 1200 }],
+    supplyListings: [],
+  }], { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }, {
+    now: '2026-08-27T12:00:00Z',
+  })
+  assert.deepEqual(
+    analysis.signals.map(({ phrase, status, autoSelectable }) => ({ phrase, status, autoSelectable })),
+    [{ phrase: 'teacher', status: 'verify', autoSelectable: false }],
+  )
+})
+
+test('confirms repeated selling-title evidence without Etsy related terms', () => {
+  const analysis = analyzeAudienceEvidence([{
+    runId: 'everbee-two',
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    demandKeywords: [],
+    supplyListings: [
+      { title: 'Teacher Mug Gift', monthlySales: 8 },
+      { title: 'Personalized Teacher Mug', monthlySales: 5 },
+    ],
+  }], { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }, {
+    now: '2026-08-27T12:00:00Z',
+  })
+  assert.equal(analysis.signals[0].status, 'confirmed')
+  assert.equal(analysis.signals[0].autoSelectable, true)
+})
+
+test('does not create a reference signal from a non-selling EverBee title', () => {
+  const analysis = analyzeAudienceEvidence([{
+    runId: 'everbee-no-sales',
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    demandKeywords: [],
+    supplyListings: [{ title: 'Teacher Mug', monthlySales: 0 }],
+  }], { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }, {
+    now: '2026-08-27T12:00:00Z',
+  })
+  assert.deepEqual(analysis.signals, [])
 })
