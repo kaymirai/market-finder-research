@@ -136,6 +136,40 @@ test('does not count a static demand seed as audience evidence', () => {
   assert.deepEqual(analysis.signals, [])
 })
 
+test('excludes configured static demand observations but keeps returned related terms', () => {
+  const context = {
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    staticSeedKeywords: ['Teacher Mug'],
+  }
+  const onlyStaticSeed = analyzeAudienceEvidence([{
+    runId: 'static-seed-only',
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    demandKeywords: [{ keyword: 'teacher mug', etsySearches30d: 1200 }],
+    supplyListings: [],
+  }], context, { now: '2026-08-27T12:00:00Z' })
+  assert.deepEqual(onlyStaticSeed.signals, [])
+  assert.equal(onlyStaticSeed.totals.etsyRelatedTermCount, 0)
+
+  const returnedRelatedTerm = analyzeAudienceEvidence([{
+    runId: 'returned-related-term',
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    demandKeywords: [{ keyword: 'teacher appreciation mug', etsySearches30d: 400 }],
+    supplyListings: [],
+  }], context, { now: '2026-08-27T12:00:00Z' })
+  assert.deepEqual(
+    returnedRelatedTerm.signals.map(({ phrase, status, evidence }) => ({ phrase, status, etsyRelatedTermCount: evidence.etsyRelatedTermCount })),
+    [{ phrase: 'teacher', status: 'verify', etsyRelatedTermCount: 1 }],
+  )
+})
+
 test('keeps exact-context Etsy-only evidence at verify', () => {
   const analysis = analyzeAudienceEvidence([{
     runId: 'etsy-only',

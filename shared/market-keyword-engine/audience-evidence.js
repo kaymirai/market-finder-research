@@ -337,6 +337,21 @@ function signalKey(signal) {
   return [signal.phrase, signal.role, signal.subjectType ?? ''].join('::')
 }
 
+function staticSeedValues(value) {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string') return value.split(/[\r\n,]+/)
+  return []
+}
+
+function buildStaticDemandSeedKeys(context, options, categoryId, dependencies) {
+  return new Set([
+    ...staticSeedValues(context?.staticSeedKeywords),
+    ...staticSeedValues(options?.staticSeedKeywords),
+  ]
+    .map((keyword) => dependencies.buildKeywordClusterKey(keyword, { categoryId }))
+    .filter(Boolean))
+}
+
 function addEvidenceSignals(groups, kind, value, categoryId, source, record, dependencies, runId) {
   const normalize = dependencies.normalizePhrase
   if (source === 'everbee-title' && !isSellingListing(value, normalize)) return
@@ -366,6 +381,7 @@ export function analyzeAudienceEvidenceCore(records = [], context = {}, options 
   const contextKey = buildAudienceContextKeyCore(normalizedContext, dependencies)
   const groups = new Map()
   const now = options.now ?? new Date()
+  const staticDemandSeedKeys = buildStaticDemandSeedKeys(context, options, normalizedContext.categoryId, dependencies)
   let matchedRecordCount = 0
 
   for (const [index, record] of (Array.isArray(records) ? records : []).entries()) {
@@ -378,6 +394,10 @@ export function analyzeAudienceEvidenceCore(records = [], context = {}, options 
     const runId = dependencies.normalizePhrase(record?.runId) || `record-${index}`
 
     for (const keyword of Array.isArray(record?.demandKeywords) ? record.demandKeywords : []) {
+      const normalizedKeyword = dependencies.buildKeywordClusterKey(keyword?.keyword ?? keyword?.query ?? keyword, {
+        categoryId: recordContext.categoryId,
+      })
+      if (staticDemandSeedKeys.has(normalizedKeyword)) continue
       addEvidenceSignals(groups, kind, keyword, recordContext.categoryId, 'etsy-related', record, dependencies, runId)
     }
     for (const listing of Array.isArray(record?.supplyListings) ? record.supplyListings : []) {
