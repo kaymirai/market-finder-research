@@ -463,6 +463,25 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
   }
 }
 
+export function prepareFreshStartWorkspace(snapshot = {}, context = {}) {
+  const prepared = prepareNewMultiAngleCycle(snapshot, {
+    ...context,
+    activeEventId: '',
+    categoryId: 'shirt',
+    preserveAccumulatedEvidence: false,
+  })
+  return {
+    ...prepared,
+    freshStartForm: {
+      buyerIdentitySeeds: '',
+    },
+    freshStartAudienceState: {
+      activeContextKey: '',
+      audienceSelectionsByContext: {},
+    },
+  }
+}
+
 export function archivedMultiAngleWinners(records = [], context = {}) {
   const eventId = String(context?.eventId ?? context?.activeEventId ?? '').trim()
   const categoryId = String(context?.categoryId ?? '').trim()

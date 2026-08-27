@@ -10,6 +10,7 @@ import {
   normalizeAudienceSelectionsByContext,
   setAudienceSelectionsForContext,
 } from '../src/audience-selection-state.js'
+import { prepareFreshStartWorkspace } from '../src/multi-angle-exploration.js'
 
 test('migrates old automatic buyer identities as unselected legacy recipients', () => {
   const migrated = migrateLegacyAudienceState({
@@ -109,6 +110,34 @@ test('clears only the current audience context for a fresh start', () => {
   assert.deepEqual(audienceSelectionsForContext(cleared, 'shirt||teacher'), [
     { phrase: 'teacher', role: 'recipient', subjectType: '', status: 'manual', source: 'manual', selected: true },
   ])
+})
+
+test('prepares a fresh active workspace without leaking audience selections or clearing archives', () => {
+  const evidenceArchives = [{ capturedAt: '2026-08-27T00:00:00.000Z', records: [{ keyword: 'teacher mug' }] }]
+  const researchedMarketHistory = [{ keyword: 'teacher mug', eventId: '', categoryId: 'mug' }]
+
+  const prepared = prepareFreshStartWorkspace({
+    evidenceArchives,
+    researchedMarketHistory,
+    researchRows: [{ keyword: 'teacher mug' }],
+    candidates: [{ keyword: 'teacher mug' }],
+    audienceSelectionsByContext: {
+      'mug||teacher': {
+        selections: [{ phrase: 'teacher', role: 'recipient', status: 'manual', selected: true }],
+        updatedAt: '2026-08-27T00:00:00.000Z',
+      },
+    },
+  })
+
+  assert.deepEqual(prepared.freshStartAudienceState, {
+    activeContextKey: '',
+    audienceSelectionsByContext: {},
+  })
+  assert.equal(prepared.freshStartForm.buyerIdentitySeeds, '')
+  assert.deepEqual(prepared.evidenceArchives, evidenceArchives)
+  assert.deepEqual(prepared.researchedMarketHistory, researchedMarketHistory)
+  assert.deepEqual(prepared.researchRows, [])
+  assert.deepEqual(prepared.candidates, [])
 })
 
 test('distinguishes no evidence from a provider failure and does not verify manual hypotheses', () => {
