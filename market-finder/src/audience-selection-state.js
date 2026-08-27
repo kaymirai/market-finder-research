@@ -131,6 +131,35 @@ export function setAudienceSelectionsForContext(state = {}, contextKey = '', sel
   }
 }
 
+export function reconcileAudienceSelectionsWithAnalysis(existingSelections = [], signals = []) {
+  const retained = normalizeSelections(existingSelections).filter((selection) => (
+    selection.status === 'manual'
+    || (selection.status === 'legacy' && selection.selected === false)
+  ))
+  const selectionByKey = new Map(retained.map((selection) => [
+    `${selection.role}|${selection.phrase.toLocaleLowerCase()}`,
+    selection,
+  ]))
+
+  for (const signal of Array.isArray(signals) ? signals : []) {
+    if (!plainObject(signal) || signal.autoSelectable !== true || signal.status !== 'confirmed') continue
+    const normalized = normalizeSelection({
+      phrase: signal.phrase,
+      role: signal.role,
+      subjectType: signal.subjectType,
+      status: 'confirmed',
+      source: (Array.isArray(signal.sources) ? signal.sources.join(',') : '') || 'evidence',
+      selected: true,
+    })
+    if (!normalized) continue
+    const key = `${normalized.role}|${normalized.phrase.toLocaleLowerCase()}`
+    if (selectionByKey.get(key)?.status === 'manual') continue
+    selectionByKey.set(key, normalized)
+  }
+
+  return [...selectionByKey.values()]
+}
+
 export function clearCurrentAudienceSelection(state = {}, contextKey = '') {
   const normalized = normalizeAudienceSelectionsByContext(state)
   const normalizedKey = normalizedContextKey(contextKey)

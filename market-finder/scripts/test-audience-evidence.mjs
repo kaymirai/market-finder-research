@@ -162,6 +162,29 @@ test('generates recipient giver and subject phrases without crossing their gramm
   assert.ok(keywords.includes('pet memorial ornament'))
   assert.equal(keywords.some((keyword) => keyword.includes('gift for pet memorial')), false)
   assert.equal(keywords.some((keyword) => keyword === 'students ornament'), false)
+
+  const subjectAndGiver = candidates.find((candidate) => candidate.keyword === 'pet memorial ornament from students')
+  assert.equal(subjectAndGiver.audienceSubject, 'pet')
+  assert.equal(subjectAndGiver.audienceSubjectType, 'pet')
+  assert.equal(subjectAndGiver.giverRole, 'students')
+  assert.deepEqual(subjectAndGiver.audienceRoleProvenance, {
+    subject: {
+      phrase: 'pet',
+      subjectType: 'pet',
+      status: 'confirmed',
+      contextKey: 'ornament::::memorial',
+      sources: [],
+      evidence: {},
+    },
+    giver: {
+      phrase: 'students',
+      subjectType: '',
+      status: 'confirmed',
+      contextKey: 'ornament::::pet memorial',
+      sources: [],
+      evidence: {},
+    },
+  })
 })
 
 test('keeps theme discovery active when audience is empty', () => {
@@ -170,6 +193,54 @@ test('keeps theme discovery active when audience is empty', () => {
     baseKeywords: ['landscape wall art'],
     audienceSelections: [],
   }), [])
+})
+
+test('keeps first-stage discovery theme-only with an explicit empty target list in all seven categories', async () => {
+  const { generateKeywordCandidates } = await import('../../shared/market-keyword-engine/index.js')
+  const productByCategory = {
+    shirt: 'shirt',
+    sweatshirt: 'sweatshirt',
+    mug: 'mug',
+    ornament: 'ornament',
+    'wall-art': 'wall art',
+    tote: 'tote bag',
+    sticker: 'sticker',
+  }
+  const unsupportedFixedPeople = /\b(?:mom|dad|grandma|grandpa|teacher|nurse|coworker|bride|groom|daughter|son|student|librarian|realtor|firefighter)\b/
+
+  for (const [categoryId, product] of Object.entries(productByCategory)) {
+    const baseGenerated = generateKeywordCandidates({
+      eventId: 'auto-discovery',
+      categoryId,
+      targets: [],
+      seedKeywords: 'retro',
+      limit: 250,
+    })
+    const audienceGenerated = generateAudienceIntentCandidates({
+      categoryId,
+      baseKeywords: [`retro ${product}`],
+      audienceSelections: [],
+    })
+    const generated = [...audienceGenerated, ...baseGenerated]
+
+    assert.ok(generated.length > 0, `${categoryId} must keep theme discovery active`)
+    assert.equal(
+      generated.some((candidate) => unsupportedFixedPeople.test(candidate.keyword)),
+      false,
+      `${categoryId} must not invent a fixed audience`,
+    )
+
+    const manual = generateAudienceIntentCandidates({
+      categoryId,
+      baseKeywords: [`retro ${product}`],
+      audienceSelections: [{ phrase: 'teacher', role: 'recipient', status: 'manual' }],
+    })
+    assert.equal(
+      manual.some((candidate) => /\bteacher\b/.test(candidate.keyword)),
+      true,
+      `${categoryId} must still accept an explicit manual audience`,
+    )
+  }
 })
 
 test('uses confirmed and manual audience selections while keeping verify and reference visible only', () => {
@@ -203,7 +274,11 @@ test('reuses a recipient already present in the base phrase before attaching a c
   })
 
   assert.ok(candidates.some((candidate) => candidate.keyword === 'teacher ornament'))
-  assert.ok(candidates.some((candidate) => candidate.keyword === 'teacher ornament from students'))
+  const recipientAndGiver = candidates.find((candidate) => candidate.keyword === 'teacher ornament from students')
+  assert.equal(recipientAndGiver.recipientRole, 'teacher')
+  assert.equal(recipientAndGiver.giverRole, 'students')
+  assert.equal(recipientAndGiver.audienceRoleProvenance.recipient.phrase, 'teacher')
+  assert.equal(recipientAndGiver.audienceRoleProvenance.giver.phrase, 'students')
 })
 
 test('does not count a static demand seed as audience evidence', () => {

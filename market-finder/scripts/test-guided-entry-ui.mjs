@@ -967,6 +967,8 @@ test('groups evidence-backed audience roles without fixed starter people', () =>
   assert.match(html, /id="audienceReferenceSuggestions"/)
   assert.match(html, /id="audienceRefreshBtn"[^>]*>実績候補を更新<\/button>/)
   assert.doesNotMatch(html, /id="buyerIdentityShuffleBtn"/)
+  assert.doesNotMatch(html, /id="targetChips"/)
+  assert.doesNotMatch(app, /index < 7 \? 'checked'/)
 })
 
 test('passes selected audience roles into candidate generation', () => {
@@ -1156,11 +1158,15 @@ test('archives and analyses a paused batch with its frozen Audience selections a
     demandKeywords: [{ keyword: 'teacher mug', etsySearches30d: 1200, etsyListings: 500 }],
     supplyListings: [{ title: 'Teacher Mug', monthlySales: 8 }],
   })
+  const activeAudienceArchiveContext = () => ({
+    categoryId: 'mug', eventId: 'mothers day', rootKeyword: 'teacher mug', contextKey: oldKey,
+  })
   const liveMarketplaceLearningRecord = new Function(
     'activeResearchContext',
     'modifierEvidenceInput',
     'activeAudienceSelectionSnapshot',
     'currentEvidenceRunId',
+    'activeAudienceArchiveContext',
     'normalizePhrase',
     `return function liveMarketplaceLearningRecord() {${liveBody}\n}`,
   )(
@@ -1168,6 +1174,7 @@ test('archives and analyses a paused batch with its frozen Audience selections a
     modifierEvidenceInput,
     activeAudienceSelectionSnapshot,
     () => 'old-batch',
+    activeAudienceArchiveContext,
     (value) => String(value ?? '').trim().toLowerCase(),
   )
   const evidenceArchiveRecord = new Function(
@@ -1197,7 +1204,7 @@ test('archives and analyses a paused batch with its frozen Audience selections a
     (row, context) => row.categoryId === context.categoryId && row.eventId === context.eventId,
     () => 'old-batch',
     activeAudienceSelectionSnapshot,
-    () => ({ categoryId: 'mug', eventId: 'mothers day', rootKeyword: 'teacher mug', contextKey: oldKey }),
+    activeAudienceArchiveContext,
     () => ({
       signals: [{
         phrase: 'teacher',

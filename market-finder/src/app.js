@@ -41,15 +41,16 @@ import {
   learnedBuyerIntentSignals,
   normalizePhrase,
   resolveMarketEvent,
-} from '../../shared/market-keyword-engine/index.js?v=20260827-2'
+} from '../../shared/market-keyword-engine/index.js?v=20260827-3'
 import {
   audienceSelectionsForContext,
   clearCurrentAudienceSelection,
   deriveAudienceUiStatus,
   migrateLegacyAudienceState,
   normalizeAudienceSelectionsByContext,
+  reconcileAudienceSelectionsWithAnalysis,
   setAudienceSelectionsForContext,
-} from './audience-selection-state.js?v=20260827-1'
+} from './audience-selection-state.js?v=20260827-2'
 import {
   acceptRestoredCheckpoint,
   buildMarketplaceCaptureRows,
@@ -1609,22 +1610,7 @@ function synchronizeAudienceSelectionContext({ autoSelect = true } = {}) {
   const existing = audienceSelectionsForContext(state.audienceSelectionsByContext, contextKey)
   if (!autoSelect) return { analysis, contextKey, selections: existing }
 
-  const selectionByKey = new Map(existing.map((selection) => [audienceSelectionKey(selection), selection]))
-  for (const signal of analysis.signals) {
-    if (!signal.autoSelectable) continue
-    const key = audienceSelectionKey(signal)
-    const current = selectionByKey.get(key)
-    if (current?.status === 'manual' || current?.status === 'legacy') continue
-    selectionByKey.set(key, {
-      phrase: signal.phrase,
-      role: signal.role,
-      subjectType: signal.subjectType,
-      status: 'confirmed',
-      source: signal.sources.join(',') || 'evidence',
-      selected: true,
-    })
-  }
-  const selections = [...selectionByKey.values()]
+  const selections = reconcileAudienceSelectionsWithAnalysis(existing, analysis.signals)
   if (!audienceSelectionsMatch(existing, selections)) {
     state.audienceSelectionsByContext = setAudienceSelectionsForContext(
       state.audienceSelectionsByContext,
@@ -1747,7 +1733,9 @@ function clearAudienceSelectionsForFreshStart() {
 }
 
 function selectedTargets() {
-  return Array.from(elements.targetChips.querySelectorAll('input:checked')).map((input) => input.value)
+  return elements.targetChips
+    ? Array.from(elements.targetChips.querySelectorAll('input:checked')).map((input) => input.value)
+    : []
 }
 
 function selectedYearOption() {
@@ -1942,19 +1930,38 @@ function audienceIntentCandidates() {
     ...currentOptions(),
     baseKeywords: combinedSeedKeywords(),
     audienceSelections: currentAudienceSelections(),
+    audienceContextKey: analysis.contextKey,
     actions: (elements.buyerActionInput?.value ?? '').split(/\r?\n|,/),
     learnedSignals: learnedSignalsForGeneration(),
   }).map((candidate) => {
-    const signal = signals.get(audienceSelectionKey({
-      phrase: candidate.audiencePhrase,
-      role: candidate.audienceRole,
-      subjectType: candidate.audienceSubjectType,
+    const roleProvenance = Object.fromEntries(Object.entries(candidate.audienceRoleProvenance ?? {}).map(([role, provenance]) => {
+      const signal = signals.get(audienceSelectionKey({
+        phrase: provenance.phrase,
+        role,
+        subjectType: provenance.subjectType,
+      }))
+      return [role, {
+        ...provenance,
+        contextKey: analysis.contextKey,
+        sources: signal?.sources ?? provenance.sources ?? [],
+        evidence: signal?.evidence ?? provenance.evidence ?? {},
+      }]
     }))
+    const provenanceRows = Object.values(roleProvenance)
+    const audienceSources = [...new Set(provenanceRows.flatMap((provenance) => provenance.sources ?? []))]
+    const audienceEvidence = provenanceRows.length > 1
+      ? { roles: roleProvenance }
+      : { ...(provenanceRows[0]?.evidence ?? {}) }
     return {
       ...candidate,
-      audienceSources: signal?.sources ?? [],
-      audienceEvidence: signal?.evidence ?? {},
-      audienceContextKey: candidate.audienceContextKey || analysis.contextKey,
+      recipientRole: roleProvenance.recipient?.phrase ?? candidate.recipientRole ?? '',
+      giverRole: roleProvenance.giver?.phrase ?? candidate.giverRole ?? '',
+      audienceSubject: roleProvenance.subject?.phrase ?? candidate.audienceSubject ?? '',
+      audienceSubjectType: roleProvenance.subject?.subjectType ?? candidate.audienceSubjectType ?? '',
+      audienceRoleProvenance: roleProvenance,
+      audienceSources,
+      audienceEvidence,
+      audienceContextKey: analysis.contextKey,
     }
   })
 }
@@ -2191,6 +2198,7 @@ function normalizeLearningRecord(record = {}) {
     version,
     categoryId: record.categoryId ?? context.categoryId ?? '',
     eventId: record.eventId ?? context.eventId ?? '',
+    rootKeyword: record.rootKeyword ?? audienceContext?.rootKeyword ?? context.rootKeyword ?? '',
     identitySeeds: record.identitySeeds ?? context.buyerIdentities ?? [],
     audienceContext,
     audienceSignals,
@@ -2206,6 +2214,7 @@ function marketplaceLearningRecords() {
 
 function liveMarketplaceLearningRecord() {
   const researchContext = activeResearchContext()
+  const audienceContext = activeAudienceArchiveContext()
   const evidence = modifierEvidenceInput()
   const audienceSelections = activeAudienceSelectionSnapshot()
   const audiencePhrases = audienceSelections.map((selection) => selection.phrase)
@@ -2215,6 +2224,7 @@ function liveMarketplaceLearningRecord() {
     capturedAt: new Date().toISOString(),
     categoryId: researchContext.categoryId,
     eventId: researchContext.eventId,
+    rootKeyword: audienceContext.rootKeyword,
     eventSnapshot: researchContext.event,
     identitySeeds: audiencePhrases,
     audienceSelections,
@@ -2223,6 +2233,7 @@ function liveMarketplaceLearningRecord() {
       eventId: researchContext.eventId,
       eventSnapshot: researchContext.event,
       eventTerm: normalizePhrase(researchContext.event.searchTerm),
+      rootKeyword: audienceContext.rootKeyword,
       buyerIdentities: audiencePhrases,
       audienceSelections,
     },
@@ -2301,6 +2312,7 @@ function evidenceArchiveRecord() {
     locale: 'en-US',
     categoryId: researchContext.categoryId,
     eventId: researchContext.eventId,
+    rootKeyword: audienceContext.rootKeyword,
     eventSnapshot: researchContext.event,
     identitySeeds: audiencePhrases,
     audienceSelections,
@@ -2838,11 +2850,12 @@ function fillSelects() {
 }
 
 function renderTargets(options = {}) {
+  if (!elements.targetChips) return
   const event = selectedEvent()
   const savedTargets = Array.isArray(options.selectedTargets) ? new Set(options.selectedTargets) : null
-  elements.targetChips.innerHTML = event.targets.map((target, index) => `
+  elements.targetChips.innerHTML = event.targets.map((target) => `
     <label class="chip">
-      <input type="checkbox" value="${escapeHtml(target)}" ${savedTargets ? (savedTargets.has(target) ? 'checked' : '') : (index < 7 ? 'checked' : '')}>
+      <input type="checkbox" value="${escapeHtml(target)}" ${savedTargets?.has(target) ? 'checked' : ''}>
       <span>${escapeHtml(target)}</span>
     </label>
   `).join('')
@@ -9111,7 +9124,7 @@ function generateCandidates({ preserveMarketplacePlan = false } = {}) {
   const options = currentOptions()
   const broadEventMode = isBroadEventDiscovery()
   const baseGenerated = broadEventMode
-    ? generateBroadEventCandidates({ ...options, limit: 40 })
+    ? generateBroadEventCandidates({ ...options, limit: 40, includeAudienceLane: false })
     : generateKeywordCandidates(options)
   // Audience phrases expand only from confirmed evidence or an explicit manual hypothesis;
   // base discovery remains available before an audience has been verified.
@@ -9277,14 +9290,30 @@ function audienceProvenanceForResearchRow(row = {}, existingRow = {}, candidate 
     }
     return {}
   }
+  const audienceRoleProvenance = firstObject('audienceRoleProvenance')
+  const provenanceRows = Object.values(audienceRoleProvenance)
+  const audienceSources = firstArray('audienceSources')
+  const combinedSources = audienceSources.length > 0
+    ? audienceSources
+    : [...new Set(provenanceRows.flatMap((provenance) => provenance?.sources ?? []))]
+  const audienceEvidence = firstObject('audienceEvidence')
+  const combinedEvidence = Object.keys(audienceEvidence).length > 0
+    ? audienceEvidence
+    : provenanceRows.length > 1
+      ? { roles: audienceRoleProvenance }
+      : { ...(provenanceRows[0]?.evidence ?? {}) }
   return {
     audienceRole: firstText('audienceRole'),
     audiencePhrase: firstText('audiencePhrase'),
-    audienceSubjectType: firstText('audienceSubjectType'),
+    recipientRole: firstText('recipientRole') || audienceRoleProvenance.recipient?.phrase || '',
+    giverRole: firstText('giverRole') || audienceRoleProvenance.giver?.phrase || '',
+    audienceSubject: firstText('audienceSubject') || audienceRoleProvenance.subject?.phrase || '',
+    audienceSubjectType: firstText('audienceSubjectType') || audienceRoleProvenance.subject?.subjectType || '',
     audienceStatus: firstText('audienceStatus'),
-    audienceSources: firstArray('audienceSources'),
-    audienceEvidence: firstObject('audienceEvidence'),
+    audienceSources: combinedSources,
+    audienceEvidence: combinedEvidence,
     audienceContextKey: firstText('audienceContextKey'),
+    audienceRoleProvenance,
   }
 }
 
@@ -9812,13 +9841,14 @@ function researchMetadataCsvValues(row) {
 function audienceCsvProvenance(row = {}) {
   const role = String(row.audienceRole ?? '').trim()
   const phrase = String(row.audiencePhrase ?? '').trim()
+  const subject = String(row.audienceSubject ?? '').trim() || (role === 'subject' ? phrase : '')
   const sources = Array.isArray(row.audienceSources) ? row.audienceSources : []
   const evidence = row.audienceEvidence && typeof row.audienceEvidence === 'object'
     ? row.audienceEvidence
     : {}
   return [
-    role === 'subject' ? phrase : '',
-    role === 'subject' ? String(row.audienceSubjectType ?? '').trim() : '',
+    subject,
+    String(row.audienceSubjectType ?? '').trim(),
     String(row.audienceStatus ?? '').trim(),
     sources.length > 0 ? JSON.stringify(sources) : '',
     Object.keys(evidence).length > 0 ? JSON.stringify(evidence) : '',
@@ -11872,7 +11902,7 @@ function bindEvents() {
   })
   elements.trendScoutInput.addEventListener('input', () => resetCandidatesForInputChange())
   elements.riskInput.addEventListener('input', () => resetCandidatesForInputChange())
-  elements.targetChips.addEventListener('change', () => resetCandidatesForInputChange())
+  elements.targetChips?.addEventListener('change', () => resetCandidatesForInputChange())
   ;[
     elements.broadQueryInput,
     elements.researchJobInput,

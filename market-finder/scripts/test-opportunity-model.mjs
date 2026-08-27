@@ -91,6 +91,45 @@ function preferredArchivedAudienceSignalsForTest() {
   )(marketKeywordEngine.buildAudienceContextKey, marketKeywordEngine.getSourceFreshness)
 }
 
+function normalizeLearningRecordForTest() {
+  const body = appFunctionBody('normalizeLearningRecord')
+  return new Function(
+    'audienceContextMatchesRecord',
+    'normalizeArchivedAudienceSignals',
+    `return function normalizeLearningRecord(record) {${body}\n}`,
+  )(
+    () => false,
+    (signals) => signals ?? [],
+  )
+}
+
+function liveMarketplaceLearningRecordForTest() {
+  const body = appFunctionBody('liveMarketplaceLearningRecord')
+  return new Function(
+    'activeResearchContext',
+    'modifierEvidenceInput',
+    'activeAudienceSelectionSnapshot',
+    'currentEvidenceRunId',
+    'activeAudienceArchiveContext',
+    'normalizePhrase',
+    `return function liveMarketplaceLearningRecord() {${body}\n}`,
+  )(
+    () => ({
+      categoryId: 'mug',
+      eventId: '',
+      event: { id: 'auto-discovery', searchTerm: '' },
+    }),
+    () => ({
+      demandKeywords: [{ keyword: 'teacher appreciation mug', etsySearches30d: 1200 }],
+      supplyListings: [{ title: 'Teacher Mug Gift', monthlySales: 8 }],
+    }),
+    () => [],
+    () => 'live-mug-run',
+    () => ({ categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }),
+    (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' '),
+  )
+}
+
 test('appends audience CSV provenance fields after legacy recipient and giver columns', () => {
   const headers = app.match(/const RESEARCH_METADATA_CSV_HEADERS = \[([\s\S]*?)\n\]/)?.[1] ?? ''
   assert.match(headers, /'Recipient Role'/)
@@ -133,6 +172,37 @@ test('reanalyzes a version-three archive from captured demand and supply, never 
     role: signal.role,
     status: signal.status,
   })), [{ phrase: 'teacher', role: 'recipient', status: 'confirmed' }])
+})
+
+test('propagates the exact audience root through live and normalized archive record shapes', () => {
+  const liveRecord = liveMarketplaceLearningRecordForTest()()
+  assert.equal(liveRecord.rootKeyword, 'teacher mug')
+  assert.equal(liveRecord.context.rootKeyword, 'teacher mug')
+
+  const normalizeLearningRecord = normalizeLearningRecordForTest()
+  const normalizedLive = normalizeLearningRecord(liveRecord)
+  assert.equal(normalizedLive.rootKeyword, 'teacher mug')
+
+  const normalizedArchive = normalizeLearningRecord({
+    version: 3,
+    categoryId: 'mug',
+    eventId: '',
+    context: { rootKeyword: 'teacher mug' },
+    demandKeywords: [{ keyword: 'teacher appreciation mug', etsySearches30d: 1200 }],
+    supplyListings: [{ title: 'Teacher Mug Gift', monthlySales: 8 }],
+  })
+  assert.equal(normalizedArchive.rootKeyword, 'teacher mug')
+
+  const analysis = analyzeAudienceEvidence(
+    [normalizedLive],
+    { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' },
+    { now: new Date(Date.now() + 60_000).toISOString() },
+  )
+  assert.deepEqual(analysis.signals.map(({ phrase, status, autoSelectable }) => ({
+    phrase,
+    status,
+    autoSelectable,
+  })), [{ phrase: 'teacher', status: 'confirmed', autoSelectable: true }])
 })
 
 test('prefers matching version-four archived audience signals when restored rows have no raw evidence', () => {
@@ -328,6 +398,150 @@ test('carries audience candidate provenance through merged research rows into CS
     '{"etsyRelatedTermCount":1,"everbeeSellingListingCount":2}',
     'ornament::::pet memorial ornament',
   ])
+})
+
+test('round-trips subject plus giver provenance through the merged row and new Audience CSV columns', () => {
+  const audienceProvenanceForResearchRow = new Function(
+    `return function audienceProvenanceForResearchRow(row, existingRow, candidate) {${appFunctionBody('audienceProvenanceForResearchRow')}\n}`,
+  )()
+  const audienceCsvProvenance = new Function(
+    `return function audienceCsvProvenance(row) {${appFunctionBody('audienceCsvProvenance')}\n}`,
+  )()
+  const candidate = generateAudienceIntentCandidates({
+    categoryId: 'ornament',
+    baseKeywords: ['memorial ornament'],
+    audienceSelections: [
+      {
+        phrase: 'pet',
+        role: 'subject',
+        subjectType: 'pet',
+        status: 'confirmed',
+        contextKey: 'ornament::::memorial',
+        sources: ['etsy-related', 'everbee-title'],
+        evidence: { etsyRelatedTermCount: 1, everbeeSellingListingCount: 1 },
+      },
+      {
+        phrase: 'students',
+        role: 'giver',
+        status: 'manual',
+        source: 'manual',
+        contextKey: 'ornament::::memorial',
+      },
+    ],
+  }).find((row) => row.keyword === 'pet memorial ornament from students')
+  const merged = {
+    ...candidate,
+    ...audienceProvenanceForResearchRow({}, {}, candidate),
+  }
+
+  assert.equal(merged.audienceSubject, 'pet')
+  assert.equal(merged.audienceSubjectType, 'pet')
+  assert.equal(merged.giverRole, 'students')
+  assert.equal(merged.audienceRoleProvenance.subject.status, 'confirmed')
+  assert.equal(merged.audienceRoleProvenance.giver.status, 'manual')
+
+  const audienceHeaders = [
+    'Audience Subject',
+    'Audience Subject Type',
+    'Audience Status',
+    'Audience Sources JSON',
+    'Audience Evidence JSON',
+    'Audience Context Key',
+  ]
+  const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`
+  const csv = [
+    ['Keyword', 'Recipient Role', 'Giver Role', ...audienceHeaders].map(csvCell).join(','),
+    [merged.keyword, merged.recipientRole, merged.giverRole, ...audienceCsvProvenance(merged)].map(csvCell).join(','),
+  ].join('\n')
+  const [roundTripped] = parseEverbeeRows(csv)
+
+  assert.equal(roundTripped.audienceSubject, 'pet')
+  assert.equal(roundTripped.audienceSubjectType, 'pet')
+  assert.equal(roundTripped.audienceStatus, 'manual')
+  assert.equal(roundTripped.giverRole, 'students')
+  assert.deepEqual(roundTripped.audienceSources, ['etsy-related', 'everbee-title', 'manual'])
+  assert.equal(roundTripped.audienceEvidence.roles.subject.status, 'confirmed')
+  assert.equal(roundTripped.audienceEvidence.roles.giver.status, 'manual')
+  assert.equal(roundTripped.audienceContextKey, 'ornament::::memorial')
+})
+
+test('round-trips recipient plus giver provenance through candidate, merged row, export, and import', () => {
+  const audienceProvenanceForResearchRow = new Function(
+    `return function audienceProvenanceForResearchRow(row, existingRow, candidate) {${appFunctionBody('audienceProvenanceForResearchRow')}\n}`,
+  )()
+  const audienceCsvProvenance = new Function(
+    `return function audienceCsvProvenance(row) {${appFunctionBody('audienceCsvProvenance')}\n}`,
+  )()
+  const candidate = generateAudienceIntentCandidates({
+    categoryId: 'mug',
+    baseKeywords: ['appreciation mug'],
+    audienceSelections: [
+      {
+        phrase: 'teacher',
+        role: 'recipient',
+        status: 'confirmed',
+        contextKey: 'mug::::teacher appreciation',
+        sources: ['etsy-related', 'everbee-title'],
+        evidence: { etsyRelatedTermCount: 1, everbeeSellingListingCount: 1 },
+      },
+      {
+        phrase: 'students',
+        role: 'giver',
+        status: 'confirmed',
+        contextKey: 'mug::::teacher appreciation',
+        sources: ['everbee-title'],
+        evidence: { everbeeSellingListingCount: 2 },
+      },
+    ],
+  }).find((row) => row.keyword === 'teacher appreciation mug from students')
+  const merged = {
+    ...candidate,
+    ...audienceProvenanceForResearchRow({}, {}, candidate),
+  }
+  const headers = [
+    'Keyword',
+    'Recipient Role',
+    'Giver Role',
+    'Audience Subject',
+    'Audience Subject Type',
+    'Audience Status',
+    'Audience Sources JSON',
+    'Audience Evidence JSON',
+    'Audience Context Key',
+  ]
+  const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`
+  const csv = [
+    headers.map(csvCell).join(','),
+    [merged.keyword, merged.recipientRole, merged.giverRole, ...audienceCsvProvenance(merged)].map(csvCell).join(','),
+  ].join('\n')
+  const [roundTripped] = parseEverbeeRows(csv)
+
+  assert.equal(roundTripped.recipientRole, 'teacher')
+  assert.equal(roundTripped.giverRole, 'students')
+  assert.equal(roundTripped.audienceSubject, '')
+  assert.equal(roundTripped.audienceSubjectType, '')
+  assert.equal(roundTripped.audienceStatus, 'confirmed')
+  assert.deepEqual(roundTripped.audienceSources, ['etsy-related', 'everbee-title'])
+  assert.equal(roundTripped.audienceEvidence.roles.recipient.status, 'confirmed')
+  assert.equal(roundTripped.audienceEvidence.roles.giver.status, 'confirmed')
+  assert.equal(roundTripped.audienceContextKey, 'mug::::teacher appreciation')
+})
+
+test('keeps old CSV imports compatible and safely defaults malformed Audience JSON', () => {
+  const [oldRow] = parseEverbeeRows('Keyword,Recipient Role,Giver Role\nteacher mug,teacher,students')
+  assert.equal(oldRow.audienceSubject, '')
+  assert.equal(oldRow.audienceSubjectType, '')
+  assert.equal(oldRow.audienceStatus, '')
+  assert.deepEqual(oldRow.audienceSources, [])
+  assert.deepEqual(oldRow.audienceEvidence, {})
+  assert.equal(oldRow.audienceContextKey, '')
+
+  const [malformed] = parseEverbeeRows([
+    'Keyword,Audience Sources JSON,Audience Evidence JSON',
+    'teacher mug,"{not-an-array}","[]"',
+  ].join('\n'))
+  assert.deepEqual(malformed.audienceSources, [])
+  assert.deepEqual(malformed.audienceEvidence, {})
 })
 
 function freshRow(overrides = {}) {

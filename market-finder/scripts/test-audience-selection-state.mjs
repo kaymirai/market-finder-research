@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as audienceSelectionState from '../src/audience-selection-state.js'
 
 import {
   PERSISTENCE_VERSION,
@@ -11,6 +12,10 @@ import {
   setAudienceSelectionsForContext,
 } from '../src/audience-selection-state.js'
 import { prepareFreshStartWorkspace } from '../src/multi-angle-exploration.js'
+import {
+  analyzeAudienceEvidence,
+  generateAudienceIntentCandidates,
+} from '../../shared/market-keyword-engine/index.js'
 
 test('migrates old automatic buyer identities as unselected legacy recipients', () => {
   const migrated = migrateLegacyAudienceState({
@@ -149,4 +154,47 @@ test('distinguishes no evidence from a provider failure and does not verify manu
   assert.equal(deriveAudienceUiStatus({
     signals: [{ phrase: 'teacher', role: 'recipient', status: 'manual', selected: true }],
   }).verified, false)
+})
+
+test('prunes an automatic confirmed selection after its exact-context evidence expires', () => {
+  assert.equal(typeof audienceSelectionState.reconcileAudienceSelectionsWithAnalysis, 'function')
+  const reconcile = audienceSelectionState.reconcileAudienceSelectionsWithAnalysis
+  const context = { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }
+  const records = [{
+    runId: 'teacher-mug-run',
+    capturedAt: '2026-08-27T00:00:00Z',
+    categoryId: 'mug',
+    eventId: '',
+    rootKeyword: 'teacher mug',
+    demandKeywords: [{ keyword: 'teacher appreciation mug', etsySearches30d: 1200 }],
+    supplyListings: [{ title: 'Teacher Mug Gift', monthlySales: 8 }],
+  }]
+  const current = analyzeAudienceEvidence(records, context, { now: '2026-08-27T12:00:00Z' })
+  const selected = reconcile([], current.signals)
+  assert.deepEqual(selected.map(({ phrase, status, selected: isSelected }) => ({
+    phrase,
+    status,
+    selected: isSelected,
+  })), [{ phrase: 'teacher', status: 'confirmed', selected: true }])
+
+  const persisted = [
+    ...selected,
+    { phrase: 'librarian', role: 'recipient', status: 'manual', source: 'manual', selected: true },
+    { phrase: 'grandma', role: 'recipient', status: 'legacy', source: 'legacy', selected: false },
+  ]
+  const expired = analyzeAudienceEvidence(records, context, { now: '2026-10-27T12:00:00Z' })
+  const synchronized = reconcile(persisted, expired.signals)
+
+  assert.equal(synchronized.some((selection) => selection.phrase === 'teacher' && selection.selected), false)
+  assert.equal(synchronized.some((selection) => selection.phrase === 'teacher' && selection.status === 'confirmed'), false)
+  assert.equal(synchronized.find((selection) => selection.phrase === 'librarian')?.selected, true)
+  assert.equal(synchronized.find((selection) => selection.phrase === 'grandma')?.selected, false)
+
+  const candidates = generateAudienceIntentCandidates({
+    categoryId: 'mug',
+    baseKeywords: ['appreciation mug'],
+    audienceSelections: synchronized.filter((selection) => selection.selected),
+  })
+  assert.equal(candidates.some((candidate) => candidate.audiencePhrase === 'teacher'), false)
+  assert.equal(candidates.some((candidate) => candidate.audiencePhrase === 'librarian'), true)
 })

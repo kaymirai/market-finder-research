@@ -249,7 +249,14 @@ function normalizeAudienceContext(context = {}, dependencies) {
   const normalize = dependencies.normalizePhrase
   const categoryId = canonicalCategoryId(context.categoryId, normalize)
   const eventId = normalize(context.eventId)
-  const rootKeyword = dependencies.buildKeywordClusterKey(context.rootKeyword ?? context.keyword ?? '', { categoryId })
+  const rootKeyword = dependencies.buildKeywordClusterKey(
+    context.rootKeyword
+      ?? context.audienceContext?.rootKeyword
+      ?? context.context?.rootKeyword
+      ?? context.keyword
+      ?? '',
+    { categoryId },
+  )
   return { categoryId, eventId, rootKeyword }
 }
 

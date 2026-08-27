@@ -93,13 +93,35 @@ const AUTO_DISCOVERY_SEGMENTS = {
   ],
 }
 
-const PRODUCT_DISCOVERY_SEGMENTS = {
+const THEME_DISCOVERY_SEGMENTS = [
+  'retirement',
+  'graduation',
+  'first day of school',
+  'family reunion',
+  'girls trip',
+  'bachelorette',
+  'baby shower',
+  'pregnancy announcement',
+  'housewarming',
+  'bridal shower',
+  'pickleball',
+  'camping',
+  'fishing',
+  'gardening',
+  'books',
+  'coffee',
+  'plants',
+  ...AUTO_DISCOVERY_SEGMENTS.styles,
+]
+
+const PRODUCT_THEME_DISCOVERY_SEGMENTS = {
   shirt: ['funny', 'embroidered', 'retro', 'vintage', 'western', 'matching'],
-  sweatshirt: ['embroidered', 'cozy', 'teacher', 'nurse', 'retro'],
-  mug: ['funny', 'personalized', 'teacher', 'nurse', 'coffee lover'],
+  sweatshirt: ['embroidered', 'cozy', 'retro'],
+  mug: ['funny', 'personalized', 'coffee'],
+  ornament: ['memorial', 'keepsake', 'personalized'],
   'wall-art': ['nursery', 'printable', 'poster', 'quote', 'boho', 'minimalist'],
-  tote: ['book lover', 'teacher', 'library', 'bridesmaid', 'market'],
-  sticker: ['teacher', 'book lover', 'planner', 'water bottle', 'laptop'],
+  tote: ['books', 'library', 'market'],
+  sticker: ['planner', 'water bottle', 'laptop'],
 }
 
 const AUTO_DISCOVERY_INTENTS = [
@@ -1144,6 +1166,12 @@ const FIELD_ALIASES = {
   wearerIntent: ['wearer intent', 'buyer intent mode'],
   recipientRole: ['recipient role', 'recipient'],
   giverRole: ['giver role', 'giver'],
+  audienceSubject: ['audience subject'],
+  audienceSubjectType: ['audience subject type'],
+  audienceStatus: ['audience status'],
+  audienceSources: ['audience sources json', 'audience sources'],
+  audienceEvidence: ['audience evidence json', 'audience evidence'],
+  audienceContextKey: ['audience context key'],
   occasion: ['occasion', 'gift occasion'],
   personalization: ['personalization', 'personalization type'],
   roundACount: ['round a count'],
@@ -1416,12 +1444,8 @@ function splitSeedText(value) {
 
 function autoDiscoveryTerms(category, event) {
   return unique([
-    ...(event.targets ?? []),
-    ...AUTO_DISCOVERY_SEGMENTS.recipients,
-    ...AUTO_DISCOVERY_SEGMENTS.situations,
-    ...AUTO_DISCOVERY_SEGMENTS.hobbiesAndWork,
-    ...AUTO_DISCOVERY_SEGMENTS.styles,
-    ...(PRODUCT_DISCOVERY_SEGMENTS[category.id] ?? []),
+    ...THEME_DISCOVERY_SEGMENTS,
+    ...(PRODUCT_THEME_DISCOVERY_SEGMENTS[category.id] ?? []),
   ])
     .map((term) => normalizePhrase(term))
     .filter(Boolean)
@@ -1881,9 +1905,9 @@ export function generateKeywordCandidates(options = {}) {
   const year = parseOptionalYear(options.year, null)
   const limit = Math.max(10, Math.min(Number(options.limit) || 60, 250))
   const seedKeywords = splitSeedText(options.seedKeywords)
-  const selectedTargets = Array.isArray(options.targets) && options.targets.length > 0
+  const selectedTargets = Array.isArray(options.targets)
     ? options.targets.map((target) => normalizePhrase(target)).filter(Boolean)
-    : event.targets
+    : []
   const discoveryTargets = options.autoDiscovery === false
     ? selectedTargets
     : unique([...selectedTargets, ...autoDiscoveryTerms(category, event)])
@@ -2977,6 +3001,25 @@ function eligibleAudienceSelections(options = {}) {
   return [...byKey.values()]
 }
 
+function audienceRoleProvenanceForSelection(selection, options, categoryId, baseKeyword) {
+  const sources = Array.isArray(selection?.sources)
+    ? selection.sources.map((source) => String(source ?? '').trim()).filter(Boolean)
+    : String(selection?.source ?? '').trim()
+      ? [String(selection.source).trim()]
+      : []
+  const evidence = selection?.evidence && typeof selection.evidence === 'object' && !Array.isArray(selection.evidence)
+    ? { ...selection.evidence }
+    : {}
+  return {
+    phrase: selection.phrase,
+    subjectType: selection.role === 'subject' ? selection.subjectType ?? '' : '',
+    status: selection.status,
+    contextKey: audienceCandidateContextKey(selection, options, categoryId, baseKeyword),
+    sources: unique(sources),
+    evidence,
+  }
+}
+
 function buildAudienceIntentCandidate(keyword, metadata, category, customRiskTerms, options) {
   const normalized = normalizePhrase(keyword)
   if (countWords(normalized) < 2) return null
@@ -2986,6 +3029,18 @@ function buildAudienceIntentCandidate(keyword, metadata, category, customRiskTer
   if (classifyCandidateKeyword(normalized, options).action !== 'candidate') return null
 
   const riskTerms = detectRiskTerms(normalized, customRiskTerms)
+  const roleProvenance = metadata.audienceRoleProvenance && typeof metadata.audienceRoleProvenance === 'object'
+    ? Object.fromEntries(Object.entries(metadata.audienceRoleProvenance).map(([role, value]) => [role, {
+        ...value,
+        sources: Array.isArray(value?.sources) ? [...value.sources] : [],
+        evidence: value?.evidence && typeof value.evidence === 'object' && !Array.isArray(value.evidence)
+          ? { ...value.evidence }
+          : {},
+      }]))
+    : {}
+  const recipient = roleProvenance.recipient
+  const giver = roleProvenance.giver
+  const subject = roleProvenance.subject
   return {
     keyword: normalized,
     modifierEvidence: metadata.modifierEvidence ?? 'assumed',
@@ -2999,8 +3054,10 @@ function buildAudienceIntentCandidate(keyword, metadata, category, customRiskTer
     status: riskTerms.length > 0 ? 'review' : 'ready',
     discoveryLane: 'audience',
     queryStrategy: 'audience-intent',
-    buyerIntentIdentity: metadata.audienceRole === 'recipient' ? metadata.audiencePhrase : '',
-    buyerIntentKind: metadata.audienceRole === 'recipient' ? classifyBuyerIdentity(metadata.audiencePhrase).kind : '',
+    buyerIntentIdentity: recipient?.phrase ?? (metadata.audienceRole === 'recipient' ? metadata.audiencePhrase : ''),
+    buyerIntentKind: recipient?.phrase
+      ? classifyBuyerIdentity(recipient.phrase).kind
+      : metadata.audienceRole === 'recipient' ? classifyBuyerIdentity(metadata.audiencePhrase).kind : '',
     personalizable: PERSONALIZATION_PATTERN.test(normalized),
     giftIntent: GIFT_INTENT_PATTERN.test(normalized),
     audienceRole: metadata.audienceRole,
@@ -3008,6 +3065,11 @@ function buildAudienceIntentCandidate(keyword, metadata, category, customRiskTer
     audienceStatus: metadata.audienceStatus,
     audienceContextKey: metadata.audienceContextKey,
     audienceSubjectType: metadata.audienceSubjectType ?? '',
+    recipientRole: recipient?.phrase ?? '',
+    giverRole: giver?.phrase ?? '',
+    audienceSubject: subject?.phrase ?? '',
+    audienceSubjectType: subject?.subjectType ?? metadata.audienceSubjectType ?? '',
+    audienceRoleProvenance: roleProvenance,
   }
 }
 
@@ -3041,6 +3103,9 @@ export function generateAudienceIntentCandidates(options = {}) {
         audienceStatus: selection.status,
         audienceContextKey: audienceCandidateContextKey(selection, options, category.id, baseKeyword),
         audienceSubjectType: selection.subjectType,
+        audienceRoleProvenance: {
+          [selection.role]: audienceRoleProvenanceForSelection(selection, options, category.id, baseKeyword),
+        },
       }
       if (selection.role === 'subject') {
         addCandidate(combineAudiencePhrase(selection.phrase, baseKeyword), {
@@ -3066,12 +3131,17 @@ export function generateAudienceIntentCandidates(options = {}) {
 
   for (const giver of selections.filter((item) => item.role === 'giver')) {
     for (const anchor of anchors) {
+      const giverProvenance = audienceRoleProvenanceForSelection(giver, options, category.id, anchor.keyword)
       addCandidate(`${anchor.keyword} from ${giver.phrase}`, {
         audienceRole: 'giver',
         audiencePhrase: giver.phrase,
         audienceStatus: giver.status,
-        audienceContextKey: audienceCandidateContextKey(giver, options, category.id, anchor.keyword),
+        audienceContextKey: giverProvenance.contextKey,
         audienceSubjectType: '',
+        audienceRoleProvenance: {
+          ...(anchor.metadata.audienceRoleProvenance ?? {}),
+          giver: giverProvenance,
+        },
         modifierEvidence: 'giver',
       })
     }
@@ -3171,7 +3241,10 @@ export function generateBroadEventCandidates(options = {}) {
     observedByLane[lane].push(observedTerm)
   }
 
-  const laneBuckets = BROAD_EVENT_LANE_ORDER.map((lane) => {
+  const laneOrder = options.includeAudienceLane === false
+    ? BROAD_EVENT_LANE_ORDER.filter((lane) => lane !== 'audience')
+    : BROAD_EVENT_LANE_ORDER
+  const laneBuckets = laneOrder.map((lane) => {
     const terms = profile.lanes[lane] ?? []
     const rows = []
 
@@ -3653,9 +3726,9 @@ export function generateBroadMarketQueries(options = {}) {
   const category = getCategory(options.categoryId)
   const year = options.includeYear ? parseOptionalYear(options.year, null) : null
   const limit = Math.max(3, Math.min(Number(options.limit) || 18, 40))
-  const selectedTargets = Array.isArray(options.targets) && options.targets.length > 0
+  const selectedTargets = Array.isArray(options.targets)
     ? options.targets.map((target) => normalizePhrase(target)).filter(Boolean)
-    : event.targets
+    : []
   const discoveryTargets = options.autoDiscovery === false
     ? selectedTargets
     : unique([...selectedTargets, ...autoDiscoveryTerms(category, event)])
@@ -6131,10 +6204,31 @@ export function parseEverbeeRows(text) {
 
   return rows.map((line) => {
     const values = parseDelimitedLine(line, delimiter)
-    const row = {}
+    const row = {
+      audienceSubject: '',
+      audienceSubjectType: '',
+      audienceStatus: '',
+      audienceSources: [],
+      audienceEvidence: {},
+      audienceContextKey: '',
+    }
     values.forEach((value, index) => {
       const field = fields[index]
-      if (
+      if (field === 'audienceSources') {
+        try {
+          const parsed = JSON.parse(value)
+          row[field] = Array.isArray(parsed) ? parsed : []
+        } catch {
+          row[field] = []
+        }
+      } else if (field === 'audienceEvidence') {
+        try {
+          const parsed = JSON.parse(value)
+          row[field] = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+        } catch {
+          row[field] = {}
+        }
+      } else if (
         field === 'productRows'
         || field === 'sourceKeywords'
         || field === 'buyerIntentAxes'
