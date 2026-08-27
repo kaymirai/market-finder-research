@@ -127,6 +127,26 @@ test('keeps one-source and different-theme audience evidence unselected', () => 
   assert.equal(analysis.signals.some((signal) => signal.phrase === 'mom'), false)
 })
 
+test('never auto-selects audience people from unrelated category history', () => {
+  const categories = ['shirt', 'sweatshirt', 'mug', 'ornament', 'wall-art', 'tote', 'sticker']
+  for (const categoryId of categories) {
+    const analysis = analyzeAudienceEvidence([
+      {
+        runId: 'other-category',
+        capturedAt: '2026-08-27T00:00:00Z',
+        categoryId: categoryId === 'shirt' ? 'mug' : 'shirt',
+        eventId: '',
+        rootKeyword: 'teacher gift',
+        demandKeywords: [{ keyword: 'teacher gift shirt', etsySearches30d: 5000 }],
+        supplyListings: [{ title: 'Teacher Gift Shirt', monthlySales: 20 }],
+      },
+    ], { categoryId, eventId: '', rootKeyword: 'custom product' }, {
+      now: '2026-08-27T12:00:00Z',
+    })
+    assert.equal(analysis.signals.some((signal) => signal.autoSelectable), false)
+  }
+})
+
 test('generates recipient giver and subject phrases without crossing their grammar', () => {
   const candidates = generateAudienceIntentCandidates({
     categoryId: 'ornament',
