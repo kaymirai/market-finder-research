@@ -101,6 +101,74 @@ test('reanalyzes a version-three archive from captured demand and supply, never 
   })), [{ phrase: 'teacher', role: 'recipient', status: 'confirmed' }])
 })
 
+test('prefers matching version-four archived audience signals when restored rows have no raw evidence', () => {
+  const body = app.match(/function preferredArchivedAudienceSignals\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.ok(body, 'matching v4 audience signals must be selected before raw fallback analysis')
+  const preferredArchivedAudienceSignals = new Function(
+    'buildAudienceContextKey',
+    `return function preferredArchivedAudienceSignals(records, context, rawSignals) {${body}\n}`,
+  )((value) => `${value.categoryId}::${value.eventId}::${value.rootKeyword}`)
+
+  const context = { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }
+  const persisted = {
+    phrase: 'teacher',
+    role: 'recipient',
+    subjectType: '',
+    status: 'confirmed',
+    autoSelectable: true,
+    sources: ['etsy-related', 'everbee-title'],
+    evidence: { etsyRelatedTermCount: 1, everbeeSellingListingCount: 1 },
+  }
+  const restored = preferredArchivedAudienceSignals([{
+    version: 4,
+    audienceContext: context,
+    audienceSignals: [persisted],
+    demandKeywords: [],
+    supplyListings: [],
+  }], context, [])
+  assert.deepEqual(restored, [persisted])
+  assert.deepEqual(preferredArchivedAudienceSignals([{
+    version: 3,
+    identitySeeds: ['teacher'],
+    demandKeywords: [],
+    supplyListings: [],
+  }], context, []), [])
+})
+
+test('carries audience candidate provenance through merged research rows into CSV values', () => {
+  const provenanceBody = app.match(/function audienceProvenanceForResearchRow\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const csvBody = app.match(/function audienceCsvProvenance\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const mergeBody = app.match(/function buildMergedResearchRow\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.ok(provenanceBody, 'candidate audience provenance must be copied into a research row')
+  assert.ok(csvBody, 'research-row audience provenance must be exported')
+  assert.match(mergeBody, /const audienceProvenance = audienceProvenanceForResearchRow\(row, existingRow, candidate\)/)
+  assert.match(mergeBody, /\.\.\.audienceProvenance,/)
+
+  const audienceProvenanceForResearchRow = new Function(
+    `return function audienceProvenanceForResearchRow(row, existingRow, candidate) {${provenanceBody}\n}`,
+  )()
+  const audienceCsvProvenance = new Function(
+    `return function audienceCsvProvenance(row) {${csvBody}\n}`,
+  )()
+  const row = audienceProvenanceForResearchRow({ audienceSources: [], audienceEvidence: {} }, {}, {
+    audienceRole: 'subject',
+    audiencePhrase: 'pet',
+    audienceSubjectType: 'pet',
+    audienceStatus: 'confirmed',
+    audienceSources: ['etsy-related', 'everbee-title'],
+    audienceEvidence: { etsyRelatedTermCount: 1, everbeeSellingListingCount: 2 },
+    audienceContextKey: 'ornament::::pet memorial ornament',
+  })
+  assert.deepEqual(audienceCsvProvenance(row), [
+    'pet',
+    'pet',
+    'confirmed',
+    '["etsy-related","everbee-title"]',
+    '{"etsyRelatedTermCount":1,"everbeeSellingListingCount":2}',
+    'ornament::::pet memorial ornament',
+  ])
+})
+
 function freshRow(overrides = {}) {
   return {
     keyword: 'pickleball mom shirt',

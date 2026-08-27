@@ -1459,11 +1459,26 @@ function currentAudienceProviderFailed() {
 function currentAudienceAnalysis() {
   const context = currentAudienceContext()
   state.audienceProviderFailed = currentAudienceProviderFailed()
-  return analyzeAudienceEvidence(marketplaceLearningRecords(), currentAudienceContext(), {
+  const records = marketplaceLearningRecords()
+  const analysis = analyzeAudienceEvidence(records, context, {
     now: new Date().toISOString(),
     customRiskTerms: elements.riskInput?.value ?? '',
     staticSeedKeywords: audienceRootIsStaticEntrance() ? [context.rootKeyword] : [],
   })
+  return {
+    ...analysis,
+    signals: preferredArchivedAudienceSignals(records, context, analysis.signals),
+  }
+}
+
+function preferredArchivedAudienceSignals(records = [], context = {}, rawSignals = []) {
+  const contextKey = buildAudienceContextKey(context)
+  const persisted = (Array.isArray(records) ? records : [])
+    .filter((record) => Number(record?.version) >= 4)
+    .filter((record) => record?.audienceContext && typeof record.audienceContext === 'object')
+    .filter((record) => buildAudienceContextKey(record.audienceContext) === contextKey)
+    .flatMap((record) => Array.isArray(record.audienceSignals) ? record.audienceSignals : [])
+  return persisted.length > 0 ? persisted : (Array.isArray(rawSignals) ? rawSignals : [])
 }
 
 function audienceSelectionKey(selection = {}) {
@@ -9142,6 +9157,42 @@ function limitNextResearchCandidates(candidates, limit = 8) {
   }).slice(0, Math.max(1, limit))
 }
 
+function audienceProvenanceForResearchRow(row = {}, existingRow = {}, candidate = {}) {
+  const firstText = (field) => {
+    for (const source of [row, existingRow, candidate]) {
+      const value = String(source?.[field] ?? '').trim()
+      if (value) return value
+    }
+    return ''
+  }
+  const firstArray = (field) => {
+    for (const source of [row, existingRow, candidate]) {
+      if (Array.isArray(source?.[field]) && source[field].length > 0) return [...source[field]]
+    }
+    return []
+  }
+  const firstObject = (field) => {
+    for (const source of [row, existingRow, candidate]) {
+      if (source?.[field]
+        && typeof source[field] === 'object'
+        && !Array.isArray(source[field])
+        && Object.keys(source[field]).length > 0) {
+        return { ...source[field] }
+      }
+    }
+    return {}
+  }
+  return {
+    audienceRole: firstText('audienceRole'),
+    audiencePhrase: firstText('audiencePhrase'),
+    audienceSubjectType: firstText('audienceSubjectType'),
+    audienceStatus: firstText('audienceStatus'),
+    audienceSources: firstArray('audienceSources'),
+    audienceEvidence: firstObject('audienceEvidence'),
+    audienceContextKey: firstText('audienceContextKey'),
+  }
+}
+
 function buildMergedResearchRow(existingRow, row, keyword) {
   const researchContext = activeResearchContext()
   const researchOptions = activeResearchOptions()
@@ -9162,6 +9213,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     || existingRow?.sourceKeyword
     || erankSourceKeyword(existingRow ?? {})
   const candidate = state.candidates.find((item) => normalizePhrase(item.keyword) === keyword)
+  const audienceProvenance = audienceProvenanceForResearchRow(row, existingRow, candidate)
   const importedResearchContext = resolveMultiAngleImportedResearchContext(
     state.multiAngleExploration,
     {
@@ -9225,6 +9277,7 @@ function buildMergedResearchRow(existingRow, row, keyword) {
     giverRole: String(row.giverRole ?? existingRow?.giverRole ?? candidate?.giverRole ?? ''),
     occasion: String(row.occasion ?? existingRow?.occasion ?? candidate?.occasion ?? ''),
     personalization: String(row.personalization ?? existingRow?.personalization ?? candidate?.personalization ?? ''),
+    ...audienceProvenance,
     intentTrack,
     resultLane,
     historyClusterKey,

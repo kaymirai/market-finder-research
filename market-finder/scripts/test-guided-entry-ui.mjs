@@ -971,7 +971,9 @@ test('groups evidence-backed audience roles without fixed starter people', () =>
 
 test('passes selected audience roles into candidate generation', () => {
   assert.match(app, /generateAudienceIntentCandidates\(\{[\s\S]*audienceSelections:\s*currentAudienceSelections\(\)/)
-  assert.match(app, /analyzeAudienceEvidence\(marketplaceLearningRecords\(\),\s*currentAudienceContext\(\)/)
+  assert.match(app, /const records = marketplaceLearningRecords\(\)/)
+  assert.match(app, /analyzeAudienceEvidence\(records, context, \{/)
+  assert.match(app, /preferredArchivedAudienceSignals\(records, context, analysis\.signals\)/)
 })
 
 test('keeps a selected audience candidate in its exact active event and root context at runtime', () => {
