@@ -57,6 +57,40 @@ const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8')
 
 const SCORE_OPTIONS = { categoryId: 'shirt', now: '2026-07-19T00:00:00Z' }
 
+function appFunctionBody(name) {
+  const declaration = `function ${name}(`
+  const start = app.indexOf(declaration)
+  assert.notEqual(start, -1, `${name} must remain available to the app`)
+  const paramsStart = app.indexOf('(', start)
+  let paramsDepth = 0
+  let paramsEnd = -1
+  for (let index = paramsStart; index < app.length; index += 1) {
+    if (app[index] === '(') paramsDepth += 1
+    if (app[index] === ')') paramsDepth -= 1
+    if (paramsDepth === 0) {
+      paramsEnd = index
+      break
+    }
+  }
+  const bodyStart = app.indexOf('{', paramsEnd)
+  let depth = 0
+  for (let index = bodyStart; index < app.length; index += 1) {
+    if (app[index] === '{') depth += 1
+    if (app[index] === '}') depth -= 1
+    if (depth === 0) return app.slice(bodyStart + 1, index)
+  }
+  assert.fail(`${name} must have a complete function body`)
+}
+
+function preferredArchivedAudienceSignalsForTest() {
+  const body = appFunctionBody('preferredArchivedAudienceSignals')
+  return new Function(
+    'buildAudienceContextKey',
+    'getSourceFreshness',
+    `return function preferredArchivedAudienceSignals(records, context, rawSignals, now) {${body}\n}`,
+  )(marketKeywordEngine.buildAudienceContextKey, marketKeywordEngine.getSourceFreshness)
+}
+
 test('appends audience CSV provenance fields after legacy recipient and giver columns', () => {
   const headers = app.match(/const RESEARCH_METADATA_CSV_HEADERS = \[([\s\S]*?)\n\]/)?.[1] ?? ''
   assert.match(headers, /'Recipient Role'/)
@@ -102,14 +136,10 @@ test('reanalyzes a version-three archive from captured demand and supply, never 
 })
 
 test('prefers matching version-four archived audience signals when restored rows have no raw evidence', () => {
-  const body = app.match(/function preferredArchivedAudienceSignals\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
-  assert.ok(body, 'matching v4 audience signals must be selected before raw fallback analysis')
-  const preferredArchivedAudienceSignals = new Function(
-    'buildAudienceContextKey',
-    `return function preferredArchivedAudienceSignals(records, context, rawSignals) {${body}\n}`,
-  )((value) => `${value.categoryId}::${value.eventId}::${value.rootKeyword}`)
+  const preferredArchivedAudienceSignals = preferredArchivedAudienceSignalsForTest()
 
   const context = { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }
+  const now = '2026-08-27T12:00:00Z'
   const persisted = {
     phrase: 'teacher',
     role: 'recipient',
@@ -121,18 +151,48 @@ test('prefers matching version-four archived audience signals when restored rows
   }
   const restored = preferredArchivedAudienceSignals([{
     version: 4,
+    capturedAt: '2026-08-26T12:00:00Z',
     audienceContext: context,
     audienceSignals: [persisted],
     demandKeywords: [],
     supplyListings: [],
-  }], context, [])
+  }], context, [], now)
   assert.deepEqual(restored, [persisted])
   assert.deepEqual(preferredArchivedAudienceSignals([{
     version: 3,
     identitySeeds: ['teacher'],
     demandKeywords: [],
     supplyListings: [],
-  }], context, []), [])
+  }], context, [], now), [])
+})
+
+test('downgrades stale version-four restored audience signals to non-auto reference evidence', () => {
+  const preferredArchivedAudienceSignals = preferredArchivedAudienceSignalsForTest()
+  const context = { categoryId: 'mug', eventId: '', rootKeyword: 'teacher mug' }
+  const restored = preferredArchivedAudienceSignals([{
+    version: 4,
+    capturedAt: '2026-05-17T12:00:00Z',
+    audienceContext: context,
+    audienceSignals: [{
+      phrase: 'teacher',
+      role: 'recipient',
+      subjectType: '',
+      status: 'confirmed',
+      autoSelectable: true,
+      sources: ['etsy-related', 'everbee-title'],
+      evidence: {
+        etsyRelatedTermCount: 1,
+        everbeeSellingListingCount: 1,
+        latestCapturedAt: '2026-05-17T12:00:00Z',
+      },
+    }],
+    demandKeywords: [],
+    supplyListings: [],
+  }], context, [], '2026-08-27T12:00:00Z')
+  assert.deepEqual(restored.map((signal) => ({
+    status: signal.status,
+    autoSelectable: signal.autoSelectable,
+  })), [{ status: 'reference', autoSelectable: false }])
 })
 
 test('carries audience candidate provenance through merged research rows into CSV values', () => {

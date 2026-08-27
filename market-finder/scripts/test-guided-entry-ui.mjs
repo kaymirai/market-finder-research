@@ -973,7 +973,7 @@ test('passes selected audience roles into candidate generation', () => {
   assert.match(app, /generateAudienceIntentCandidates\(\{[\s\S]*audienceSelections:\s*currentAudienceSelections\(\)/)
   assert.match(app, /const records = marketplaceLearningRecords\(\)/)
   assert.match(app, /analyzeAudienceEvidence\(records, context, \{/)
-  assert.match(app, /preferredArchivedAudienceSignals\(records, context, analysis\.signals\)/)
+  assert.match(app, /preferredArchivedAudienceSignals\(records, context, analysis\.signals, now\)/)
 })
 
 test('keeps a selected audience candidate in its exact active event and root context at runtime', () => {

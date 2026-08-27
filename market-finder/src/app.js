@@ -1458,27 +1458,36 @@ function currentAudienceProviderFailed() {
 
 function currentAudienceAnalysis() {
   const context = currentAudienceContext()
+  const now = new Date().toISOString()
   state.audienceProviderFailed = currentAudienceProviderFailed()
   const records = marketplaceLearningRecords()
   const analysis = analyzeAudienceEvidence(records, context, {
-    now: new Date().toISOString(),
+    now,
     customRiskTerms: elements.riskInput?.value ?? '',
     staticSeedKeywords: audienceRootIsStaticEntrance() ? [context.rootKeyword] : [],
   })
   return {
     ...analysis,
-    signals: preferredArchivedAudienceSignals(records, context, analysis.signals),
+    signals: preferredArchivedAudienceSignals(records, context, analysis.signals, now),
   }
 }
 
-function preferredArchivedAudienceSignals(records = [], context = {}, rawSignals = []) {
+function preferredArchivedAudienceSignals(records = [], context = {}, rawSignals = [], now = new Date()) {
   const contextKey = buildAudienceContextKey(context)
   const persisted = (Array.isArray(records) ? records : [])
     .filter((record) => Number(record?.version) >= 4)
     .filter((record) => record?.audienceContext && typeof record.audienceContext === 'object')
     .filter((record) => buildAudienceContextKey(record.audienceContext) === contextKey)
-    .flatMap((record) => Array.isArray(record.audienceSignals) ? record.audienceSignals : [])
-  return persisted.length > 0 ? persisted : (Array.isArray(rawSignals) ? rawSignals : [])
+    .flatMap((record) => (Array.isArray(record.audienceSignals)
+      ? record.audienceSignals.map((signal) => ({ record, signal }))
+      : []))
+  if (persisted.length === 0) return Array.isArray(rawSignals) ? rawSignals : []
+  return persisted.map(({ record, signal }) => {
+    const capturedAt = signal?.evidence?.latestCapturedAt || record?.capturedAt
+    const freshness = getSourceFreshness(capturedAt, now)
+    if (freshness.eligibleForRanking) return signal
+    return { ...signal, status: 'reference', autoSelectable: false }
+  })
 }
 
 function audienceSelectionKey(selection = {}) {
