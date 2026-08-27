@@ -21,9 +21,9 @@ test('rechecks both candidate creation and Etsy handoff with the shared gate', (
   assert.match(functionBody('etsyValidationCandidates'), /classifyMarketplaceBuyerQuery/)
 })
 
-test('cache-busts both multi-angle module imports after the buyer-query gate update', () => {
+test('keeps cache-busted multi-angle module imports current', () => {
   assert.match(app, /from '\.\/multi-angle-candidates\.js\?v=20260815-1'/)
-  assert.match(app, /from '\.\/multi-angle-exploration\.js\?v=20260815-9'/)
+  assert.match(app, /from '\.\/multi-angle-exploration\.js\?v=20260827-1'/)
 })
 
 test('checks automatic deep dive after idle EverBee completion', () => {

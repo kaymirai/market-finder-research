@@ -247,7 +247,7 @@ import {
   shouldRegenerateMarketplaceCandidates,
   startMultiAngleExploration,
   stopMultiAngleWork,
-} from './multi-angle-exploration.js?v=20260815-9'
+} from './multi-angle-exploration.js?v=20260827-1'
 import {
   createMultiAngleRetryScheduler,
 } from './multi-angle-retry-scheduler.js?v=20260730-1'
@@ -1537,8 +1537,34 @@ function currentAudienceSelectionSnapshot() {
     .filter((selection) => selection.selected === true)
 }
 
+function activeAudienceBatchContextKey() {
+  const exploration = createMultiAngleExplorationState(state.multiAngleExploration)
+  if (exploration.audienceContextKey) return exploration.audienceContextKey
+
+  const research = activeResearchContext()
+  const storedKey = String(state.activeAudienceContextKey ?? '').trim()
+  const [storedCategoryId = '', storedEventId = '', storedRootKeyword = ''] = storedKey.split('::')
+  const storedMatchesActiveResearch = storedCategoryId === research.categoryId
+    && storedEventId === normalizePhrase(research.eventId).replace(/-/g, ' ')
+  const rootKeyword = normalizePhrase(
+    storedMatchesActiveResearch ? storedRootKeyword : exploration.audienceRootKeyword,
+  ) || normalizePhrase(research.category?.searchTerm)
+  return buildAudienceContextKey({
+    categoryId: research.categoryId,
+    eventId: research.eventId,
+    rootKeyword,
+  })
+}
+
+function activeAudienceSelectionSnapshot() {
+  return audienceSelectionsForContext(
+    state.audienceSelectionsByContext,
+    activeAudienceBatchContextKey(),
+  ).filter((selection) => selection.selected === true)
+}
+
 function audienceSelectionPhrasesForArchive() {
-  return currentAudienceSelectionSnapshot().map((selection) => selection.phrase)
+  return activeAudienceSelectionSnapshot().map((selection) => selection.phrase)
 }
 
 function clearAudienceSelectionsForFreshStart() {
@@ -1986,7 +2012,7 @@ function marketplaceLearningRecords() {
 function liveMarketplaceLearningRecord() {
   const researchContext = activeResearchContext()
   const evidence = modifierEvidenceInput()
-  const audienceSelections = currentAudienceSelectionSnapshot()
+  const audienceSelections = activeAudienceSelectionSnapshot()
   const audiencePhrases = audienceSelections.map((selection) => selection.phrase)
   return {
     version: 3,
@@ -2059,7 +2085,7 @@ function evidenceArchiveRecord() {
   ))
   const capturedAt = new Date().toISOString()
   const runId = currentEvidenceRunId()
-  const audienceSelections = currentAudienceSelectionSnapshot()
+  const audienceSelections = activeAudienceSelectionSnapshot()
   const audiencePhrases = audienceSelections.map((selection) => selection.phrase)
   const previousNodes = state.evidenceArchives
     .filter((record) => String(record?.runId ?? '').trim() === runId)
@@ -7215,6 +7241,7 @@ function queueNextMultiAngleBatch() {
 async function startMultiAngleSearch() {
   invalidateMultiAngleRetrySchedule()
   const researchContext = activeResearchContext()
+  const audienceContext = currentAudienceContext()
   const timing = classifyProductionWindow(researchContext.event)
   if (['early', 'late'].includes(timing.status) && !state.timingOverrideConfirmed) {
     setSimpleStatus('制作時期を確認してください。明示的に続行するまで自動調査は開始しません。')
@@ -7230,6 +7257,8 @@ async function startMultiAngleSearch() {
       categoryId: researchContext.categoryId,
       eventSnapshot: researchContext.event,
       categorySnapshot: researchContext.category,
+      audienceContextKey: buildAudienceContextKey(audienceContext),
+      audienceRootKeyword: audienceContext.rootKeyword,
       targetWinnerCount: target.targetWinnerCount,
     },
   )
@@ -7254,12 +7283,15 @@ async function startNewMultiAngleCycle() {
     event: selectedEvent(),
     category: selectedCategory(),
   }
+  const audienceContext = currentAudienceContext()
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
   const cycleContext = {
     activeEventId: nextCycleContext.event.id,
     categoryId: nextCycleContext.category.id,
     eventSnapshot: researchEventSnapshot(nextCycleContext.event),
     categorySnapshot: nextCycleContext.category,
+    audienceContextKey: buildAudienceContextKey(audienceContext),
+    audienceRootKeyword: audienceContext.rootKeyword,
     targetWinnerCount: target.targetWinnerCount,
     preserveAccumulatedEvidence: preserveAccumulatedEvidenceForNextCycle,
   }
@@ -10002,6 +10034,7 @@ async function prepareForNewCandidateDiscovery() {
   if (state.researchRows.length > 0) clearResearchResults('all')
   const event = selectedEvent()
   const category = selectedCategory()
+  const audienceContext = currentAudienceContext()
   const target = calculateListingResearchTarget(state.listingResearchTargetSettings)
   const prepared = prepareNewMultiAngleCycle({
     exploration: state.multiAngleExploration,
@@ -10019,6 +10052,8 @@ async function prepareForNewCandidateDiscovery() {
     categoryId: category.id,
     eventSnapshot: researchEventSnapshot(event),
     categorySnapshot: category,
+    audienceContextKey: buildAudienceContextKey(audienceContext),
+    audienceRootKeyword: audienceContext.rootKeyword,
     targetWinnerCount: target.targetWinnerCount,
   })
   state.multiAngleExploration = prepared.exploration

@@ -327,6 +327,8 @@ export function createMultiAngleExplorationState(saved = {}) {
   const categoryId = String(saved?.categoryId ?? '').trim()
   const eventSnapshot = normalizedEventSnapshot(saved?.eventSnapshot, activeEventId)
   const categorySnapshot = normalizedCategorySnapshot(saved?.categorySnapshot, categoryId)
+  const audienceContextKey = String(saved?.audienceContextKey ?? '').trim()
+  const audienceRootKeyword = String(saved?.audienceRootKeyword ?? '').trim()
   const currentAngleId = String(saved?.currentAngleId ?? '').trim()
   const currentBatchCandidates = (Array.isArray(saved?.currentBatchCandidates)
     ? saved.currentBatchCandidates
@@ -359,6 +361,8 @@ export function createMultiAngleExplorationState(saved = {}) {
     categoryId,
     eventSnapshot,
     categorySnapshot,
+    audienceContextKey,
+    audienceRootKeyword,
     currentAngleId,
     angleIndex: Math.max(0, Number(saved?.angleIndex) || 0),
     evidenceKeys: uniqueStrings(saved?.evidenceKeys),
@@ -423,6 +427,8 @@ export function prepareNewMultiAngleCycle(snapshot = {}, context = {}) {
     categoryId: String(context?.categoryId ?? '').trim(),
     eventSnapshot: context?.eventSnapshot,
     categorySnapshot: context?.categorySnapshot,
+    audienceContextKey: String(context?.audienceContextKey ?? '').trim(),
+    audienceRootKeyword: String(context?.audienceRootKeyword ?? '').trim(),
     targetWinnerCount: positiveInteger(context?.targetWinnerCount, 1),
     historicalEvidenceKeys: uniqueStrings([
       ...previousExploration.historicalEvidenceKeys,
@@ -1099,6 +1105,8 @@ export function startMultiAngleExploration(state = {}, context = {}, now = '') {
     context?.categorySnapshot,
     suppliedCategoryId,
   )
+  const suppliedAudienceContextKey = String(context?.audienceContextKey ?? '').trim()
+  const suppliedAudienceRootKeyword = String(context?.audienceRootKeyword ?? '').trim()
   const freshEventId = suppliedEventId || restored.activeEventId
   const freshCategoryId = suppliedCategoryId || restored.categoryId
   const targetWinnerCount = positiveInteger(
@@ -1123,6 +1131,12 @@ export function startMultiAngleExploration(state = {}, context = {}, now = '') {
       ? suppliedCategorySnapshot
         || (restored.categorySnapshot?.id === freshCategoryId ? restored.categorySnapshot : null)
       : restored.categorySnapshot || suppliedCategorySnapshot,
+    audienceContextKey: startsFresh
+      ? suppliedAudienceContextKey || restored.audienceContextKey
+      : restored.audienceContextKey,
+    audienceRootKeyword: startsFresh
+      ? suppliedAudienceRootKeyword || restored.audienceRootKeyword
+      : restored.audienceRootKeyword,
     targetWinnerCount,
     startedAt: startsFresh ? updatedAt : restored.startedAt || updatedAt,
     updatedAt,

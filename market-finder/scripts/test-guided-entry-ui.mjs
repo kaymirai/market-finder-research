@@ -8,6 +8,10 @@ import {
   deriveAudienceUiStatus,
   setAudienceSelectionsForContext,
 } from '../src/audience-selection-state.js'
+import {
+  createMultiAngleExplorationState,
+  startMultiAngleExploration,
+} from '../src/multi-angle-exploration.js'
 
 const root = new URL('../', import.meta.url)
 const [html, app, styles, extensionManifestText, readme] = await Promise.all([
@@ -1070,6 +1074,162 @@ test('switches the Audience UI to selected category and event while a previous b
   assert.deepEqual(audienceSelectionsForContext(selections, nextKey), [])
 })
 
+test('archives and analyses a paused batch with its frozen Audience selections after the UI changes', () => {
+  const activeKeyBody = appLf.match(/function activeAudienceBatchContextKey\(\) \{([\s\S]*?)\n\}\n\nfunction activeAudienceSelectionSnapshot/)?.[1] ?? ''
+  const activeSnapshotBody = appLf.match(/function activeAudienceSelectionSnapshot\(\) \{([\s\S]*?)\n\}\n\nfunction audienceSelectionPhrasesForArchive/)?.[1] ?? ''
+  const phraseBody = appLf.match(/function audienceSelectionPhrasesForArchive\(\) \{([\s\S]*?)\n\}\n\nfunction clearAudienceSelectionsForFreshStart/)?.[1] ?? ''
+  const liveBody = appLf.match(/function liveMarketplaceLearningRecord\(\) \{([\s\S]*?)\n\}\n\nfunction currentModifierAnalysis/)?.[1] ?? ''
+  const modifierBody = appLf.match(/function currentModifierAnalysis\(\) \{([\s\S]*?)\n\}\n\nfunction currentEvidenceRunId/)?.[1] ?? ''
+  const archiveBody = appLf.match(/function evidenceArchiveRecord\(\) \{([\s\S]*?)\n\}\n\nfunction parseOptionalNumber/)?.[1] ?? ''
+  assert.ok(activeKeyBody, 'an active batch must retain its frozen Audience context key')
+  assert.ok(activeSnapshotBody, 'archive selection lookup must be executable')
+  assert.ok(phraseBody, 'modifier analysis selection lookup must be executable')
+  assert.ok(liveBody, 'live marketplace learning record must be executable')
+  assert.ok(modifierBody, 'modifier analysis must be executable')
+  assert.ok(archiveBody, 'evidence archive record must be executable')
+
+  const oldKey = 'mug::mothers day::teacher mug'
+  const newKey = 'ornament::halloween::pumpkin ornament'
+  const audienceSelectionsByContext = setAudienceSelectionsForContext(
+    setAudienceSelectionsForContext({}, oldKey, [
+      { phrase: 'teacher', role: 'recipient', status: 'manual', selected: true },
+    ]),
+    newKey,
+    [{ phrase: 'pumpkin', role: 'subject', subjectType: 'motif', status: 'manual', selected: true }],
+  )
+  const frozenBatch = startMultiAngleExploration(
+    createMultiAngleExplorationState({ status: 'idle' }),
+    {
+      activeEventId: 'mothers-day',
+      categoryId: 'mug',
+      eventSnapshot: { id: 'mothers-day', searchTerm: 'mothers day' },
+      categorySnapshot: { id: 'mug', searchTerm: 'mug' },
+      audienceContextKey: oldKey,
+      audienceRootKeyword: 'teacher mug',
+    },
+    '2026-08-27T00:00:00.000Z',
+  )
+  const state = {
+    multiAngleExploration: createMultiAngleExplorationState({ ...frozenBatch, status: 'paused' }),
+    audienceSelectionsByContext,
+    evidenceArchives: [],
+    researchRows: [{ keyword: 'teacher mug', categoryId: 'mug', eventId: 'mothers-day' }],
+    candidateCatalog: [],
+  }
+  const activeAudienceBatchContextKey = new Function(
+    'state',
+    'createMultiAngleExplorationState',
+    'activeResearchContext',
+    'buildAudienceContextKey',
+    'normalizePhrase',
+    `return function activeAudienceBatchContextKey() {${activeKeyBody}\n}`,
+  )(
+    state,
+    createMultiAngleExplorationState,
+    () => ({ categoryId: 'mug', eventId: 'mothers-day', category: { searchTerm: 'mug' } }),
+    (context) => `${context.categoryId}::${context.eventId.replace('-', ' ')}::${context.rootKeyword}`,
+    (value) => String(value ?? '').trim().toLowerCase(),
+  )
+  const activeAudienceSelectionSnapshot = new Function(
+    'state',
+    'activeAudienceBatchContextKey',
+    'audienceSelectionsForContext',
+    `return function activeAudienceSelectionSnapshot() {${activeSnapshotBody}\n}`,
+  )(state, activeAudienceBatchContextKey, audienceSelectionsForContext)
+  const audienceSelectionPhrasesForArchive = new Function(
+    'activeAudienceSelectionSnapshot',
+    `return function audienceSelectionPhrasesForArchive() {${phraseBody}\n}`,
+  )(activeAudienceSelectionSnapshot)
+
+  assert.equal(activeAudienceBatchContextKey(), oldKey)
+  assert.deepEqual(activeAudienceSelectionSnapshot().map((selection) => selection.phrase), ['teacher'])
+
+  const activeResearchContext = () => ({
+    categoryId: 'mug',
+    eventId: 'mothers-day',
+    category: { id: 'mug', searchTerm: 'mug' },
+    event: { id: 'mothers-day', searchTerm: 'mothers day' },
+  })
+  const modifierEvidenceInput = () => ({
+    demandKeywords: [{ keyword: 'teacher mug', etsySearches30d: 1200, etsyListings: 500 }],
+    supplyListings: [{ title: 'Teacher Mug', monthlySales: 8 }],
+  })
+  const liveMarketplaceLearningRecord = new Function(
+    'activeResearchContext',
+    'modifierEvidenceInput',
+    'activeAudienceSelectionSnapshot',
+    'currentEvidenceRunId',
+    'normalizePhrase',
+    `return function liveMarketplaceLearningRecord() {${liveBody}\n}`,
+  )(
+    activeResearchContext,
+    modifierEvidenceInput,
+    activeAudienceSelectionSnapshot,
+    () => 'old-batch',
+    (value) => String(value ?? '').trim().toLowerCase(),
+  )
+  const evidenceArchiveRecord = new Function(
+    'activeResearchContext',
+    'modifierEvidenceInput',
+    'state',
+    'candidateMatchesResearchContext',
+    'currentEvidenceRunId',
+    'activeAudienceSelectionSnapshot',
+    'currentCrossNicheDrilldown',
+    'createMultiAngleExplorationState',
+    'mergeNicheDrilldownNodes',
+    'buildNicheDrilldownGraph',
+    'normalizePhrase',
+    'parseOptionalNumber',
+    'normalizeArchivedSupplyListings',
+    `return function evidenceArchiveRecord() {${archiveBody}\n}`,
+  )(
+    activeResearchContext,
+    modifierEvidenceInput,
+    state,
+    (row, context) => row.categoryId === context.categoryId && row.eventId === context.eventId,
+    () => 'old-batch',
+    activeAudienceSelectionSnapshot,
+    () => ({ candidates: [] }),
+    createMultiAngleExplorationState,
+    (_previous, nodes) => nodes,
+    () => [],
+    (value) => String(value ?? '').trim().toLowerCase(),
+    (value) => Number(value),
+    (rows) => rows,
+  )
+  const capturedOptions = []
+  const currentModifierAnalysis = new Function(
+    'activeResearchOptions',
+    'audienceSelectionPhrasesForArchive',
+    'stableRenderSignature',
+    'state',
+    'analyzeMarketplaceVocabulary',
+    'marketplaceLearningRecords',
+    `let modifierAnalysisCache = null; return function currentModifierAnalysis() {${modifierBody}\n}`,
+  )(
+    () => ({ categoryId: 'mug', eventId: 'mothers-day' }),
+    audienceSelectionPhrasesForArchive,
+    (value) => JSON.stringify(value),
+    state,
+    (_records, options) => {
+      capturedOptions.push(options)
+      return { options }
+    },
+    () => [],
+  )
+
+  const live = liveMarketplaceLearningRecord()
+  const archive = evidenceArchiveRecord()
+  currentModifierAnalysis()
+
+  assert.deepEqual(live.identitySeeds, ['teacher'])
+  assert.deepEqual(archive.identitySeeds, ['teacher'])
+  assert.deepEqual(archive.audienceSelections.map((selection) => selection.phrase), ['teacher'])
+  assert.equal(archive.audienceSelections.some((selection) => selection.phrase === 'pumpkin'), false)
+  assert.equal(capturedOptions.at(-1)?.identitySeeds, 'teacher')
+})
+
 test('renders a terminal current-context Etsy or EverBee failure as unverified and resets after capture', () => {
   const providerBody = appLf.match(/function currentAudienceProviderFailed\(\) \{([\s\S]*?)\n\}\n\nfunction currentAudienceAnalysis/)?.[1] ?? ''
   assert.ok(providerBody, 'current-context audience provider status must be executable')
@@ -1148,6 +1308,8 @@ test('fresh candidate discovery clears audience state while continuation keeps i
     'selectedEvent',
     'selectedCategory',
     'calculateListingResearchTarget',
+    'currentAudienceContext',
+    'buildAudienceContextKey',
     'prepareNewMultiAngleCycle',
     'researchEventSnapshot',
     'createCrossNicheWorkflowState',
@@ -1182,6 +1344,8 @@ test('fresh candidate discovery clears audience state while continuation keeps i
     () => ({ id: 'mothers-day' }),
     () => ({ id: 'mug' }),
     () => ({ targetWinnerCount: 1 }),
+    () => ({ categoryId: 'mug', eventId: 'mothers-day', rootKeyword: 'teacher mug' }),
+    (context) => `${context.categoryId}::${context.eventId.replace('-', ' ')}::${context.rootKeyword}`,
     (snapshot) => ({
       ...snapshot,
       exploration: {},
