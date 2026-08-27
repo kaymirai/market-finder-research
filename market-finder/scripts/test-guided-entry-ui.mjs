@@ -3,7 +3,11 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { extensionResultsImportMode } from '../src/research-flow.js'
 import { deriveErankCaptureUiState } from '../src/research-console-ui.js'
-import { deriveAudienceUiStatus } from '../src/audience-selection-state.js'
+import {
+  audienceSelectionsForContext,
+  deriveAudienceUiStatus,
+  setAudienceSelectionsForContext,
+} from '../src/audience-selection-state.js'
 
 const root = new URL('../', import.meta.url)
 const [html, app, styles, extensionManifestText, readme] = await Promise.all([
@@ -980,6 +984,7 @@ test('keeps a selected audience candidate in its exact active event and root con
     'keywordClass',
     'detectRiskTerms',
     'activeResearchContext',
+    'selectedAudienceUiContext',
     'candidateProvenance',
     `return function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Map()) {${candidateBody}\n}`,
   )(
@@ -995,11 +1000,18 @@ test('keeps a selected audience candidate in its exact active event and root con
       event: { jpLabel: '母の日' },
       category: { label: 'Mug' },
     }),
+    () => ({
+      eventId: 'mothers-day',
+      categoryId: 'mug',
+      event: { jpLabel: '母の日' },
+      category: { label: 'Mug' },
+    }),
     () => ({}),
   )
   const selectedAudienceCandidate = new Function(
     'state',
     'activeResearchContext',
+    'selectedAudienceUiContext',
     'normalizePhrase',
     `return function selectedAudienceCandidate() {${selectedBody}\n}`,
   )
@@ -1015,6 +1027,7 @@ test('keeps a selected audience candidate in its exact active event and root con
   const selected = selectedAudienceCandidate(
     state,
     () => ({ eventId: 'mothers-day', categoryId: 'mug' }),
+    () => ({ eventId: 'mothers-day', categoryId: 'mug' }),
     (value) => String(value ?? '').trim().toLowerCase(),
   )()
 
@@ -1025,6 +1038,38 @@ test('keeps a selected audience candidate in its exact active event and root con
   assert.equal(`${selected.categoryId}::mothers day::${selected.rootKeyword}`, selected.audienceContextKey)
 })
 
+test('switches the Audience UI to selected category and event while a previous batch stays paused', () => {
+  const contextBody = appLf.match(/function currentAudienceContext\(\) \{([\s\S]*?)\n\}\n\nfunction currentAudienceProviderFailed/)?.[1] ?? ''
+  const selectedCandidateBody = appLf.match(/function selectedAudienceCandidate\(\) \{([\s\S]*?)\n\}\n\nfunction selectedAudienceRootKeyword/)?.[1] ?? ''
+  const rootBody = appLf.match(/function selectedAudienceRootKeyword\(\) \{([\s\S]*?)\n\}\n\nfunction audienceRootIsStaticEntrance/)?.[1] ?? ''
+  assert.ok(contextBody, 'Audience context must be executable')
+  assert.match(selectedCandidateBody, /selectedAudienceUiContext\(\)/)
+  assert.match(rootBody, /selectedAudienceUiContext\(\)/)
+
+  const currentAudienceContext = new Function(
+    'selectedAudienceUiContext',
+    'selectedAudienceRootKeyword',
+    'activeResearchContext',
+    `return function currentAudienceContext() {${contextBody}\n}`,
+  )(
+    () => ({ eventId: 'halloween', categoryId: 'ornament' }),
+    () => 'memorial ornament',
+    () => ({ eventId: 'mothers-day', categoryId: 'mug', fixed: true }),
+  )
+  const previousKey = 'mug::mothers day::teacher'
+  const selections = setAudienceSelectionsForContext({}, previousKey, [
+    { phrase: 'teacher', role: 'recipient', status: 'manual', selected: true },
+  ])
+  const context = currentAudienceContext()
+  const nextKey = `${context.categoryId}::${context.eventId.replace('-', ' ')}::${context.rootKeyword}`
+
+  assert.equal(nextKey, 'ornament::halloween::memorial ornament')
+  assert.deepEqual(audienceSelectionsForContext(selections, previousKey), [
+    { phrase: 'teacher', role: 'recipient', subjectType: '', status: 'manual', source: 'manual', selected: true },
+  ])
+  assert.deepEqual(audienceSelectionsForContext(selections, nextKey), [])
+})
+
 test('renders a terminal current-context Etsy or EverBee failure as unverified and resets after capture', () => {
   const providerBody = appLf.match(/function currentAudienceProviderFailed\(\) \{([\s\S]*?)\n\}\n\nfunction currentAudienceAnalysis/)?.[1] ?? ''
   assert.ok(providerBody, 'current-context audience provider status must be executable')
@@ -1032,6 +1077,7 @@ test('renders a terminal current-context Etsy or EverBee failure as unverified a
   const providerFailed = new Function(
     'state',
     'activeResearchContext',
+    'currentAudienceContext',
     'candidateMatchesResearchContext',
     'rowHasEtsyMarketplaceInput',
     'rowHasEverbeeInput',
@@ -1045,6 +1091,7 @@ test('renders a terminal current-context Etsy or EverBee failure as unverified a
   const makeProviderFailed = (state) => providerFailed(
     state,
     () => context,
+    () => ({ ...context, rootKeyword: 'teacher mug' }),
     matchesContext,
     hasEtsy,
     hasEverbee,

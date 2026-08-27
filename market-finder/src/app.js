@@ -1348,8 +1348,19 @@ function activeResearchOptions() {
   })
 }
 
+function selectedAudienceUiContext() {
+  const event = selectedEvent()
+  const category = selectedCategory()
+  return {
+    eventId: event.id,
+    categoryId: category.id,
+    event: researchEventSnapshot(event),
+    category,
+  }
+}
+
 function selectedAudienceCandidate() {
-  const research = activeResearchContext()
+  const research = selectedAudienceUiContext()
   const selectedKeyword = normalizePhrase(state.consoleUi?.selectedKeyword)
   const candidates = state.candidates.filter((candidate) => (
     candidate?.categoryId === research.categoryId
@@ -1371,7 +1382,7 @@ function selectedAudienceRootKeyword() {
   )
   if (candidateRoot) return candidateRoot
 
-  const research = activeResearchContext()
+  const research = selectedAudienceUiContext()
   const selectedKeyword = normalizePhrase(state.consoleUi?.selectedKeyword)
   const selectedRow = state.researchRows.find((row) => (
     normalizePhrase(row?.keyword) === selectedKeyword
@@ -1386,12 +1397,12 @@ function selectedAudienceRootKeyword() {
 function audienceRootIsStaticEntrance() {
   return !selectedAudienceCandidate() && !state.researchRows.some((row) => (
     normalizePhrase(row?.keyword) === normalizePhrase(state.consoleUi?.selectedKeyword)
-    && candidateMatchesResearchContext(row, activeResearchContext(), { requireContext: true })
+    && candidateMatchesResearchContext(row, selectedAudienceUiContext(), { requireContext: true })
   ))
 }
 
 function currentAudienceContext() {
-  const research = activeResearchContext()
+  const research = selectedAudienceUiContext()
   const rootKeyword = selectedAudienceRootKeyword()
   return {
     categoryId: research.categoryId,
@@ -1401,7 +1412,12 @@ function currentAudienceContext() {
 }
 
 function currentAudienceProviderFailed() {
+  const audience = currentAudienceContext()
   const research = activeResearchContext()
+  if (
+    String(audience.eventId ?? '') !== String(research.eventId ?? '')
+    || String(audience.categoryId ?? '') !== String(research.categoryId ?? '')
+  ) return false
   const plan = state.marketplaceInsightPlan
   const planMatchesCurrentContext = Boolean(plan)
     && String(plan.eventId ?? '') === String(research.eventId ?? '')
@@ -8824,7 +8840,7 @@ function candidateFromKeyword(keyword, generatedMap, trendMetaByKeyword = new Ma
   const generated = generatedMap.get(normalized)
   const trendMeta = trendMetaByKeyword.get(normalized)
   if (generated) {
-    const research = activeResearchContext()
+    const research = selectedAudienceUiContext()
     const audienceContextParts = String(generated.audienceContextKey ?? '').split('::')
     return {
       ...generated,
