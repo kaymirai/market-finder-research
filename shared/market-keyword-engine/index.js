@@ -1,4 +1,8 @@
 import { classifyProductionWindow } from './market-timing.js'
+import {
+  extractAudienceRoleSignalsCore,
+  getAudienceCategoryProfileCore,
+} from './audience-evidence.js'
 
 const DEFAULT_EVENT_YEAR = 2026
 
@@ -1293,6 +1297,61 @@ export function buildKeywordClusterKey(keyword, options = {}) {
     .split(' ')
     .filter((token) => token && !ignored.has(token))
   return unique(tokens).join(' ') || normalizePhrase(keyword)
+}
+
+function audienceEvidenceDependencies() {
+  const libraryPhrases = (typeof BUYER_IDENTITY_LIBRARY !== 'undefined'
+    ? BUYER_IDENTITY_LIBRARY.flatMap((group) => group.phrases ?? [])
+    : [])
+  const personIdentities = unique([
+    ...AUTO_DISCOVERY_SEGMENTS.recipients,
+    ...Object.values(TARGET_GROUPS).flat(),
+    ...libraryPhrases,
+    'mom', 'mum', 'mama', 'mother', 'dad', 'papa', 'father',
+    'grandma', 'grandmother', 'grandpa', 'grandfather', 'teacher', 'teachers',
+    'student', 'students', 'parent', 'parents', 'nurse', 'coworker', 'coworkers',
+    'friend', 'best friend', 'daughter', 'son', 'kids', 'children', 'family',
+    'wife', 'husband', 'sister', 'brother', 'librarian', 'principal', 'coach',
+    'firefighter', 'veteran', 'survivor', 'caregiver', 'doctor', 'barista',
+    'accountant', 'mechanic', 'realtor',
+  ])
+  const giverIdentities = unique([
+    'student', 'students', 'class', 'the class', 'parents', 'parent', 'kids', 'the kids',
+    'children', 'family', 'friends', 'friend', 'coworkers', 'coworker', 'colleagues',
+    'the team', 'team', 'patients', 'patient', 'families', 'club', 'crew',
+    'daughter', 'son', 'grandkids', 'the grandkids',
+  ])
+  const subjectIdentities = unique([
+    'pet', 'pets', 'dog', 'dogs', 'cat', 'cats', 'puppy', 'puppies', 'kitten', 'kittens',
+    'horse', 'horses', 'bird', 'birds', 'rabbit', 'rabbits', 'hamster', 'hamsters',
+    'nursery', 'kitchen', 'bathroom', 'bedroom', 'living room', 'dining room', 'playroom',
+    'classroom', 'office', 'dorm room', 'entryway', 'gallery wall', 'landscape', 'nature',
+    'floral', 'flowers', 'flower', 'plants', 'plant', 'gardening', 'books', 'book', 'reading',
+    'coffee', 'camping', 'fishing', 'hunting', 'pickleball', 'yoga', 'music', 'travel',
+    'sports', 'baseball', 'football', 'soccer', 'beach', 'ocean', 'lake', 'mountain',
+    'mountains', 'forest', 'desert', 'garden', 'farmhouse', 'country', 'city', 'coast',
+    'cabin', 'campground',
+  ])
+  return {
+    normalizePhrase,
+    buildKeywordClusterKey,
+    productCategories: PRODUCT_CATEGORIES,
+    productAliases: Object.values(PRODUCT_FAMILY_TERMS).flat(),
+    personIdentities,
+    giverIdentities,
+    petSubjects: subjectIdentities.filter((value) => /\b(?:pet|dog|cat|puppy|kitten|horse|bird|rabbit|hamster)s?\b/.test(value)),
+    roomSubjects: subjectIdentities.filter((value) => /\b(?:nursery|kitchen|bathroom|bedroom|living room|dining room|playroom|classroom|office|dorm room|entryway|gallery wall)\b/.test(value)),
+    placeSubjects: subjectIdentities.filter((value) => /\b(?:beach|ocean|lake|mountain|mountains|forest|desert|garden|farmhouse|country|city|coast|cabin|campground)\b/.test(value)),
+    interestSubjects: subjectIdentities.filter((value) => /\b(?:landscape|nature|floral|flowers?|plants?|gardening|books?|reading|coffee|camping|fishing|hunting|pickleball|yoga|music|travel|sports?|baseball|football|soccer)\b/.test(value)),
+  }
+}
+
+export function getAudienceCategoryProfile(categoryId) {
+  return getAudienceCategoryProfileCore(categoryId, audienceEvidenceDependencies())
+}
+
+export function extractAudienceRoleSignals(value, options = {}) {
+  return extractAudienceRoleSignalsCore(value, options, audienceEvidenceDependencies())
 }
 
 export function clusterKeywordCandidates(candidates = [], options = {}) {
